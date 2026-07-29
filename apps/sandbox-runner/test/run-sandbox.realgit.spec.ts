@@ -5,6 +5,7 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { RunnerConfig } from "../src/config";
+import { DEFAULT_SANDBOX_IMAGES } from "../src/docker-run";
 import { type Exec, runSandbox } from "../src/run-sandbox";
 
 // REAL git (no node:fs/promises mock here) — the ONLY kind of test that catches "git diff omits
@@ -37,7 +38,8 @@ const CFG = (): RunnerConfig => ({
   runsDir,
   network: "naary-sandbox-internal",
   proxyUrl: "http://naary-sandbox-proxy:3128",
-  image: "naary-claude-sandbox:latest",
+  images: DEFAULT_SANDBOX_IMAGES,
+  requireDigest: false,
   limits: { cpus: "1.0", memoryMb: 2048, pids: 256 },
   defaultTimeoutMs: 900_000,
   port: 8099,

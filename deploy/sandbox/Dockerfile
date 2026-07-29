@@ -15,6 +15,14 @@ ARG NODE_VERSION=24
 
 FROM node:${NODE_VERSION}-bookworm-slim
 
+# Marks this as a naary SANDBOX image, for the deploy host's disk hygiene. deploy.yml's pre-pull
+# `docker image prune -af --filter until=<KEEP_HOURS>h` reclaims TAGGED images not referenced by a
+# container — and sandbox containers are `--rm`, so nothing references these between runs. Without
+# an exclusion the deploy would delete the image the next codeAgent run needs and re-pull ~1.7GiB
+# every time. deploy.yml adds `--filter label!=com.naary.sandbox=1`; a separate, targeted sweep
+# removes the sandbox images that are no longer the CURRENT ones (verified: the two filters AND).
+LABEL com.naary.sandbox="1"
+
 # Pin the CLI for reproducible, security-sensitive builds — a VERSIONED default (not `latest`)
 # so a rebuild can't silently pull a new/breaking/vulnerable release. Bump deliberately; or
 # override per deploy:  docker build --build-arg CLAUDE_CODE_VERSION=2.1.210 …

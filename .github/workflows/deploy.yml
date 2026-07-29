@@ -4,6 +4,11 @@ name: Deploy
 #   build job  — builds ghcr.io/<owner>/naary-backend + naary-web for the ref and pushes
 #                them, UNLESS both tags already exist (so a rollback pulls the exact
 #                bytes that ran before, never a rebuild).
+#   sandbox-images job — reusable workflow (.github/workflows/sandbox-images.yml) that
+#                resolves the four codeAgent SANDBOX images to DIGEST-pinned GHCR refs,
+#                building only the ones whose content tag isn't published yet. They are
+#                tagged by CONTENT, not by release, so an app release almost never pays
+#                for them. Its outputs become the runner's SANDBOX_IMAGE_* below.
 #   deploy job — ships the compose files over SSH, logs the box into GHCR with this
 #                run's EPHEMERAL GITHUB_TOKEN (no long-lived registry credential ever
 #                touches the server), then `compose pull` + `up -d --no-build`.
@@ -161,9 +166,9 @@ jobs:
       # codeAgent sandbox runner (apps/sandbox-runner): the one container that holds the
       # Docker socket, so it is its OWN image — deliberately not the shared backend image
       # (no app secrets, no DB access, no workspace deps). Compose can only pull it from
-      # GHCR like the others; the SANDBOX image it launches (naary-claude-sandbox) is NOT
-      # built here — the runner starts it through the host Docker, so it is built on the box
-      # (deploy/sandbox/README.md), which is also where its egress gate must be proven.
+      # GHCR like the others. The SANDBOX images it LAUNCHES are built by the
+      # `sandbox-images` job below (they are content-tagged, not release-tagged, so they
+      # do not belong in this per-release loop).
       - name: Build + push sandbox-runner image (codeAgent sandbox launcher)
         if: steps.exists.outputs.sandbox_runner != 'true'
         uses: docker/build-push-action@v7
@@ -175,8 +180,24 @@ jobs:
           cache-from: type=gha,scope=sandbox-runner
           cache-to: type=gha,scope=sandbox-runner,mode=max
 
+  # The four codeAgent SANDBOX images the runner launches. A separate, reusable workflow because
+  # their build cadence is NOT the release cadence: they are tagged by the content hash of their
+  # Dockerfile, so this job normally just resolves four already-published refs to their digests
+  # (seconds) and only builds when a Dockerfile or deploy/sandbox/IMAGE_EPOCH actually changed.
+  #
+  # Its outputs are DIGEST-pinned refs, which is the point: the runner holds the Docker socket, so
+  # what it launches must be immutable bytes, not a `:latest` tag anyone can re-push under.
+  # `env.DEPLOY_REF` is not available in a job-level `with:`, hence the repeated expression.
+  sandbox-images:
+    uses: ./.github/workflows/sandbox-images.yml
+    permissions:
+      contents: read
+      packages: write
+    with:
+      ref: ${{ inputs.ref || github.event.release.tag_name }}
+
   deploy:
-    needs: build
+    needs: [build, sandbox-images]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -217,6 +238,13 @@ jobs:
           OTEL_EXPORTER_OTLP_ENDPOINT: ${{ secrets.OTEL_EXPORTER_OTLP_ENDPOINT }}
           OTEL_EXPORTER_OTLP_HEADERS: ${{ secrets.OTEL_EXPORTER_OTLP_HEADERS }}
           OTEL_EXPORTER_OTLP_PROTOCOL: ${{ secrets.OTEL_EXPORTER_OTLP_PROTOCOL }}
+          # codeAgent sandbox images, DIGEST-pinned by the sandbox-images job. These are not
+          # secrets — they are here for the same reason the Sentry env is: this is the channel
+          # that reaches the box's compose without ever being written to a file on it.
+          SANDBOX_IMAGE_CLAUDE: ${{ needs.sandbox-images.outputs.claude }}
+          SANDBOX_IMAGE_CURSOR: ${{ needs.sandbox-images.outputs.cursor }}
+          SANDBOX_IMAGE_COPILOT: ${{ needs.sandbox-images.outputs.copilot }}
+          SANDBOX_IMAGE_GEMINI: ${{ needs.sandbox-images.outputs.gemini }}
         run: |
           install -d -m 700 ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
@@ -232,7 +260,7 @@ jobs:
             deploy/sandbox \
             | $SSH "mkdir -p /opt/naary && tar xzf - -C /opt/naary"
 
-          $SSH "DEPLOY_REF='$DEPLOY_REF' IMAGE_BASE='$IMAGE_BASE' GHCR_TOKEN='$GHCR_TOKEN' GHCR_USER='$GHCR_USER' SENTRY_DSN='$SENTRY_DSN' SENTRY_DSN_API='$SENTRY_DSN_API' SENTRY_DSN_WORKER='$SENTRY_DSN_WORKER' SENTRY_TRACES_SAMPLE_RATE='$SENTRY_TRACES_SAMPLE_RATE' SENTRY_PROFILES_SAMPLE_RATE='$SENTRY_PROFILES_SAMPLE_RATE' OTEL_EXPORTER_OTLP_ENDPOINT='$OTEL_EXPORTER_OTLP_ENDPOINT' OTEL_EXPORTER_OTLP_HEADERS='$OTEL_EXPORTER_OTLP_HEADERS' OTEL_EXPORTER_OTLP_PROTOCOL='$OTEL_EXPORTER_OTLP_PROTOCOL' bash -s" <<'REMOTE'
+          $SSH "DEPLOY_REF='$DEPLOY_REF' IMAGE_BASE='$IMAGE_BASE' GHCR_TOKEN='$GHCR_TOKEN' GHCR_USER='$GHCR_USER' SENTRY_DSN='$SENTRY_DSN' SENTRY_DSN_API='$SENTRY_DSN_API' SENTRY_DSN_WORKER='$SENTRY_DSN_WORKER' SENTRY_TRACES_SAMPLE_RATE='$SENTRY_TRACES_SAMPLE_RATE' SENTRY_PROFILES_SAMPLE_RATE='$SENTRY_PROFILES_SAMPLE_RATE' OTEL_EXPORTER_OTLP_ENDPOINT='$OTEL_EXPORTER_OTLP_ENDPOINT' OTEL_EXPORTER_OTLP_HEADERS='$OTEL_EXPORTER_OTLP_HEADERS' OTEL_EXPORTER_OTLP_PROTOCOL='$OTEL_EXPORTER_OTLP_PROTOCOL' SANDBOX_IMAGE_CLAUDE='$SANDBOX_IMAGE_CLAUDE' SANDBOX_IMAGE_CURSOR='$SANDBOX_IMAGE_CURSOR' SANDBOX_IMAGE_COPILOT='$SANDBOX_IMAGE_COPILOT' SANDBOX_IMAGE_GEMINI='$SANDBOX_IMAGE_GEMINI' bash -s" <<'REMOTE'
           set -euo pipefail
           cd /opt/naary
           # Ensure swap exists BEFORE the rolling replace. docker-rollout scales a service
@@ -295,6 +323,49 @@ jobs:
           [ -n "${OTEL_EXPORTER_OTLP_PROTOCOL:-}" ] || unset OTEL_EXPORTER_OTLP_PROTOCOL
           export SENTRY_RELEASE="${SENTRY_RELEASE:-$DEPLOY_REF}"
 
+          # ── codeAgent sandbox images ──────────────────────────────────────────────────────────
+          # Is the `sandbox` profile actually on for this box? Ask COMPOSE, not the .env file:
+          # `config --services` lists only services in ACTIVE profiles, so this is compose's own
+          # resolution of COMPOSE_PROFILES rather than a re-implementation of comma-list parsing.
+          # A box without the profile must neither pull ~1.7GiB of coding CLIs nor face the higher
+          # free-disk bar below.
+          SERVICES="$($COMPOSE config --services)"
+          SANDBOX_ON=0
+          if printf '%s\n' "$SERVICES" | grep -qx sandbox-runner; then SANDBOX_ON=1; fi
+          echo "sandbox profile active: $SANDBOX_ON"
+
+          SANDBOX_IMAGE_REFS=""
+          # ALL FOUR empty ⇒ a ROLLBACK to a ref that predates CI-built sandbox images: the
+          # sandbox-images job says so deliberately (see its legacy guard). Deploy that ref exactly
+          # as its own code expects — no pull, no SANDBOX_REQUIRE_DIGEST — rather than failing.
+          # SOME empty is a different thing entirely: a real CI bug. That still aborts below.
+          SANDBOX_LEGACY_REF=0
+          if [ -z "${SANDBOX_IMAGE_CLAUDE:-}${SANDBOX_IMAGE_CURSOR:-}${SANDBOX_IMAGE_COPILOT:-}${SANDBOX_IMAGE_GEMINI:-}" ]; then
+            SANDBOX_LEGACY_REF=1
+          fi
+          if [ "$SANDBOX_ON" = "1" ] && [ "$SANDBOX_LEGACY_REF" = "1" ]; then
+            echo "::warning::No sandbox image refs for this ref — deploying it as a pre-CI-images release. codeAgent will use whatever this box has locally, unpinned. Roll FORWARD to restore digest pinning."
+          fi
+          if [ "$SANDBOX_ON" = "1" ] && [ "$SANDBOX_LEGACY_REF" = "0" ]; then
+            # The runner holds the Docker socket, so what it launches must be immutable BYTES, not
+            # a re-pushable tag. Refuse the deploy if any ref isn't digest-pinned rather than
+            # letting the box fall back to `naary-*-sandbox:latest` — the runner would refuse to
+            # boot anyway (SANDBOX_REQUIRE_DIGEST below), and failing here says why, before the
+            # pull touches anything.
+            for v in SANDBOX_IMAGE_CLAUDE SANDBOX_IMAGE_CURSOR SANDBOX_IMAGE_COPILOT SANDBOX_IMAGE_GEMINI; do
+              eval "ref=\${$v:-}"
+              if ! printf '%s' "$ref" | grep -Eq '@sha256:[0-9a-f]{64}$'; then
+                echo "::error::$v is not digest-pinned ('$ref'). The sandbox-images job should have supplied a <ref>@sha256:<digest>; aborting before the pull."
+                exit 1
+              fi
+              SANDBOX_IMAGE_REFS="$SANDBOX_IMAGE_REFS $ref"
+            done
+            # Fail CLOSED in the runner too: with this set it refuses to boot on anything that
+            # isn't `@sha256:`-pinned, so a future path that silently drops these vars can't
+            # degrade prod back to a mutable `:latest`.
+            export SANDBOX_REQUIRE_DIGEST=1
+          fi
+
           # docker-rollout (https://github.com/wowu/docker-rollout): start-first rolling
           # replace for compose services — scale to 2, wait for the NEW container's
           # healthcheck, then stop the old one. A ~10KB bash script we run as root, so we
@@ -324,9 +395,16 @@ jobs:
           # preserves recent tags so a rollback (`Deploy` with an older tag) still finds its
           # image locally instead of re-pulling; older ones re-pull on demand, which is slower
           # but never wrong. `|| true` so a prune hiccup never fails an otherwise-good deploy.
+          #
+          # `label!=com.naary.sandbox=1` EXCLUDES the codeAgent sandbox images. They would otherwise
+          # be swept every time: `-a` collects tagged images no CONTAINER references, and sandbox
+          # containers are `--rm`, so nothing references them between runs — the deploy would delete
+          # the image the next codeAgent run needs and re-pull ~1.7GiB. Verified locally that a
+          # `label!=` filter ANDs with `until` and spares the labelled image. Stale sandbox images
+          # are reclaimed instead by the targeted sweep at the end of this script.
           KEEP_HOURS="${DEPLOY_IMAGE_KEEP_HOURS:-336}" # 14 days of rollback targets
           echo "disk before reclaim:"; df -h / | tail -1
-          docker image prune -af --filter "until=${KEEP_HOURS}h" >/dev/null 2>&1 || true
+          docker image prune -af --filter "until=${KEEP_HOURS}h" --filter "label!=com.naary.sandbox=1" >/dev/null 2>&1 || true
           docker builder prune -af >/dev/null 2>&1 || true
           echo "disk after reclaim:"; df -h / | tail -1
 
@@ -334,15 +412,43 @@ jobs:
           # incoming backend image needs ~5GiB unpacked, and web/netdata a little more; 12GiB is
           # headroom for both plus the 2x-scale rollout overlap. `df --output=avail` reports 1K
           # (1024-byte) blocks, so the threshold and the message below are GiB, not GB.
+          #
+          # The four sandbox images add ~1.7GiB on disk MEASURED HONESTLY: they all derive from
+          # node:24-bookworm-slim (231MB, stored once by overlay2), and the per-image `du -sm /`
+          # figures are claude 578 / cursor 552 / copilot 857 / gemini 430 MB — so the union is
+          # 231 + (347+321+626+199) ≈ 1724MB, NOT the 2.4GB you get by summing them. Round the
+          # allowance up to 2GiB to cover the transient compressed blobs during extraction. Applied
+          # ONLY when the sandbox profile is on, so boxes that don't run codeAgent keep the old bar.
+          # `if`, not `[ … ] && x=2`: this script runs under `set -e`, where a false test as the
+          # last command of an && list is a nonzero status and would abort the deploy on every box
+          # WITHOUT the sandbox profile.
+          SANDBOX_DISK_GIB=0
+          if [ -n "$SANDBOX_IMAGE_REFS" ]; then SANDBOX_DISK_GIB=2; fi
+          MIN_AVAIL_GIB=$((12 + SANDBOX_DISK_GIB))
           AVAIL_KB=$(df --output=avail / | tail -1 | tr -d ' ')
-          MIN_AVAIL_KB=$((12 * 1024 * 1024)) # 12 GiB, matching the message below exactly
+          MIN_AVAIL_KB=$((MIN_AVAIL_GIB * 1024 * 1024))
           if [ "$AVAIL_KB" -lt "$MIN_AVAIL_KB" ]; then
-            echo "::error::Only $((AVAIL_KB / 1024 / 1024))GiB free on / — need ~12GiB to pull this release. Reclaim space on the box (docker image prune -af; docker builder prune -af), or grow the disk. Aborting BEFORE the pull so the running release stays untouched."
+            echo "::error::Only $((AVAIL_KB / 1024 / 1024))GiB free on / — need ~${MIN_AVAIL_GIB}GiB to pull this release. Reclaim space on the box (docker image prune -af; docker builder prune -af), or grow the disk. Aborting BEFORE the pull so the running release stays untouched."
             docker system df || true
             exit 1
           fi
 
           $COMPOSE pull
+
+          # The sandbox images are NOT compose services — the runner launches them through the host
+          # Docker — so compose can't pull them. Pull them here, by digest. Cheap when the box
+          # already has them (a digest match downloads nothing), which is also what self-heals a box
+          # whose images were reclaimed. FATAL on failure: a half-provisioned sandbox host would
+          # fail every codeAgent run at `docker run` instead, hours later and far from the cause.
+          if [ "$SANDBOX_ON" = "1" ]; then
+            for ref in $SANDBOX_IMAGE_REFS; do
+              echo "pulling sandbox image $ref"
+              if ! docker pull -q "$ref" >/dev/null; then
+                echo "::error::failed to pull $ref. On the FIRST deploy after this change, make sure the naary-{claude,cursor,copilot,gemini}-sandbox packages exist in GHCR and are linked to this repo so the run's GITHUB_TOKEN can read them (naary-sandbox-runner is the working precedent)."
+                exit 1
+              fi
+            done
+          fi
 
           # 1) Migrations first, to completion. The OLD api/worker keep serving while these
           #    run against the already-live DB — so migrations must stay backward-compatible
@@ -381,6 +487,38 @@ jobs:
           # untagged layers). The real reclamation is the pre-pull `prune -af` above — this
           # cannot remove a previous release's TAGGED image and is not meant to.
           docker image prune -f >/dev/null
+
+          # Targeted sandbox sweep — the counterpart to excluding them from the prune above. The
+          # general prune can't tell a current sandbox image from a superseded one (neither is
+          # referenced by a container), so do it by IDENTITY: keep exactly the four this deploy
+          # pulled, drop every other image carrying the sandbox label. Runs only after a successful
+          # rollout, and never fails the deploy.
+          if [ -n "$SANDBOX_IMAGE_REFS" ]; then
+            # Also drop any local `naary-<tool>-sandbox:latest`. Those are hand-built leftovers from
+            # before this change, and they are exactly what makes an un-pinned fallback DANGEROUS
+            # rather than merely broken: if an operator brings the stack up without CD's env (a
+            # manual `compose up`), the runner falls back to `:latest` — and if that tag resolves
+            # locally, it silently runs unreviewed bytes with the Docker socket in reach. With the
+            # tag absent, the same mistake fails loudly at `docker run`. Untagging can't remove the
+            # bytes if they ARE one of the four we just pulled (same image id); that's fine.
+            for t in claude cursor copilot gemini; do
+              docker rmi "naary-$t-sandbox:latest" >/dev/null 2>&1 || true
+            done
+            # Both sides must be the SAME id form: `docker images -q` truncates to 12 chars while
+            # inspect returns `sha256:<64 hex>`, so --no-trunc is load-bearing — without it nothing
+            # would match `keep` and the sweep would delete the images this deploy just pulled.
+            keep=" $(docker image inspect -f '{{.Id}}' $SANDBOX_IMAGE_REFS 2>/dev/null | tr '\n' ' ')"
+            if [ "$(printf '%s' "$keep" | wc -w)" -eq 4 ]; then
+              for id in $(docker images -q --no-trunc --filter "label=com.naary.sandbox=1" | sort -u); do
+                case "$keep" in *" $id "*) continue ;; esac
+                echo "removing superseded sandbox image $id"
+                docker rmi "$id" >/dev/null 2>&1 || true
+              done
+            else
+              echo "skipping sandbox sweep — could not resolve all four current image ids"
+            fi
+          fi
+
           echo "Deployed $DEPLOY_REF — rolling replace complete, all services healthy."
           echo "disk after deploy:"; df -h / | tail -1
           REMOTE

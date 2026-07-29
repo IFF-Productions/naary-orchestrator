@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  ALLOWED_KEY_ENV_VARS_BY_TOOL,
   ALLOWED_SANDBOX_IMAGES,
+  assertKeyEnvVarForTool,
+  assertPinnedImage,
   buildSandboxDockerArgs,
+  DEFAULT_SANDBOX_IMAGES,
+  isSandboxTool,
+  SANDBOX_TOOLS,
   type SandboxRunSpec,
 } from "../src/docker-run";
 
@@ -31,6 +37,18 @@ describe("buildSandboxDockerArgs", () => {
     expect(args[args.indexOf("--cap-drop") + 1]).toBe("ALL");
     expect(args[args.indexOf("--pids-limit") + 1]).toBe("256");
     expect(args[args.indexOf("--memory") + 1]).toBe("2048m");
+  });
+
+  it("gives the CLIs a writable tmpfs HOME — with mode=1777, or it is useless", () => {
+    // Every image runs as the unprivileged `sandbox` user whose home is on the read-only root, and
+    // these CLIs all write there at startup. Proven by deploy/sandbox/smoke-test.sh: without the
+    // mount copilot/gemini die with ENOENT, and with a bare `--tmpfs` (root-owned 0755) they die
+    // with EACCES instead — so the mode is load-bearing, not decoration.
+    const tmpfs = args.filter((_, i) => args[i - 1] === "--tmpfs");
+    expect(tmpfs).toContain("/home/sandbox:size=64m,mode=1777");
+    expect(tmpfs).toContain("/tmp:size=256m");
+    // It must stay a tmpfs (ephemeral RAM), never a bind mount of a host path.
+    expect(args).not.toContain("/home/sandbox");
   });
 
   it("routes egress through the allowlist proxy", () => {
@@ -93,6 +111,142 @@ describe("buildSandboxDockerArgs", () => {
       expect(() => buildSandboxDockerArgs({ ...SPEC, workdir })).toThrow(
         /workdir must be an absolute path/,
       );
+    }
+  });
+
+  it("does NOT attach stdin (-i): the CLI must see EOF, not an open empty pipe", () => {
+    // The api's old in-process `execFile` left the child's stdin an OPEN pipe, so `claude -p`
+    // blocked ~3s waiting for EOF and could exit 1 — that had its own regression suite before
+    // #680 moved the run here. `docker run` without `-i` gives the container no stdin at all, so
+    // the CLI sees EOF immediately. Adding `-i`/`-t` would silently resurrect that bug.
+    expect(args).not.toContain("-i");
+    expect(args).not.toContain("-t");
+    expect(args).not.toContain("--interactive");
+  });
+});
+
+/**
+ * ONE IMAGE PER TOOL (#680). Before this, `ALLOWED_SANDBOX_IMAGES` pinned only the claude image,
+ * so a cursor/copilot argv was dispatched to a `claude` ENTRYPOINT — the latent bug #933 found.
+ * These tests pin the two properties that make that impossible now: every tool has a DISTINCT
+ * pinned image, and each tool's credential vars are separately allowlisted.
+ */
+describe("per-tool images + key vars", () => {
+  it("every tool has its own DISTINCT pinned image (never a fallback to another tool's)", () => {
+    const images = Object.values(DEFAULT_SANDBOX_IMAGES);
+    expect(images).toHaveLength(SANDBOX_TOOLS.length);
+    expect(new Set(images).size).toBe(images.length); // all distinct
+    for (const image of images) expect(ALLOWED_SANDBOX_IMAGES).toContain(image);
+  });
+
+  it("assertPinnedImage accepts every tool's image and nothing else", () => {
+    for (const tool of SANDBOX_TOOLS) {
+      expect(() =>
+        assertPinnedImage(DEFAULT_SANDBOX_IMAGES[tool]),
+      ).not.toThrow();
+    }
+    expect(() => assertPinnedImage("naary-claude-sandbox")).toThrow(
+      /un-pinned image/,
+    ); // untagged ≠ pinned
+    expect(() => assertPinnedImage("evil/pwn:latest")).toThrow(
+      /un-pinned image/,
+    );
+  });
+
+  /**
+   * REGRESSION: the allowlist is the OPERATOR'S configured image set, not a compile-time list of
+   * `:latest` tags.
+   *
+   * Before this, `ALLOWED_SANDBOX_IMAGES` was the only allowlist — so an operator who followed the
+   * documented production advice ("pin by digest") got `refusing to launch un-pinned image` on
+   * EVERY run, because a digest ref is correctly not one of the four dev tags. Pinning by digest
+   * meant editing this source file per deploy. Since the runner holds the host Docker socket, a
+   * digest is exactly what the pin is supposed to name; this makes that reachable.
+   */
+  const PINNED = `ghcr.io/iff-productions/naary-claude-sandbox:sha-0123456789ab@sha256:${"a".repeat(64)}`;
+
+  it("accepts a DIGEST-pinned image when the operator's config lists it", () => {
+    expect(() => assertPinnedImage(PINNED, [PINNED])).not.toThrow();
+    expect(() =>
+      buildSandboxDockerArgs({ ...SPEC, image: PINNED }, [PINNED]),
+    ).not.toThrow();
+    expect(
+      buildSandboxDockerArgs({ ...SPEC, image: PINNED }, [PINNED]),
+    ).toContain(PINNED);
+  });
+
+  it("still refuses an image outside the operator's set — a digest is not a free pass", () => {
+    // The immutability of a digest says nothing about WHOSE image it is: an immutable ref to an
+    // attacker's image is just as fatal. Membership of the operator-supplied set is the control.
+    const other = `evil/pwn@sha256:${"b".repeat(64)}`;
+    expect(() => assertPinnedImage(other, [PINNED])).toThrow(/un-pinned image/);
+    // …and the dev default no longer leaks in once an operator has configured a set.
+    expect(() =>
+      assertPinnedImage(DEFAULT_SANDBOX_IMAGES.claude, [PINNED]),
+    ).toThrow(/un-pinned image/);
+  });
+
+  it("isSandboxTool is a CLOSED set — a request can name a tool, never an image", () => {
+    for (const tool of SANDBOX_TOOLS) expect(isSandboxTool(tool)).toBe(true);
+    for (const bad of [
+      "bash",
+      "naary-claude-sandbox:latest",
+      "",
+      null,
+      42,
+      { tool: "claude" },
+    ]) {
+      expect(isSandboxTool(bad)).toBe(false);
+    }
+  });
+
+  it("a tool may forward only ITS OWN credential var, not merely some tool's", () => {
+    expect(() =>
+      assertKeyEnvVarForTool("ANTHROPIC_API_KEY", "claude"),
+    ).not.toThrow();
+    expect(() =>
+      assertKeyEnvVarForTool("CLAUDE_CODE_OAUTH_TOKEN", "claude"),
+    ).not.toThrow();
+    expect(() =>
+      assertKeyEnvVarForTool("CURSOR_API_KEY", "cursor"),
+    ).not.toThrow();
+    expect(() =>
+      assertKeyEnvVarForTool("COPILOT_GITHUB_TOKEN", "copilot"),
+    ).not.toThrow();
+    expect(() =>
+      assertKeyEnvVarForTool("GEMINI_API_KEY", "gemini"),
+    ).not.toThrow();
+    // Cross-tool forwarding is refused — a copilot GitHub token must not reach the claude box.
+    expect(() =>
+      assertKeyEnvVarForTool("COPILOT_GITHUB_TOKEN", "claude"),
+    ).toThrow(/not valid for the "claude" sandbox/);
+    expect(() => assertKeyEnvVarForTool("ANTHROPIC_API_KEY", "gemini")).toThrow(
+      /not valid for the "gemini" sandbox/,
+    );
+    // …and an arbitrary var is still refused everywhere.
+    expect(() =>
+      assertKeyEnvVarForTool("AWS_SECRET_ACCESS_KEY", "cursor"),
+    ).toThrow(/not valid/);
+  });
+
+  it("the isolation argv is IDENTICAL across tools apart from the image + key var name", () => {
+    const normalize = (tool: (typeof SANDBOX_TOOLS)[number]) =>
+      buildSandboxDockerArgs({
+        ...SPEC,
+        image: DEFAULT_SANDBOX_IMAGES[tool],
+        keyEnvVar: ALLOWED_KEY_ENV_VARS_BY_TOOL[tool][0],
+      }).map((a) =>
+        a === DEFAULT_SANDBOX_IMAGES[tool]
+          ? "<IMAGE>"
+          : a === ALLOWED_KEY_ENV_VARS_BY_TOOL[tool][0]
+            ? "<KEY_VAR>"
+            : a,
+      );
+    const claude = normalize("claude");
+    for (const tool of SANDBOX_TOOLS) {
+      // Same --network, --read-only, --tmpfs, no-new-privileges, --cap-drop ALL, cpu/memory/pids
+      // caps and proxy vars for every tool: adding a CLI never buys it a weaker sandbox.
+      expect(normalize(tool), tool).toEqual(claude);
     }
   });
 });

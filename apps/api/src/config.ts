@@ -245,14 +245,3 @@ export function storageProvider(env: Env = process.env): string | undefined {
   return env.STORAGE_PROVIDER;
 }
 
-/**
- * The MINIMAL env handed to a spawned CLI (the graph generator's `claude` subprocess): enough to
- * find binaries and a home directory, and nothing else. Never spread the API's own env into a
- * subprocess — DATABASE_URL and ENCRYPTION_KEY must not cross that boundary.
- */
-export function subprocessBaseEnv(env: Env = process.env): {
-  PATH: string | undefined;
-  HOME: string | undefined;
-} {
-  return { PATH: env.PATH, HOME: env.HOME };
-}

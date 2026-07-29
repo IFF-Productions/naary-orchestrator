@@ -357,6 +357,25 @@ export function AppsTab({
           )}
           onSaved={() => void onChanged()}
         />
+        <CodeAgentCredentialCard
+          tenant={tenant}
+          provider="gemini-cli"
+          label="Gemini CLI"
+          badge="✦"
+          placeholder="GEMINI_API_KEY"
+          hint={
+            <>
+              The Code Agent node — runs the <code>gemini</code> CLI. Uses a
+              dedicated Gemini API key (separate from the Google model key
+              above, so you can rotate them independently).
+            </>
+          }
+          hasKey={credentials.some((c) => c.provider === "gemini-cli")}
+          keyValid={credentials.some(
+            (c) => c.provider === "gemini-cli" && c.isValid,
+          )}
+          onSaved={() => void onChanged()}
+        />
       </div>
 
       {/* ---- Connect dialogs (the existing flows, unchanged) ---- */}

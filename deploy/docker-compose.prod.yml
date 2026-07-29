@@ -59,6 +59,14 @@ services:
       SWAGGER_DISABLED: "${SWAGGER_DISABLED:-1}"
       # Label Sentry events as production (the code otherwise falls back to NODE_ENV → "development").
       SENTRY_ENVIRONMENT: production
+      # The api dispatches "Build with AI" runs that use a tenant's Claude Code credential to the
+      # SAME sandbox-runner the worker uses (#680) — it no longer ships or spawns the CLI itself.
+      # Only URL + token: it uses the runner's EPHEMERAL workspace (no repo, no git), so unlike the
+      # worker it needs NO share of the runs-dir bind mount — the internet-facing container gets no
+      # writable host path out of this. Empty ⇒ that one generate source answers 503 naming these
+      # settings; every API-key provider (Anthropic/OpenAI/Google) is unaffected.
+      SANDBOX_RUNNER_URL: "${SANDBOX_RUNNER_URL:-http://sandbox-runner:8099}"
+      SANDBOX_RUNNER_TOKEN: "${SANDBOX_RUNNER_TOKEN:-}"
     # Drop the local-temporal dependency (Temporal is Cloud); keep DB + migrations.
     depends_on: !override
       postgres:
@@ -92,15 +100,11 @@ services:
       # The default is empty, so the posture is unchanged until someone sets it deliberately,
       # AFTER deploy/sandbox/egress-test.sh passes on this host.
       CODE_AGENT_WRITE_ENABLED: "${CODE_AGENT_WRITE_ENABLED:-}"
-      # READ mode isolation (#594/#680): "true" routes codeAgent READ runs through the same
-      # sandbox-runner as write, instead of exec'ing the coding CLI IN the worker process (where
-      # it can read the worker's filesystem — /proc/<pid>/environ → ENCRYPTION_KEY). DECLARED for
-      # the same reason as the write gate above: without an entry here, setting it in
-      # /opt/naary/.env reaches nothing and read silently stays un-sandboxed. Empty default ⇒ the
-      # posture is unchanged until an operator opts in, after the `sandbox` profile is running.
-      # NB read mode then REQUIRES `repo` + `connectionId` on the node (the sandbox runs on a
-      # cloned tree), and only the `claude` tool is supported (the runner's pinned image).
-      CODE_AGENT_SANDBOX_READ: "${CODE_AGENT_SANDBOX_READ:-}"
+      # NB there is no CODE_AGENT_SANDBOX_READ any more (#680). It was declared here briefly
+      # (#933) as the opt-in for isolating READ; read is now ALWAYS sandboxed, so the flag —
+      # and the un-isolated in-worker path it guarded — are gone. codeAgent consequently
+      # REQUIRES the `sandbox` profile below to be running; without it a run fails with
+      # CODE_AGENT_SANDBOX_UNCONFIGURED naming the two settings to add.
     volumes:
       # The shared working-tree dir: the worker clones into it, the runner mounts it into
       # the sandbox. It MUST be the same path inside both containers as on the host — the
@@ -132,9 +136,6 @@ services:
       SANDBOX_RUNNER_TOKEN: "${SANDBOX_RUNNER_TOKEN:-}"
       CODE_AGENT_RUNS_DIR: "${SANDBOX_RUNS_DIR:-/var/lib/naary/sandbox-runs}"
       CODE_AGENT_WRITE_ENABLED: "${CODE_AGENT_WRITE_ENABLED:-}"
-      # Read-isolation gate — declared on BOTH pools for the reason above; a flag set on only one
-      # is the silent no-op this file already warns about for the write gate.
-      CODE_AGENT_SANDBOX_READ: "${CODE_AGENT_SANDBOX_READ:-}"
     volumes:
       - "${SANDBOX_RUNS_DIR:-/var/lib/naary/sandbox-runs}:${SANDBOX_RUNS_DIR:-/var/lib/naary/sandbox-runs}"
     ports: !override []
@@ -217,11 +218,16 @@ services:
   # deploy — on boxes that haven't set one, and an empty token would just crash-loop a
   # Docker-privileged container. So they start only when the operator opts in:
   #
-  #   1. docker build -t naary-claude-sandbox:latest /opt/naary/deploy/sandbox   (the image
-  #      the runner launches; hard-pinned by name in the runner, never workflow-chosen)
-  #   2. /opt/naary/deploy/sandbox/egress-test.sh   (the acceptance gate — prove the sandbox
+  #   1. add SANDBOX_RUNNER_TOKEN=<random> and COMPOSE_PROFILES=sandbox to /opt/naary/.env
+  #   2. re-run Deploy. The four sandbox images the runner launches are BUILT IN CI and PULLED
+  #      here like every other image — nothing is built on this box any more. deploy.yml pulls
+  #      them by DIGEST and hands the runner SANDBOX_IMAGE_* + SANDBOX_REQUIRE_DIGEST=1, so what
+  #      runs with the Docker socket in reach is immutable bytes rather than a re-pushable tag.
+  #      (Local/dev hosts with no GHCR access keep building them by hand — deploy/sandbox/README.md.)
+  #   3. /opt/naary/deploy/sandbox/egress-test.sh   (the acceptance gate — prove the sandbox
   #      can reach Anthropic and NOTHING else, on this host)
-  #   3. add SANDBOX_RUNNER_TOKEN=<random> and COMPOSE_PROFILES=sandbox to /opt/naary/.env
+  #   4. /opt/naary/deploy/sandbox/smoke-test.sh "$SANDBOX_IMAGE_CLAUDE" …   (each image starts
+  #      under the isolation flags — pass the digest refs so you smoke the bytes you deployed)
   #
   # Enabling codeAgent write mode (CODE_AGENT_WRITE_ENABLED) is a SEPARATE, later step —
   # this only makes the infrastructure available.
@@ -274,7 +280,22 @@ services:
       SANDBOX_RUNS_DIR: "${SANDBOX_RUNS_DIR:-/var/lib/naary/sandbox-runs}"
       SANDBOX_NETWORK: naary-sandbox-internal
       SANDBOX_PROXY_URL: http://naary-sandbox-proxy:3128
-      SANDBOX_IMAGE: naary-claude-sandbox:latest
+      # Per-TOOL images (#680): the runner maps the request's `tool` to one of these — a request
+      # can never name an image (the runner holds the Docker socket). Each default is DISTINCT;
+      # `SANDBOX_IMAGE` remains a claude-only alias for pre-#680 deploys.
+      #
+      # The `:latest` values here are the LOCAL-BUILD defaults, for a host without GHCR access.
+      # A real deploy never uses them: deploy/docker-compose.ghcr.yml (layered last by CD)
+      # replaces all four with digest-pinned GHCR refs and sets SANDBOX_REQUIRE_DIGEST=1, which
+      # makes the runner refuse to boot on a mutable tag. That split is what keeps a contributor's
+      # `docker build … :latest` working without weakening prod.
+      SANDBOX_IMAGE_CLAUDE: "${SANDBOX_IMAGE_CLAUDE:-naary-claude-sandbox:latest}"
+      SANDBOX_IMAGE_CURSOR: "${SANDBOX_IMAGE_CURSOR:-naary-cursor-sandbox:latest}"
+      SANDBOX_IMAGE_COPILOT: "${SANDBOX_IMAGE_COPILOT:-naary-copilot-sandbox:latest}"
+      SANDBOX_IMAGE_GEMINI: "${SANDBOX_IMAGE_GEMINI:-naary-gemini-sandbox:latest}"
+      # OFF by default (a dev/local host builds `:latest` images). CD exports =1 when the sandbox
+      # profile is active, so prod fails CLOSED if the digest refs ever go missing.
+      SANDBOX_REQUIRE_DIGEST: "${SANDBOX_REQUIRE_DIGEST:-}"
     volumes:
       # Docker socket — this container's (contained) privilege.
       - /var/run/docker.sock:/var/run/docker.sock

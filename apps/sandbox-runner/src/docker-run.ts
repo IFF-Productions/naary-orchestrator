@@ -42,24 +42,100 @@ export interface SandboxRunSpec {
   limits: SandboxLimits;
 }
 
-/** Images the runner is willing to launch. The workflow can NEVER choose the image. The
- *  `:latest` entry is for dev; a production deploy should build + tag the sandbox image with a
- *  version/digest and list THAT here (and in SANDBOX_IMAGE) so the launched code is immutable. */
-export const ALLOWED_SANDBOX_IMAGES = ["naary-claude-sandbox:latest"] as const;
+/**
+ * The coding CLIs the runner can launch — a CLOSED set. A request names a TOOL from this set; the
+ * runner maps tool → image from its OWN config (`RunnerConfig.images`). A request can never name an
+ * image: the runner holds the Docker socket (host root), so an attacker-chosen image name is a
+ * root-privileged injection surface, while an attacker-chosen member of a fixed enum is not.
+ */
+export const SANDBOX_TOOLS = ["claude", "cursor", "copilot", "gemini"] as const;
+export type SandboxTool = (typeof SANDBOX_TOOLS)[number];
 
-/** The env var names the sandbox may read its credential from. An allowlist (not a free string)
- *  so a caller can never inject an arbitrary env var into the container. `claude` reads an API key
- *  from ANTHROPIC_API_KEY and a subscription setup-token from CLAUDE_CODE_OAUTH_TOKEN. */
-export const ALLOWED_KEY_ENV_VARS = [
-  "ANTHROPIC_API_KEY",
-  "CLAUDE_CODE_OAUTH_TOKEN",
-] as const;
+export function isSandboxTool(v: unknown): v is SandboxTool {
+  return (
+    typeof v === "string" && (SANDBOX_TOOLS as readonly string[]).includes(v)
+  );
+}
 
-/** Back-compat default when a request omits the var name (an API key). */
+/**
+ * The conventional image tag per tool. Each CLI gets its OWN image with its OWN ENTRYPOINT — a
+ * single shared image was the latent bug in #933: `ALLOWED_SANDBOX_IMAGES` pinned only the claude
+ * image, whose ENTRYPOINT is `claude`, so cursor/copilot argv was handed to the wrong binary.
+ * With one image per tool that class of bug is gone BY CONSTRUCTION.
+ *
+ * Note each default is DISTINCT — there is deliberately no fallback to the claude image, which
+ * would re-create exactly that bug behind more machinery. An unbuilt image fails loudly at
+ * `docker run` instead.
+ */
+export const DEFAULT_SANDBOX_IMAGES: Record<SandboxTool, string> = {
+  claude: "naary-claude-sandbox:latest",
+  cursor: "naary-cursor-sandbox:latest",
+  copilot: "naary-copilot-sandbox:latest",
+  gemini: "naary-gemini-sandbox:latest",
+};
+
+/**
+ * The DEV default allowlist — the images the runner will launch when an operator has configured
+ * none. The workflow can NEVER choose the image either way.
+ *
+ * This used to be the ONLY allowlist, which made the documented production posture impossible:
+ * an operator who set `SANDBOX_IMAGE_CLAUDE=ghcr.io/…/naary-claude-sandbox:abc@sha256:…` got
+ * `refusing to launch un-pinned image` on every run, because a digest ref is (correctly) not one
+ * of these four `:latest` tags. Pinning therefore meant editing this file per deploy.
+ *
+ * The allowlist is now the OPERATOR'S configured set (`RunnerConfig.images`, env-only) — see
+ * `assertPinnedImage(image, allowed)`. These stay as the default so a dev box with no
+ * `SANDBOX_IMAGE_*` behaves exactly as before. In production, `SANDBOX_REQUIRE_DIGEST=1`
+ * additionally forces every configured image to be `@sha256:`-pinned (config.ts).
+ */
+export const ALLOWED_SANDBOX_IMAGES = Object.values(
+  DEFAULT_SANDBOX_IMAGES,
+) as readonly string[];
+
+/**
+ * The env var names each tool's sandbox may read its credential from. An allowlist (not a free
+ * string) so a caller can never inject an arbitrary env var into the container — and PER TOOL, so
+ * a request also can't forward, say, a GitHub token into the Claude container.
+ *
+ *  - claude  reads an API key from ANTHROPIC_API_KEY, a subscription setup-token from
+ *            CLAUDE_CODE_OAUTH_TOKEN (two kinds of credential, two vars).
+ *  - cursor  CURSOR_API_KEY. copilot COPILOT_GITHUB_TOKEN. gemini GEMINI_API_KEY.
+ *
+ * Extend this deliberately — one var per driver — never by relaxing the check.
+ */
+export const ALLOWED_KEY_ENV_VARS_BY_TOOL: Record<
+  SandboxTool,
+  readonly string[]
+> = {
+  claude: ["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"],
+  cursor: ["CURSOR_API_KEY"],
+  copilot: ["COPILOT_GITHUB_TOKEN"],
+  gemini: ["GEMINI_API_KEY"],
+};
+
+/** The union of every tool's allowed key var — the backstop `buildSandboxDockerArgs` enforces
+ *  when it is handed an already-resolved image (the per-TOOL check happens at the request layer). */
+export const ALLOWED_KEY_ENV_VARS = Object.values(
+  ALLOWED_KEY_ENV_VARS_BY_TOOL,
+).flat() as readonly string[];
+
+/** Back-compat default when a request omits the var name (a claude API key). */
 export const SANDBOX_KEY_ENV = "ANTHROPIC_API_KEY";
 
-export function assertPinnedImage(image: string): void {
-  if (!(ALLOWED_SANDBOX_IMAGES as readonly string[]).includes(image)) {
+/**
+ * The image must be one the OPERATOR pinned. `allowed` is `Object.values(cfg.images)` at the real
+ * call site — a set that can only ever come from the runner's environment, never from a request.
+ *
+ * Note this is deliberately NOT "any ref that looks digest-pinned": a digest is immutable, but an
+ * immutable ref to an ATTACKER'S image is exactly as fatal (the runner holds the Docker socket).
+ * Membership of an operator-supplied set is the control; the digest is what makes each member's
+ * bytes immutable. `SANDBOX_REQUIRE_DIGEST` (config.ts) enforces the second half at boot.
+ */
+export function assertPinnedImage(
+  image: string,
+  allowed: readonly string[] = ALLOWED_SANDBOX_IMAGES,
+): void {
+  if (!allowed.includes(image)) {
     throw new Error(
       `sandbox-runner: refusing to launch un-pinned image "${image}"`,
     );
@@ -67,9 +143,18 @@ export function assertPinnedImage(image: string): void {
 }
 
 export function assertAllowedKeyEnvVar(name: string): void {
-  if (!(ALLOWED_KEY_ENV_VARS as readonly string[]).includes(name)) {
+  if (!ALLOWED_KEY_ENV_VARS.includes(name)) {
     throw new Error(
       `sandbox-runner: refusing to forward un-allowlisted key env var "${name}"`,
+    );
+  }
+}
+
+/** The per-TOOL tightening: `name` must be one of THIS tool's vars, not merely of some tool's. */
+export function assertKeyEnvVarForTool(name: string, tool: SandboxTool): void {
+  if (!ALLOWED_KEY_ENV_VARS_BY_TOOL[tool].includes(name)) {
+    throw new Error(
+      `sandbox-runner: key env var "${name}" is not valid for the "${tool}" sandbox`,
     );
   }
 }
@@ -78,9 +163,16 @@ export function assertAllowedKeyEnvVar(name: string): void {
  * Build the `docker run …` argv. The returned array is passed to execFile("docker", args)
  * — no shell. The credential is forwarded by name only (`spec.keyEnvVar`); the caller must set
  * its value in the exec environment (`{ [spec.keyEnvVar]: key }`), never inline it here.
+ *
+ * `allowedImages` is the operator's configured image set; it defaults to the dev tags so every
+ * existing caller/test is unchanged. The real caller (`run-sandbox.ts`) passes
+ * `Object.values(cfg.images)`, which is what lets a production deploy pin by DIGEST.
  */
-export function buildSandboxDockerArgs(spec: SandboxRunSpec): string[] {
-  assertPinnedImage(spec.image);
+export function buildSandboxDockerArgs(
+  spec: SandboxRunSpec,
+  allowedImages: readonly string[] = ALLOWED_SANDBOX_IMAGES,
+): string[] {
+  assertPinnedImage(spec.image, allowedImages);
   assertAllowedKeyEnvVar(spec.keyEnvVar);
   if (!spec.network || /\s/.test(spec.network)) {
     throw new Error("sandbox-runner: invalid network name");
@@ -100,10 +192,26 @@ export function buildSandboxDockerArgs(spec: SandboxRunSpec): string[] {
     // Isolation: internal network (no gateway) is the egress boundary.
     "--network",
     spec.network,
-    // Filesystem: read-only root + a small writable tmpfs; the working tree is the only mount.
+    // Filesystem: read-only root + small writable tmpfs mounts; the working tree is the only
+    // real mount.
     "--read-only",
     "--tmpfs",
     "/tmp:size=256m",
+    // The CLIs' HOME. Every sandbox image runs as the same unprivileged `sandbox` user, whose
+    // home sits on the now-read-only root — and these tools all write there at startup
+    // (`~/.gemini`, `~/.cache` for copilot's bundled-package extraction, `~/.claude`). Verified:
+    // without this, copilot and gemini die before running with
+    // `ENOENT … mkdir '/home/sandbox/.gemini'`.
+    //
+    // This does NOT loosen the sandbox: a tmpfs is per-container RAM, discarded when the
+    // container exits, and `/tmp` above already provides exactly this kind of scratch space. The
+    // point of `--read-only` is that the IMAGE's files can't be modified, which still holds.
+    //
+    // `mode=1777` is REQUIRED, not decorative: a bare `--tmpfs` mounts root-owned 0755, so the
+    // unprivileged `sandbox` user still can't write and the failure merely changes from ENOENT to
+    // EACCES (verified for all three of cursor/copilot/gemini). Same mode Docker gives `/tmp`.
+    "--tmpfs",
+    "/home/sandbox:size=64m,mode=1777",
     "-v",
     `${spec.workdir}:/work`,
     "-w",

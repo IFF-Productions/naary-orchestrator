@@ -46,14 +46,15 @@ export interface TextToSpeechNodeConfig {
 
 /**
  * codeAgent node (design docs/design/CLAUDE-CODE-NODE.md). Runs an agentic coding CLI
- * (Claude Code / Cursor / Copilot) as a BYOK Temporal activity. Slice 1 is READ-ONLY —
- * `claude -p` in plan mode with tools clamped to Read/Grep/Glob (no Bash/write/clone/PR;
- * those land in later slices behind the sandbox). `tool` selects the driver (default
- * "claude"); the credential is the tenant's key for that tool's provider.
+ * (Claude Code / Cursor / Copilot / Gemini) as a BYOK Temporal activity. Every run happens inside
+ * that tool's own isolated sandbox image (#680) — never in the worker process. Read mode is
+ * clamped read-only per CLI (claude: plan mode + Read/Grep/Glob; gemini: --approval-mode plan; …)
+ * and no driver ever grants shell. `tool` selects the driver (default "claude"); the credential is
+ * the tenant's key for that tool's own provider slot.
  */
 export interface CodeAgentNodeConfig {
   /** Which coding-CLI driver to run. Defaults to "claude". */
-  tool?: "claude" | "cursor" | "copilot";
+  tool?: "claude" | "cursor" | "copilot" | "gemini";
   /** The task prompt. `{{ nodeId.path }}` upstream templating is resolved before the activity. */
   prompt: string;
   /** Appended to the CLI's system prompt (e.g. house rules). */
@@ -66,8 +67,9 @@ export interface CodeAgentNodeConfig {
   maxBudgetUsd?: number;
   /** Overall wall-clock budget for the run (ms). */
   timeoutMs?: number;
-  /** "read" (default) = in-worker plan-mode run. "write" = clone `repo` + edit it in the sandbox,
-   *  returning a diff (Slice 2c; gated by CODE_AGENT_WRITE_ENABLED on the worker). */
+  /** "read" (default) = plan-mode run, no edits. "write" = clone `repo` + edit it, returning a diff
+   *  (gated by CODE_AGENT_WRITE_ENABLED on the worker). BOTH run in the isolated sandbox (#680);
+   *  read without a `repo` runs against an empty ephemeral tree. */
   mode?: "read" | "write";
   /** "owner/name" of the repo to clone (write mode). */
   repo?: string;

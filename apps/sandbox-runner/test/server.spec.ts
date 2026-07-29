@@ -1,6 +1,7 @@
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { RunnerConfig } from "../src/config";
+import { DEFAULT_SANDBOX_IMAGES } from "../src/docker-run";
 import type { Exec } from "../src/run-sandbox";
 import { createRunnerServer } from "../src/server";
 
@@ -14,7 +15,8 @@ const CFG: RunnerConfig = {
   runsDir: "/runs",
   network: "naary-sandbox-internal",
   proxyUrl: "http://naary-sandbox-proxy:3128",
-  image: "naary-claude-sandbox:latest",
+  images: DEFAULT_SANDBOX_IMAGES,
+  requireDigest: false,
   limits: { cpus: "1.0", memoryMb: 2048, pids: 256 },
   defaultTimeoutMs: 900_000,
   port: 0,

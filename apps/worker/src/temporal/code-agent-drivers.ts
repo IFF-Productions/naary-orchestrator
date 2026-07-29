@@ -1,18 +1,22 @@
 /**
  * CLI-agent drivers (design docs/design/CLAUDE-CODE-NODE.md §8c). The `codeAgent` node is
- * tool-agnostic: a driver adapts one agentic coding CLI (Claude Code / Cursor / Copilot)
+ * tool-agnostic: a driver adapts one agentic coding CLI (Claude Code / Cursor / Copilot / Gemini)
  * behind a common contract. Everything CLI-specific — the argv, the auth env var, and how
  * to parse the CLI's output — lives here; the activity + workflow stay driver-independent.
  *
  * These functions are PURE (build argv / parse text). The subprocess execution + credential
  * fetch live in the activity (`callCodeAgent`), so drivers are trivially unit-tested.
  *
- * Slice 1 is READ-ONLY: the claude driver runs `claude -p` in plan mode with tools clamped
- * to Read/Grep/Glob (no Bash/write/clone). Resume/questions (the Q&A loop) and Cursor/Copilot
- * drivers land in later slices.
+ * Every driver runs inside the isolated sandbox and NOWHERE else (#680) — each tool has its OWN
+ * pinned image (deploy/sandbox/<tool>.Dockerfile) whose ENTRYPOINT is that tool's binary, and the
+ * runner maps tool → image from its own config. `binary` is therefore documentation of what the
+ * image's entrypoint is, not something the worker spawns.
+ *
+ * Read mode is clamped read-only per CLI (claude: plan mode + Read/Grep/Glob; cursor: no --force;
+ * copilot: --deny-tool write; gemini: --approval-mode plan). No driver ever grants shell/Bash.
  */
 
-export type CodeAgentTool = "claude" | "cursor" | "copilot";
+export type CodeAgentTool = "claude" | "cursor" | "copilot" | "gemini";
 
 export interface CodeAgentRunOpts {
   prompt: string;
@@ -98,6 +102,12 @@ export interface CliAgentDriver {
   /** The BYOK credential provider to fetch for this tool (e.g. claude → "claude-code"). This is a
    *  DEDICATED slot, separate from the `anthropic` model-provider API key. */
   credentialProvider: string;
+  /**
+   * The model name the usage ledger prices against when the node didn't set one. MUST be a real
+   * model with a pricing row for `credentialProvider`, because a missing row throws AFTER the CLI
+   * has already run and cost money. Per-driver, so a gemini run isn't priced as Claude.
+   */
+  defaultPricingModel: string;
   /** The auth env var(s) to inject into the CLI subprocess for a given credential value. Returns a
    *  map (not a fixed name) because the same credential slot may hold different token kinds that the
    *  CLI reads from different vars. The git token NEVER goes here. */
@@ -113,8 +123,15 @@ export interface CliAgentDriver {
   };
   /** Build the argv for a headless, read-only run (Slice 1). */
   buildArgs(opts: CodeAgentRunOpts): string[];
-  /** Parse the CLI's stdout + exit code → the normalized envelope. */
-  parse(stdout: string, exitCode: number): CodeAgentEnvelope;
+  /**
+   * Parse the CLI's output → the normalized envelope.
+   *
+   * `stderr` is passed because not every CLI puts its envelope on stdout: the Gemini CLI writes
+   * its `-o json` envelope to STDERR on a failed run (verified in-container against 0.53.0, where
+   * stdout was completely empty), so a stdout-only parse would report `no_envelope` and throw away
+   * the real reason. Drivers whose envelope is always on stdout simply ignore it.
+   */
+  parse(stdout: string, exitCode: number, stderr?: string): CodeAgentEnvelope;
 }
 
 /** Claude Code — the reference driver. `claude -p --output-format stream-json --verbose`, plan mode. */
@@ -123,6 +140,8 @@ const claudeDriver: CliAgentDriver = {
   binary: "claude",
   image: "naary-claude-sandbox",
   credentialProvider: "claude-code",
+  // A real Anthropic model (the CLI runs Claude) so the ledger can bill from tokens.
+  defaultPricingModel: "claude-opus-4-8",
   // A `claude setup-token` OAuth token (sk-ant-oat…) authenticates the CLI via
   // CLAUDE_CODE_OAUTH_TOKEN (subscription billing); a plain API key (sk-ant-api…) via
   // ANTHROPIC_API_KEY. Return exactly ONE var so the CLI's precedence isn't ambiguous.
@@ -376,6 +395,8 @@ const cursorDriver: CliAgentDriver = {
   binary: "cursor-agent",
   image: "naary-cursor-sandbox",
   credentialProvider: "cursor",
+  // The `cursor` pricing table proxies Anthropic's (packages/usage/src/pricing.ts).
+  defaultPricingModel: "claude-opus-4-8",
   authEnv(key) {
     return { CURSOR_API_KEY: key.trim() };
   },
@@ -428,6 +449,8 @@ const copilotDriver: CliAgentDriver = {
   binary: "copilot",
   image: "naary-copilot-sandbox",
   credentialProvider: "copilot",
+  // The `copilot` pricing table proxies Anthropic's (packages/usage/src/pricing.ts).
+  defaultPricingModel: "claude-opus-4-8",
   authEnv(key) {
     return { COPILOT_GITHUB_TOKEN: key.trim() };
   },
@@ -483,11 +506,119 @@ const copilotDriver: CliAgentDriver = {
   },
 };
 
-/** Registry of available drivers. Add an entry + the driver above when a new CLI is adapted. */
+/**
+ * Google Gemini CLI (`gemini`). Headless `-p`, `-o json`. Auth via GEMINI_API_KEY.
+ *
+ * Everything below was verified IN-CONTAINER against the pinned 0.53.0 (see
+ * deploy/sandbox/gemini.Dockerfile), because three of its behaviours are surprising:
+ *
+ *  1. `--skip-trust` is MANDATORY, and its absence FAILS OPEN. In an untrusted directory — which
+ *     every fresh sandbox mount is — the CLI prints "Approval mode overridden to 'default' because
+ *     the current folder is not trusted" and then refuses to run at all (exit 55). The dangerous
+ *     half is the override: it silently DOWNGRADES our `--approval-mode plan` read-only clamp.
+ *     Every other driver's clamp fails closed, so this flag is not optional politeness — it is what
+ *     keeps read mode read-only. Verified: with `--skip-trust` the override lines are gone.
+ *  2. On a FAILED run the `-o json` envelope goes to STDERR and stdout is EMPTY (verified: stdout
+ *     alone was zero bytes on an invalid-key run). Hence `parse` reads both streams.
+ *  3. Its JSON is PRETTY-PRINTED across many lines, so the per-line JSONL parse can't see it —
+ *     `jsonObjects`'s whole-buffer fast path is what catches it.
+ *
+ * NOT verified: the SUCCESS envelope's exact field name (that needs a live Gemini key, which the
+ * authoring environment did not have). The documented shape is `{ response, stats }`; the read
+ * below is therefore DEFENSIVE across response/result/text/output — the same stance the copilot
+ * driver already ships with. A shape change surfaces as a loud empty result, never as wrong data.
+ *
+ * The CLI reports no token counts in this envelope, so `usage` is left undefined and the activity's
+ * char/4 billing fallback covers it (Tier-1 rule 6 — never bill zero).
+ */
+const geminiDriver: CliAgentDriver = {
+  tool: "gemini",
+  binary: "gemini",
+  image: "naary-gemini-sandbox",
+  credentialProvider: "gemini-cli",
+  // A real Google model — the `gemini-cli` pricing table proxies the `google` one.
+  defaultPricingModel: "gemini-2.5-pro",
+  authEnv(key) {
+    return { GEMINI_API_KEY: key.trim() };
+  },
+  capabilities: {
+    headless: true,
+    resume: true,
+    structuredQuestions: false,
+    structuredOutput: false,
+  },
+  buildArgs(opts) {
+    // Gemini has no append-system-prompt flag — fold it into the prompt (as cursor/copilot do).
+    const prompt = opts.systemPrompt
+      ? `${opts.systemPrompt}\n\n${opts.prompt}`
+      : opts.prompt;
+    const args = [
+      "-p",
+      prompt,
+      "-o",
+      "json",
+      // Read: `plan` is the CLI's own read-only mode. Write: `auto_edit` auto-approves EDIT tools
+      // only — deliberately not `yolo`, which would auto-approve shell too (the no-Bash invariant
+      // the claude/copilot drivers also hold).
+      "--approval-mode",
+      opts.write ? "auto_edit" : "plan",
+      // MANDATORY — see (1) above. Without it the approval mode is silently downgraded to
+      // "default" and the run then aborts; with it, `plan` actually holds.
+      "--skip-trust",
+    ];
+    if (opts.model) args.push("-m", opts.model);
+    return args;
+  },
+  parse(stdout, exitCode, stderr) {
+    // Success → stdout; failure → stderr (verified). Try stdout first so a successful run is never
+    // mis-read from a stray warning on stderr.
+    const objs = [...jsonObjects(stdout), ...jsonObjects(stderr ?? "")];
+    // The envelope is the last object carrying a result-ish or `error` field.
+    const RESULT_KEYS = ["response", "result", "text", "output"];
+    const obj =
+      [...objs]
+        .reverse()
+        .find((o) => firstString(o, RESULT_KEYS) || o.error != null) ??
+      objs[objs.length - 1];
+    if (!obj) {
+      return { result: "", isError: true, failureSubtype: "no_envelope" };
+    }
+    // `error` is an OBJECT here (`{type, message, code}`), not a boolean/string.
+    const err = obj.error as
+      { type?: unknown; message?: unknown; code?: unknown } | undefined | null;
+    const isError = err != null || exitCode !== 0;
+    return {
+      result: firstString(obj, RESULT_KEYS) ?? "",
+      sessionId: firstString(obj, ["session_id", "sessionId"]),
+      isError,
+      // Prefer the API's own status code (e.g. 400 on an invalid key) — that is what makes a
+      // failure diagnosable in its Sentry grouping (#551).
+      failureSubtype: isError
+        ? typeof err?.code === "number" || typeof err?.code === "string"
+          ? `error_${err.code}`
+          : typeof err?.type === "string" && err.type
+            ? err.type
+            : exitCode !== 0
+              ? `exit_${exitCode}`
+              : "unknown"
+        : undefined,
+    };
+  },
+};
+
+/**
+ * Registry of available drivers. Adding a CLI means a driver here AND its own pinned sandbox image
+ * (deploy/sandbox/<tool>.Dockerfile) listed in the runner's `DEFAULT_SANDBOX_IMAGES`, plus its auth
+ * var in `ALLOWED_KEY_ENV_VARS_BY_TOOL`, plus an entry in the CI build loop
+ * (.github/workflows/sandbox-images.yml) so the image is published to GHCR and pinned by digest in
+ * production rather than built by hand on the box. One image per tool, each with that tool's
+ * ENTRYPOINT, is what makes "the argv reached the wrong CLI" (#933) impossible by construction.
+ */
 const DRIVERS: Record<CodeAgentTool, CliAgentDriver> = {
   claude: claudeDriver,
   cursor: cursorDriver,
   copilot: copilotDriver,
+  gemini: geminiDriver,
 };
 
 /** Resolve the driver for a tool (default "claude"). Tolerant of any runtime string so a stale
@@ -496,7 +627,7 @@ export function resolveDriver(tool: string | undefined): CliAgentDriver {
   const driver = DRIVERS[(tool ?? "claude") as CodeAgentTool];
   if (!driver) {
     throw new Error(
-      `codeAgent: unknown coding-CLI tool "${tool}" (expected claude/cursor/copilot).`,
+      `codeAgent: unknown coding-CLI tool "${tool}" (expected claude/cursor/copilot/gemini).`,
     );
   }
   return driver;

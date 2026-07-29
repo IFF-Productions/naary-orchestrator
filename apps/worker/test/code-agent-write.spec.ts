@@ -19,7 +19,6 @@ const ENV = {
   runnerToken: "runner-bearer",
   runsDir: "/srv/runs",
   writeEnabled: true,
-  sandboxReadEnabled: false,
 };
 
 const PARAMS = {
@@ -81,7 +80,14 @@ describe("sandboxRunId", () => {
 describe("runCodeAgentWrite", () => {
   it("clones then dispatches to the runner and returns the diff", async () => {
     const out = await runCodeAgentWrite(PARAMS, ENV);
-    expect(out).toEqual({ exitCode: 0, stdout: "{}", diff: "diff --git a b" });
+    expect(out).toEqual({
+      exitCode: 0,
+      stdout: "{}",
+      // Passed through from the runner: some CLIs (gemini) put their envelope on stderr, so
+      // dropping it here would make those failures undiagnosable.
+      stderr: "",
+      diff: "diff --git a b",
+    });
     // git clone happened with the plain https URL (no token in it).
     expect(exec).toHaveBeenCalledOnce();
     const [bin, args] = exec.mock.calls[0];
@@ -133,9 +139,9 @@ describe("runCodeAgentWrite", () => {
     mode: "read" as const,
     agentArgs: ["-p", "review the code", "--permission-mode", "plan"],
   };
-  const READ_ENV = { ...ENV, writeEnabled: false, sandboxReadEnabled: true };
+  const READ_ENV = { ...ENV, writeEnabled: false };
 
-  it("READ mode: clones + dispatches to the runner (isolated), gated by sandboxReadEnabled", async () => {
+  it("READ mode: clones + dispatches to the runner (isolated) — no gate at all", async () => {
     const out = await runCodeAgentWrite(READ_PARAMS, READ_ENV);
     expect(out.exitCode).toBe(0);
     // Same isolated path as write: git clone + runner POST /run.
@@ -151,17 +157,43 @@ describe("runCodeAgentWrite", () => {
     expect(JSON.stringify(init.headers)).not.toContain(GIT_TOKEN);
   });
 
-  it("READ mode: independent gate — disabled unless `sandboxReadEnabled` is set", async () => {
-    await expect(
-      runCodeAgentWrite(READ_PARAMS, {
-        ...READ_ENV,
-        sandboxReadEnabled: false,
-      }),
-    ).rejects.toMatchObject({
-      type: "CODE_AGENT_SANDBOX_READ_DISABLED",
-      nonRetryable: true,
-    });
+  // #680 removed the read gate entirely — read has no un-sandboxed alternative to opt out of,
+  // so a flag that could turn isolation OFF would be the bug, not the feature.
+  it("READ mode: with NO repo, skips git entirely and asks the runner for an ephemeral workspace", async () => {
+    const { repo: _repo, connectionId: _conn, ...noRepo } = READ_PARAMS;
+    const out = await runCodeAgentWrite(noRepo, READ_ENV);
+    expect(out.exitCode).toBe(0);
+    // No clone, and no GitHub App token resolved — there is no repo and no VCS involved.
     expect(exec).not.toHaveBeenCalled();
+    const [, init] = fetchMock.mock.calls[0];
+    const body = JSON.parse(init.body);
+    expect(body.workspace).toBe("ephemeral");
+    expect(body.runId).toBeUndefined(); // the RUNNER owns the id in this mode
+    expect(body.authKey).toBe(ANTHROPIC);
+    // Nothing to clean up on this side (the runner deletes its own tree).
+    expect(rm).not.toHaveBeenCalled();
+  });
+
+  it("the runner is REQUIRED: an unconfigured worker fails with the operator's next step", async () => {
+    const err = await runCodeAgentWrite(READ_PARAMS, {
+      ...READ_ENV,
+      runnerUrl: "",
+      runnerToken: "",
+    }).catch((e) => e);
+    expect(err.type).toBe("CODE_AGENT_SANDBOX_UNCONFIGURED");
+    expect(err.nonRetryable).toBe(true);
+    // The message must name what to set — this is the loud failure that replaced the silent
+    // un-isolated fallback, so it has to be actionable.
+    expect(err.message).toContain("COMPOSE_PROFILES=sandbox");
+    expect(err.message).toContain("SANDBOX_RUNNER_TOKEN");
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it("forwards the TOOL (never an image name) so the runner picks the pinned image", async () => {
+    await runCodeAgentWrite({ ...READ_PARAMS, tool: "cursor" }, READ_ENV);
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(body.tool).toBe("cursor");
+    expect(JSON.stringify(body)).not.toContain("sandbox:latest");
   });
 
   it("READ mode: the write gate does NOT block it (read runs with writeEnabled=false)", async () => {

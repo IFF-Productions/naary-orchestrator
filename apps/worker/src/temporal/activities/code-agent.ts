@@ -1,6 +1,5 @@
 // codeAgent node — headless coding CLI (claude -p) as a BYOK activity.
 import { createLogger } from "@naary/logging";
-import { execFile } from "node:child_process";
 import { ApplicationFailure } from "@temporalio/activity";
 import { getDefaultEnvironmentId } from "@naary/db";
 import { MissingCredentialError } from "@naary/secrets";
@@ -20,7 +19,6 @@ import {
 } from "../code-agent-drivers";
 import { codeAgentWriteEnv, runCodeAgentWrite } from "../code-agent-write";
 import { type AgentMeta, estimateTokens, getCredentials } from "./shared";
-import { subprocessBaseEnv } from "../../config";
 
 // Activities run in the worker PROCESS (a side-effect zone), so structured
 // logging is fine here — unlike workflows.ts, which must stay deterministic.
@@ -88,69 +86,28 @@ export interface CodeAgentResult {
 }
 
 /**
- * Test seam: the credential source, usage sink, and the CLI subprocess runner — swappable
- * so the activity's orchestration (in-activity key fetch, billing fallback, error mapping)
- * is unit-testable without a live `claude` binary or DB.
+ * Test seam: the credential source, usage sink, and the sandbox dispatch — swappable so the
+ * activity's orchestration (in-activity key fetch, billing fallback, error mapping) is
+ * unit-testable without a live runner or DB.
+ *
+ * NB there is deliberately NO `exec` seam any more (#680): the CLI is never spawned in the worker
+ * process, so every run goes through `runWrite` → the sandbox-runner.
  */
 export const __codeAgentDeps = {
   getCredentials,
   getDefaultEnvId: getDefaultEnvironmentId,
   recordUsage,
-  /** Run the CLI; resolve {stdout, exitCode} even on a non-zero exit (the CLI may still
-   *  emit its JSON envelope), reject only on spawn failure (binary missing) / timeout. */
-  exec: (
-    binary: string,
-    args: string[],
-    opts: { env: NodeJS.ProcessEnv; timeoutMs?: number },
-  ): Promise<{ stdout: string; exitCode: number }> =>
-    new Promise((resolve, reject) => {
-      const child = execFile(
-        binary,
-        args,
-        {
-          env: opts.env,
-          timeout: opts.timeoutMs,
-          // `--output-format stream-json --verbose` streams the FULL NDJSON — every assistant
-          // message AND every tool_result (which carries read file contents) — so a read run over
-          // a real codebase emits far more stdout than the old single-envelope `json` mode did.
-          // Buffer generously: on overflow execFile DISCARDS stdout and fails the run with no
-          // trace AND no result (a regression), so we'd rather hold the bytes. We keep only a
-          // bounded, truncated slice of this (see the driver's trace caps) — the buffer is transient.
-          maxBuffer: 256 * 1024 * 1024,
-        },
-        (err, stdout) => {
-          if (err) {
-            const code = (err as NodeJS.ErrnoException).code;
-            // Spawn failure (ENOENT: binary not installed) or timeout (killed) → hard fail.
-            if (
-              typeof code === "string" ||
-              (err as { killed?: boolean }).killed
-            )
-              return reject(err);
-            // Otherwise the process ran and exited non-zero — keep its stdout.
-            return resolve({
-              stdout: String(stdout),
-              exitCode: typeof code === "number" ? code : 1,
-            });
-          }
-          resolve({ stdout: String(stdout), exitCode: 0 });
-        },
-      );
-      // Close stdin (EOF) so `claude` doesn't block ~3s waiting for it — the prompt is passed via
-      // args, not stdin (same fix as the graph-generator's CLI exec).
-      child.stdin?.end();
-    }),
-  /** Write-mode dispatch: clone (outside the sandbox) → sandbox-runner → diff. Seam so the
+  /** Sandbox dispatch: (clone outside the sandbox →) sandbox-runner → stdout + diff. Seam so the
    *  activity's orchestration is tested without a real runner/git. */
   runWrite: runCodeAgentWrite,
 };
 
 /**
- * codeAgent node (design docs/design/CLAUDE-CODE-NODE.md). Runs an agentic coding CLI via a
- * driver (Slice 1: `claude -p` in plan mode, read-only). Mirrors runAgent's envelope: BYOK
- * key fetched IN-ACTIVITY (per-`execFile` env, never a workflow arg/return, never logged),
- * fail-safe usage (never bills zero), and auth/quota → non-retryable so Temporal doesn't
- * burn retries on a credential the user must fix. At-most-once (`maximumAttempts: 1`).
+ * codeAgent node (design docs/design/CLAUDE-CODE-NODE.md). Runs the Claude Code CLI inside the
+ * isolated sandbox — always (#680). Mirrors runAgent's envelope: BYOK key fetched IN-ACTIVITY
+ * (handed to the runner for one container, never a workflow arg/return, never logged), fail-safe
+ * usage (never bills zero), and auth/quota → non-retryable so Temporal doesn't burn retries on a
+ * credential the user must fix. At-most-once (`maximumAttempts: 1`).
  */
 export async function callCodeAgent(
   cfg: CodeAgentActivityConfig,
@@ -184,10 +141,11 @@ export async function callCodeAgent(
       .getDecryptedKey(meta.tenantId, envId, driver.credentialProvider);
 
     const write = cfg.mode === "write";
-    // Read can ALSO run in the isolated sandbox (#594/#680) when enabled — same dispatch as write,
-    // just read-only argv + no PR. OFF by default → read stays in-worker (legacy). Read env once.
+    // #680: there is no in-worker branch any more. Read and write BOTH go to the sandbox-runner —
+    // read differs only in argv (plan mode, Read/Grep/Glob) and in opening no PR. This is what
+    // actually closes #594: the CLI can no longer see the worker's filesystem (/proc/<pid>/environ
+    // → ENCRYPTION_KEY), because it no longer runs on the worker at all.
     const sandboxEnv = codeAgentWriteEnv();
-    const sandboxRead = !write && sandboxEnv.sandboxReadEnabled;
     const args = driver.buildArgs({
       prompt: cfg.prompt,
       systemPrompt: cfg.systemPrompt,
@@ -198,76 +156,67 @@ export async function callCodeAgent(
       ...(cfg.outputSchema ? { outputSchema: cfg.outputSchema } : {}),
     });
 
-    let stdout: string;
-    let exitCode: number;
-    let diff: string | undefined;
-    let pr: { number: number; url: string; branch: string } | undefined;
-    if (write || sandboxRead) {
-      // Dispatch to the isolated sandbox-runner. The activity (here) clones the repo with the git
-      // token OUTSIDE the sandbox; the runner only ever gets the LLM credential (via the driver's
-      // chosen env var) — never the git token. Read differs from write ONLY in argv (Read/Grep/Glob
-      // + plan mode, built above with write:false) and opens no PR — so it runs jailed, off the
-      // worker's filesystem (closes #594).
-      if (!cfg.repo || !cfg.connectionId) {
-        throw ApplicationFailure.nonRetryable(
-          `codeAgent ${write ? "write" : "sandboxed read"} mode requires \`repo\` and a GitHub App \`connectionId\`.`,
-          write ? "CODE_AGENT_WRITE_CONFIG" : "CODE_AGENT_READ_CONFIG",
-        );
-      }
-      // authEnv gives { [varName]: value } — the contract is EXACTLY one entry (the CLI reads a
-      // single auth var). Assert it rather than blindly destructure `[0]` (a future driver
-      // returning 0 or >1 entries would otherwise crash or forward an ambiguous credential).
-      const authEntries = Object.entries(driver.authEnv(apiKey));
-      if (authEntries.length !== 1) {
-        throw ApplicationFailure.nonRetryable(
-          `codeAgent: driver "${driver.tool}" must resolve exactly one auth env var.`,
-          "CODE_AGENT_BAD_AUTH_ENV",
-        );
-      }
-      const [keyEnvVar, authKey] = authEntries[0];
-      const w = await __codeAgentDeps.runWrite(
-        {
-          tenantId: meta.tenantId,
-          executionId: meta.executionId,
-          nodeId: meta.nodeId,
-          mode: write ? "write" : "read",
-          repo: cfg.repo,
-          branch: cfg.branch,
-          connectionId: cfg.connectionId,
-          agentArgs: args,
-          authKey,
-          keyEnvVar,
-          timeoutMs: cfg.timeoutMs,
-          // Write + PR (#444): commit the edits to a branch, push, open a PR — all OUTSIDE the
-          // sandbox. Read never mutates the tree, so no PR fields.
-          openPr: write ? cfg.openPr : false,
-          prTitle: write ? cfg.prTitle : undefined,
-          prBody: write ? cfg.prBody : undefined,
-          commitMessage: write ? cfg.commitMessage : undefined,
-          headBranch: write ? cfg.headBranch : undefined,
-        },
-        sandboxEnv,
+    // Write needs a repo to edit; read runs against the clone when `repo` is set, and otherwise
+    // against an EMPTY ephemeral tree the runner creates. A repo (either mode) needs the App
+    // connection that authorizes the clone.
+    if (write && !cfg.repo) {
+      throw ApplicationFailure.nonRetryable(
+        "codeAgent write mode requires `repo` and a GitHub App `connectionId`.",
+        "CODE_AGENT_WRITE_CONFIG",
       );
-      stdout = w.stdout;
-      exitCode = w.exitCode;
-      diff = write ? w.diff : undefined; // a read run makes no edits → no diff
-      pr = write ? w.pr : undefined;
-    } else {
-      // LEGACY in-worker READ (CODE_AGENT_SANDBOX_READ off): runs the CLI IN the worker process.
-      // #594: this can read the worker's filesystem (/proc/<pid>/environ → ENCRYPTION_KEY) — enable
-      // CODE_AGENT_SANDBOX_READ + deploy the runner to isolate it (the branch above). MINIMAL env —
-      // PATH/HOME + the driver's chosen auth var (exactly one). Never the git token.
-      const r = await __codeAgentDeps.exec(driver.binary, args, {
-        env: {
-          ...subprocessBaseEnv(),
-          ...driver.authEnv(apiKey),
-        },
-        timeoutMs: cfg.timeoutMs,
-      });
-      stdout = r.stdout;
-      exitCode = r.exitCode;
     }
-    const envlp = driver.parse(stdout, exitCode);
+    if (cfg.repo && !cfg.connectionId) {
+      throw ApplicationFailure.nonRetryable(
+        "codeAgent needs a GitHub App `connectionId` to clone `repo`.",
+        write ? "CODE_AGENT_WRITE_CONFIG" : "CODE_AGENT_READ_CONFIG",
+      );
+    }
+    // authEnv gives { [varName]: value } — the contract is EXACTLY one entry (the CLI reads a
+    // single auth var). Assert it rather than blindly destructure `[0]` (a future driver
+    // returning 0 or >1 entries would otherwise crash or forward an ambiguous credential).
+    const authEntries = Object.entries(driver.authEnv(apiKey));
+    if (authEntries.length !== 1) {
+      throw ApplicationFailure.nonRetryable(
+        `codeAgent: driver "${driver.tool}" must resolve exactly one auth env var.`,
+        "CODE_AGENT_BAD_AUTH_ENV",
+      );
+    }
+    const [keyEnvVar, authKey] = authEntries[0];
+    const w = await __codeAgentDeps.runWrite(
+      {
+        tenantId: meta.tenantId,
+        executionId: meta.executionId,
+        nodeId: meta.nodeId,
+        mode: write ? "write" : "read",
+        // The runner maps this tool to ITS OWN pinned image (one image per CLI, each with that
+        // CLI's ENTRYPOINT). Passing the tool rather than an image name is deliberate: the runner
+        // holds the Docker socket, so a caller-chosen image would be a host-root injection surface.
+        tool: driver.tool,
+        repo: cfg.repo,
+        branch: cfg.branch,
+        connectionId: cfg.connectionId,
+        agentArgs: args,
+        authKey,
+        keyEnvVar,
+        timeoutMs: cfg.timeoutMs,
+        // Write + PR (#444): commit the edits to a branch, push, open a PR — all OUTSIDE the
+        // sandbox. Read never mutates the tree, so no PR fields.
+        openPr: write ? cfg.openPr : false,
+        prTitle: write ? cfg.prTitle : undefined,
+        prBody: write ? cfg.prBody : undefined,
+        commitMessage: write ? cfg.commitMessage : undefined,
+        headBranch: write ? cfg.headBranch : undefined,
+      },
+      sandboxEnv,
+    );
+    const stdout = w.stdout;
+    const exitCode = w.exitCode;
+    const diff = write ? w.diff : undefined; // a read run makes no edits → no diff
+    const pr = write ? w.pr : undefined;
+    // stderr matters for drivers that don't put their envelope on stdout — the Gemini CLI writes
+    // its `-o json` envelope to stderr on a failed run (stdout is empty), so without this a failed
+    // gemini run would be an undiagnosable `no_envelope`.
+    const envlp = driver.parse(stdout, exitCode, w.stderr);
 
     // BILLING (Tier-1 rule 6): prefer the CLI's own token counts; else a char/4 estimate —
     // so recordUsage always writes non-zero tokens (never a silently-free call).
@@ -284,9 +233,10 @@ export async function callCodeAgent(
             input,
             envlp.result,
           );
-    // Price against a REAL Claude model (the CLI runs Claude) so the ledger can bill from
-    // tokens — a placeholder like "cli" has no pricing row and would throw.
-    const model = cfg.model || "claude-opus-4-8";
+    // Price against a REAL model for THIS driver's provider so the ledger can bill from tokens —
+    // a placeholder like "cli" has no pricing row and would throw (after the CLI already ran and
+    // cost money). Per-driver, so a gemini run isn't priced against a Claude table.
+    const model = cfg.model || driver.defaultPricingModel;
     await __codeAgentDeps.recordUsage({
       tenantId: meta.tenantId,
       environmentId: meta.environmentId, // per-env cost tag (Slice 6)
