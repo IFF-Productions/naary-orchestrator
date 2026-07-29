@@ -92,6 +92,15 @@ services:
       # The default is empty, so the posture is unchanged until someone sets it deliberately,
       # AFTER deploy/sandbox/egress-test.sh passes on this host.
       CODE_AGENT_WRITE_ENABLED: "${CODE_AGENT_WRITE_ENABLED:-}"
+      # READ mode isolation (#594/#680): "true" routes codeAgent READ runs through the same
+      # sandbox-runner as write, instead of exec'ing the coding CLI IN the worker process (where
+      # it can read the worker's filesystem — /proc/<pid>/environ → ENCRYPTION_KEY). DECLARED for
+      # the same reason as the write gate above: without an entry here, setting it in
+      # /opt/naary/.env reaches nothing and read silently stays un-sandboxed. Empty default ⇒ the
+      # posture is unchanged until an operator opts in, after the `sandbox` profile is running.
+      # NB read mode then REQUIRES `repo` + `connectionId` on the node (the sandbox runs on a
+      # cloned tree), and only the `claude` tool is supported (the runner's pinned image).
+      CODE_AGENT_SANDBOX_READ: "${CODE_AGENT_SANDBOX_READ:-}"
     volumes:
       # The shared working-tree dir: the worker clones into it, the runner mounts it into
       # the sandbox. It MUST be the same path inside both containers as on the host — the
@@ -123,6 +132,9 @@ services:
       SANDBOX_RUNNER_TOKEN: "${SANDBOX_RUNNER_TOKEN:-}"
       CODE_AGENT_RUNS_DIR: "${SANDBOX_RUNS_DIR:-/var/lib/naary/sandbox-runs}"
       CODE_AGENT_WRITE_ENABLED: "${CODE_AGENT_WRITE_ENABLED:-}"
+      # Read-isolation gate — declared on BOTH pools for the reason above; a flag set on only one
+      # is the silent no-op this file already warns about for the write gate.
+      CODE_AGENT_SANDBOX_READ: "${CODE_AGENT_SANDBOX_READ:-}"
     volumes:
       - "${SANDBOX_RUNS_DIR:-/var/lib/naary/sandbox-runs}:${SANDBOX_RUNS_DIR:-/var/lib/naary/sandbox-runs}"
     ports: !override []

@@ -30,34 +30,69 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends openssl ca-certificates curl \
   && rm -rf /var/lib/apt/lists/*
 
-# The `claude` CLI for the codeAgent node's read-only (Slice 1) path, which runs `claude -p`
-# IN the worker (capability-clamped: plan mode, Read/Grep/Glob — no Bash/write). Write mode
-# runs in the isolated sandbox image instead (deploy/sandbox). Pinned for reproducibility.
+# ── coding CLIs (`claude`, `copilot`, `cursor-agent`) ────────────────────────────────────
+# #680 Slice B asked to DROP these from the shared image once nothing execs them in-process.
+# As of this commit BOTH services still do, so they stay — verified, not assumed:
+#   * api    — apps/api/src/graphs/graph-generator.service.ts execs `claude` for the
+#              "claude-code" AI-generate source (the fallback that makes a tenant with only a
+#              Claude Code credential able to generate a workflow). Removing the binary takes
+#              that path out: every such request 503s with "Claude Code isn't available on this
+#              server" (the ENOENT branch) — loud, but only at request time, not build time.
+#   * worker — apps/worker/src/temporal/activities/code-agent.ts still runs the CLI IN-PROCESS
+#              for codeAgent READ mode unless CODE_AGENT_SANDBOX_READ=true. The sandboxed read
+#              path (#594) exists but is OFF by default, so the in-worker exec is the norm.
+# Removing them is blocked on: (1) the api's claude-code generate path moving off the local
+# subprocess (or the api/worker image split — PRODUCTION-READINESS.md §3.A), and (2) sandboxed
+# read becoming the default. Re-check both before deleting anything below.
+#
+# The `claude` CLI: the api's claude-code generate path AND the codeAgent node's in-worker read
+# path (capability-clamped: plan mode, Read/Grep/Glob — no Bash/write). Write mode — and read
+# mode with CODE_AGENT_SANDBOX_READ=true — run in the isolated sandbox image instead
+# (deploy/sandbox), which installs its own copy. Pinned for reproducibility.
 ARG CLAUDE_CODE_VERSION=2.1.210
 RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
   && npm cache clean --force
 
-# GitHub Copilot CLI (`copilot`) — the codeAgent copilot driver's read-mode binary. npm-installed
-# (Node 22+, which this base is). PINNED for a reproducible build (like CLAUDE_CODE_VERSION); bump
-# intentionally, or override via --build-arg.
+# GitHub Copilot CLI (`copilot`) — the codeAgent copilot driver's IN-WORKER read-mode binary.
+# npm-installed (Node 22+, which this base is). PINNED for a reproducible build (like
+# CLAUDE_CODE_VERSION); bump intentionally, or override via --build-arg.
+#
+# Reachability (why it can't just be dropped with #680 Slice B): the canvas disables the
+# Cursor/Copilot options ("coming soon"), but `tool: "cursor" | "copilot"` is still accepted by
+# the DSL save-gate (packages/dsl/src/registry.ts) and the Integrations screen offers both
+# credential slots — so an API-authored / imported / AI-generated graph can select them and the
+# worker will exec this binary. The sandbox does NOT cover them either: the runner only ever
+# launches the pinned `naary-claude-sandbox` image (ALLOWED_SANDBOX_IMAGES), whose ENTRYPOINT is
+# `claude`. Narrowing that DSL enum to `claude` is the cheapest way to make these two removable.
 ARG COPILOT_CLI_VERSION=1.0.73
 RUN npm install -g "@github/copilot@${COPILOT_CLI_VERSION}" \
   && npm cache clean --force
 
-# Cursor Agent CLI (`cursor-agent`) — the codeAgent cursor driver's read-mode binary. The official
-# installer drops the binary in ~/.local/bin (added to PATH below). `-fsSL` follows redirects. By
-# default BEST-EFFORT: if the installer ever changes/misbehaves the build still succeeds and
-# cursor-agent is simply absent — the driver then errors cleanly at exec, so this never breaks the
-# shared api/worker image build. Set --build-arg REQUIRE_CURSOR_CLI=true to make it FATAL (e.g. a
-# CI job that must guarantee the binary is present). Verify the parse matches before production use.
+# Cursor Agent CLI (`cursor-agent`) — the codeAgent cursor driver's IN-WORKER read-mode binary
+# (same reachability note as the copilot block above). The official installer drops the binary in
+# ~/.local/bin (added to PATH below). `-fsSL` follows redirects. By default BEST-EFFORT: the
+# installer is an UNPINNED remote script on a third-party host, so if it ever changes/404s/is
+# unreachable the build still succeeds and cursor-agent is simply absent — the driver then errors
+# cleanly at exec, and a transient cursor.com outage can't break the shared api/worker image build
+# (which everything else depends on). Set --build-arg REQUIRE_CURSOR_CLI=true to make it FATAL
+# (e.g. a CI job that must guarantee the binary is present).
+#
+# Download-then-run, NOT `curl … | bash`: a pipeline's exit status is the LAST command's, so with
+# `if curl … | bash` a failed download fed `bash` an empty stdin, bash exited 0, and the build
+# reported "cursor-agent installed" with no binary present — REQUIRE_CURSOR_CLI=true could never
+# fire. Verified: with broken TLS, curl exits 77 and the old form still printed success. The final
+# `command -v` also catches an installer that exits 0 without placing the binary.
 ARG REQUIRE_CURSOR_CLI=false
-RUN if curl -fsSL https://cursor.com/install | bash; then \
+RUN if curl -fsSL https://cursor.com/install -o /tmp/cursor-install.sh \
+      && bash /tmp/cursor-install.sh \
+      && PATH="/root/.local/bin:$PATH" command -v cursor-agent >/dev/null; then \
       echo "cursor-agent installed"; \
     elif [ "$REQUIRE_CURSOR_CLI" = "true" ]; then \
       echo "ERROR: cursor-agent install failed and REQUIRE_CURSOR_CLI=true"; exit 1; \
     else \
       echo "WARN: cursor-agent install skipped — cursor codeAgent driver unavailable until fixed"; \
-    fi
+    fi \
+    && rm -f /tmp/cursor-install.sh
 ENV PATH="/root/.local/bin:${PATH}"
 
 # pnpm via corepack, pinned to the version in package.json's packageManager.
