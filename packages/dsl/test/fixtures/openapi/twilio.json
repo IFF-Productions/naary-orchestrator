@@ -1,0 +1,198 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Twilio - Api",
+    "version": "1.0.0"
+  },
+  "x-naary": {
+    "provider": "twilio",
+    "pathPrefix": "/2010-04-01",
+    "source": "https://raw.githubusercontent.com/twilio/twilio-oai/main/spec/json/twilio_api_v2010.json",
+    "fetchedAt": "2026-07-29",
+    "note": "PRUNED snapshot — see packages/dsl/scripts/extract-openapi-fixtures.mjs. Do not hand-edit."
+  },
+  "paths": {
+    "/2010-04-01/Accounts/{AccountSid}/Messages.json": {
+      "post": {
+        "operationId": "CreateMessage",
+        "parameters": [
+          {
+            "name": "AccountSid",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "required": [
+                  "To"
+                ],
+                "properties": {
+                  "To": {},
+                  "StatusCallback": {},
+                  "ApplicationSid": {},
+                  "MaxPrice": {},
+                  "ProvideFeedback": {},
+                  "Attempt": {},
+                  "ValidityPeriod": {},
+                  "ForceDelivery": {},
+                  "ContentRetention": {},
+                  "AddressRetention": {},
+                  "SmartEncoded": {},
+                  "PersistentAction": {},
+                  "TrafficType": {},
+                  "ShortenUrls": {},
+                  "ScheduleType": {},
+                  "SendAt": {},
+                  "SendAsMms": {},
+                  "ContentVariables": {},
+                  "RiskCheck": {},
+                  "From": {},
+                  "FallbackFrom": {},
+                  "MessagingServiceSid": {},
+                  "Body": {},
+                  "MediaUrl": {},
+                  "ContentSid": {}
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "ListMessage",
+        "parameters": [
+          {
+            "name": "AccountSid",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "To",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "From",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "DateSent",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "DateSent<",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "DateSent>",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "PageSize",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "Page",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "PageToken",
+            "in": "query",
+            "required": false
+          }
+        ]
+      }
+    },
+    "/2010-04-01/Accounts/{AccountSid}/Messages/{Sid}.json": {
+      "get": {
+        "operationId": "FetchMessage",
+        "parameters": [
+          {
+            "name": "AccountSid",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "Sid",
+            "in": "path",
+            "required": true
+          }
+        ]
+      }
+    },
+    "/2010-04-01/Accounts/{AccountSid}/Calls.json": {
+      "post": {
+        "operationId": "CreateCall",
+        "parameters": [
+          {
+            "name": "AccountSid",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "required": [
+                  "To",
+                  "From"
+                ],
+                "properties": {
+                  "To": {},
+                  "From": {},
+                  "Method": {},
+                  "FallbackUrl": {},
+                  "FallbackMethod": {},
+                  "StatusCallback": {},
+                  "StatusCallbackEvent": {},
+                  "StatusCallbackMethod": {},
+                  "SendDigits": {},
+                  "Timeout": {},
+                  "Record": {},
+                  "RecordingChannels": {},
+                  "RecordingStatusCallback": {},
+                  "RecordingStatusCallbackMethod": {},
+                  "RecordingConfigurationId": {},
+                  "SipAuthUsername": {},
+                  "SipAuthPassword": {},
+                  "MachineDetection": {},
+                  "MachineDetectionTimeout": {},
+                  "RecordingStatusCallbackEvent": {},
+                  "Trim": {},
+                  "CallerId": {},
+                  "MachineDetectionSpeechThreshold": {},
+                  "MachineDetectionSpeechEndThreshold": {},
+                  "MachineDetectionSilenceTimeout": {},
+                  "AsyncAmd": {},
+                  "AsyncAmdStatusCallback": {},
+                  "AsyncAmdStatusCallbackMethod": {},
+                  "Byoc": {},
+                  "CallReason": {},
+                  "CallToken": {},
+                  "RecordingTrack": {},
+                  "TimeLimit": {},
+                  "ClientNotificationUrl": {},
+                  "Url": {},
+                  "Twiml": {},
+                  "ApplicationSid": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

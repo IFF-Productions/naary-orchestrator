@@ -1,0 +1,300 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "PagerDuty API",
+    "version": "2.0.0"
+  },
+  "x-naary": {
+    "provider": "pagerduty",
+    "pathPrefix": "",
+    "source": "https://raw.githubusercontent.com/PagerDuty/api-schema/main/reference/REST/openapiv3.json",
+    "fetchedAt": "2026-07-29",
+    "note": "PRUNED snapshot — see packages/dsl/scripts/extract-openapi-fixtures.mjs. Do not hand-edit."
+  },
+  "paths": {
+    "/incidents": {
+      "post": {
+        "operationId": "createIncident",
+        "parameters": [
+          {
+            "name": "Accept",
+            "in": "header",
+            "required": true
+          },
+          {
+            "name": "Content-Type",
+            "in": "header",
+            "required": true
+          },
+          {
+            "name": "From",
+            "in": "header",
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "incident"
+                ],
+                "properties": {
+                  "incident": {
+                    "required": [
+                      "type",
+                      "title",
+                      "service"
+                    ],
+                    "properties": {
+                      "type": {},
+                      "title": {},
+                      "service": {
+                        "properties": {
+                          "type": {}
+                        }
+                      },
+                      "priority": {},
+                      "urgency": {},
+                      "body": {},
+                      "incident_key": {},
+                      "assignments": {},
+                      "incident_type": {},
+                      "escalation_policy": {},
+                      "conference_bridge": {}
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "listIncidents",
+        "parameters": [
+          {
+            "name": "Accept",
+            "in": "header",
+            "required": true
+          },
+          {
+            "name": "Content-Type",
+            "in": "header",
+            "required": true
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "total",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "date_range",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "incident_key",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "service_ids[]",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "team_ids[]",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "user_ids[]",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "urgencies[]",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "time_zone",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "statuses[]",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "sort_by",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "include[]",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "until",
+            "in": "query",
+            "required": false
+          }
+        ]
+      }
+    },
+    "/incidents/{id}": {
+      "get": {
+        "operationId": "getIncident",
+        "parameters": [
+          {
+            "name": "Accept",
+            "in": "header",
+            "required": true
+          },
+          {
+            "name": "Content-Type",
+            "in": "header",
+            "required": true
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "include[]",
+            "in": "query",
+            "required": false
+          }
+        ]
+      },
+      "put": {
+        "operationId": "updateIncident",
+        "parameters": [
+          {
+            "name": "Accept",
+            "in": "header",
+            "required": true
+          },
+          {
+            "name": "Content-Type",
+            "in": "header",
+            "required": true
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "From",
+            "in": "header",
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "incident"
+                ],
+                "properties": {
+                  "incident": {
+                    "required": [
+                      "type"
+                    ],
+                    "properties": {
+                      "type": {},
+                      "status": {},
+                      "priority": {},
+                      "resolution": {},
+                      "title": {},
+                      "escalation_level": {},
+                      "assignments": {},
+                      "incident_type": {},
+                      "escalation_policy": {},
+                      "urgency": {},
+                      "conference_bridge": {},
+                      "service": {}
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/incidents/{id}/notes": {
+      "post": {
+        "operationId": "createIncidentNote",
+        "parameters": [
+          {
+            "name": "Accept",
+            "in": "header",
+            "required": true
+          },
+          {
+            "name": "Content-Type",
+            "in": "header",
+            "required": true
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "From",
+            "in": "header",
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "note"
+                ],
+                "properties": {
+                  "note": {
+                    "required": [
+                      "content"
+                    ],
+                    "properties": {
+                      "content": {}
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
