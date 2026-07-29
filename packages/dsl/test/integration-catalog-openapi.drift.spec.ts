@@ -329,6 +329,8 @@ interface BodyVerdict {
 interface PrunedSchema {
   required?: string[];
   properties?: Record<string, PrunedSchema>;
+  /** Names the spec marks `readOnly` — declared, but declared as response-only. */
+  "x-readonly"?: string[];
   items?: PrunedSchema;
   type?: string;
   "x-freeform"?: boolean;
@@ -342,6 +344,11 @@ interface PrunedSchema {
  *     spec permits any key, so nothing under it can be called wrong. UNKNOWABLE.
  *   - the node was never expanded (the fixture pruned it, or the spec is silent). UNKNOWABLE.
  *   - the node declares properties and ours is not one of them. WRONG, naming what it does declare.
+ *
+ * And one more on the way out: a name the spec marks `readOnly` is declared, so writing to it is
+ * not wrong — but the spec is also saying it is response-only, so landing there is not
+ * confirmation. UNKNOWABLE. PagerDuty forces the distinction: it marks a service reference's `id`
+ * readOnly while its own docs require `incident.service.id` on every create.
  */
 function resolveBodyPath(schema: unknown, dotted: string): BodyVerdict {
   let node = schema as PrunedSchema | undefined;
@@ -388,6 +395,11 @@ function resolveBodyPath(schema: unknown, dotted: string): BodyVerdict {
         why: `${where} declares {${Object.keys(properties).sort().join(", ")}} upstream — not "${segment}"`,
       };
     }
+    if (node["x-readonly"]?.includes(segment))
+      return {
+        state: "unknowable",
+        why: `upstream declares "${segment}" on ${where} as readOnly — the spec calls it response-only, so it can neither confirm nor deny that we may send it`,
+      };
     node = next;
   }
   return { state: "confirmed" };
@@ -607,6 +619,103 @@ const checks: ActionCheck[] = fixtures.flatMap((fixture) => {
 const advisories = [...new Set(checks.flatMap((c) => c.advisories))].sort();
 
 // ── the tests ───────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * The classifier itself, on hand-built schemas.
+ *
+ * Necessary because the pinned providers happen to produce `confirmed` for almost everything, and
+ * a tri-state classifier whose other two states have never been observed is a classifier being
+ * trusted on the strength of its comments. These pin each exit with a schema shaped exactly like
+ * what `extract-openapi-fixtures.mjs` emits — so a coverage line reading "0 unknowable" means
+ * "checked, and none", not "that branch never ran".
+ */
+describe("resolveBodyPath — every exit", () => {
+  it("confirms a declared property", () => {
+    expect(resolveBodyPath({ properties: { title: {} } }, "title").state).toBe(
+      "confirmed",
+    );
+  });
+
+  it("confirms a nested property the spec declares", () => {
+    const schema = {
+      properties: { incident: { properties: { title: {} } } },
+    };
+    expect(resolveBodyPath(schema, "incident.title").state).toBe("confirmed");
+  });
+
+  it("calls an undeclared name WRONG, and says what upstream declares", () => {
+    const verdict = resolveBodyPath(
+      { properties: { incident: { properties: { title: {} } } } },
+      "incident.severity",
+    );
+    expect(verdict.state).toBe("wrong");
+    expect(verdict.why).toContain("declares {title}");
+  });
+
+  it("calls a path MISSING its envelope wrong", () => {
+    // The #813 headline shape: `title` at the root when upstream wants `incident.title`.
+    const verdict = resolveBodyPath(
+      { properties: { incident: { properties: { title: {} } } } },
+      "title",
+    );
+    expect(verdict.state).toBe("wrong");
+  });
+
+  it("calls a DOUBLED envelope wrong", () => {
+    const verdict = resolveBodyPath(
+      { properties: { incident: { properties: { title: {} } } } },
+      "incident.incident.title",
+    );
+    expect(verdict.state).toBe("wrong");
+  });
+
+  it("calls nesting INTO an array wrong", () => {
+    const verdict = resolveBodyPath(
+      { properties: { contacts: { type: "array" } } },
+      "contacts.email",
+    );
+    expect(verdict.state).toBe("wrong");
+    expect(verdict.why).toContain("ARRAY");
+  });
+
+  it("is unknowable inside a free-form map", () => {
+    // Notion's `properties`, Airtable's `fields`: upstream permits any key.
+    const verdict = resolveBodyPath(
+      { properties: { fields: { "x-freeform": true } } },
+      "fields.Anything",
+    );
+    expect(verdict.state).toBe("unknowable");
+    expect(verdict.why).toContain("free-form");
+  });
+
+  it("is unknowable where the fixture stopped expanding", () => {
+    const verdict = resolveBodyPath({ properties: { data: {} } }, "data.name");
+    expect(verdict.state).toBe("unknowable");
+  });
+
+  it("is unknowable when the operation declares no body at all", () => {
+    expect(resolveBodyPath(undefined, "title").state).toBe("unknowable");
+  });
+
+  it("is unknowable on a readOnly property — declared, but response-only", () => {
+    const verdict = resolveBodyPath(
+      { properties: { id: {} }, "x-readonly": ["id"] },
+      "id",
+    );
+    expect(verdict.state).toBe("unknowable");
+    expect(verdict.why).toContain("readOnly");
+  });
+
+  it("accepts a name declared by `required` alone", () => {
+    // PagerDuty's `incident.body`: `required: ["type"]`, `properties: {details}`.
+    const schema = {
+      properties: {
+        body: { required: ["type"], properties: { details: {} } },
+      },
+    };
+    expect(resolveBodyPath(schema, "body.type").state).toBe("confirmed");
+  });
+});
 
 describe("vendored spec fixtures", () => {
   it("exist, and each names a provider still in the catalog", () => {

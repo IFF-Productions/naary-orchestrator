@@ -291,7 +291,10 @@
                   "type": {},
                   "priority": {},
                   "data": {}
-                }
+                },
+                "x-readonly": [
+                  "content"
+                ]
               }
             }
           }

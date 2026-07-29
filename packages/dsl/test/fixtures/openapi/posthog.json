@@ -186,7 +186,17 @@
                   "scope": {},
                   "emoji": {},
                   "hidden_in_user_interface": {}
-                }
+                },
+                "x-readonly": [
+                  "id",
+                  "dashboard_name",
+                  "insight_short_id",
+                  "insight_name",
+                  "insight_derived_name",
+                  "created_by",
+                  "created_at",
+                  "updated_at"
+                ]
               }
             },
             "application/x-www-form-urlencoded": {
@@ -209,7 +219,17 @@
                   "scope": {},
                   "emoji": {},
                   "hidden_in_user_interface": {}
-                }
+                },
+                "x-readonly": [
+                  "id",
+                  "dashboard_name",
+                  "insight_short_id",
+                  "insight_name",
+                  "insight_derived_name",
+                  "created_by",
+                  "created_at",
+                  "updated_at"
+                ]
               }
             },
             "multipart/form-data": {
@@ -232,7 +252,17 @@
                   "scope": {},
                   "emoji": {},
                   "hidden_in_user_interface": {}
-                }
+                },
+                "x-readonly": [
+                  "id",
+                  "dashboard_name",
+                  "insight_short_id",
+                  "insight_name",
+                  "insight_derived_name",
+                  "created_by",
+                  "created_at",
+                  "updated_at"
+                ]
               }
             }
           }

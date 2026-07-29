@@ -260,7 +260,10 @@ body could never be accepted, shipped looking exactly as trustworthy as one that
 
 **Spec-verified (13 providers, 29 of the 76 body-bearing write actions):** `asana` · `box` ·
 `cloudflare` · `discord` · `front` · `github` · `intercom` · `pagerduty` · `posthog` · `sendgrid` ·
-`slack` · `stripe` · `twilio` — 77 body fields confirmed, 0 unknowable, 0 wrong.
+`slack` · `stripe` · `twilio` — 74 body fields confirmed, 3 unknowable, 0 wrong. The three
+unknowable ones are properties their own spec marks `readOnly` while the provider's docs require
+them on a write (PagerDuty's `incident.service.id`/`.type`, Cloudflare's DNS `content`); the spec
+contradicts itself there, so it neither confirms nor denies.
 
 **Not spec-verified (22 providers, 47 actions)** — grouped by why, because "we didn't check" and
 "there is nothing to check against" are different claims:

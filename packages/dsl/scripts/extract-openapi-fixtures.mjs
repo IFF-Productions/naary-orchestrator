@@ -229,6 +229,7 @@ function mergeBranches(schema, deref) {
     raw: s,
     required: required.filter((r) => !readOnly.has(r)),
     properties,
+    readOnly,
     freeform,
   };
 }
@@ -244,7 +245,7 @@ function mergeBranches(schema, deref) {
 function pruneSchema(schema, deref, keep, prefix = "", depth = 0) {
   const merged = mergeBranches(schema, deref);
   if (!merged || depth > 5) return {};
-  const { raw, required, properties, freeform } = merged;
+  const { raw, required, properties, readOnly, freeform } = merged;
   const out = {};
   // An ARRAY's properties live under `items`. Kept so the spec can tell "you nested into a list"
   // from "that name doesn't exist" — different findings with different fixes.
@@ -266,6 +267,12 @@ function pruneSchema(schema, deref, keep, prefix = "", depth = 0) {
           : {};
     }
     out.properties = kept;
+    // The names the spec marks `readOnly`. Kept as a LIST rather than dropped, because the two
+    // things a reader wants to know are different: the name exists (so a bodyPath onto it is not
+    // wrong), and the spec says it is response-only (so landing there is not confirmation
+    // either). The drift spec reports those as UNKNOWABLE.
+    const readOnlyHere = names.filter((n) => readOnly.has(n));
+    if (readOnlyHere.length) out["x-readonly"] = readOnlyHere;
   } else if (freeform || raw.type === "object" || !raw.type) {
     // No declared properties: a free-form map, or a schema too loose to say anything. Marked so
     // the drift spec reports UNKNOWABLE rather than inventing a verdict from an empty object.

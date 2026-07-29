@@ -98,7 +98,26 @@
                       "parent": {},
                       "custom_type": {},
                       "custom_type_status_option": {}
-                    }
+                    },
+                    "x-readonly": [
+                      "gid",
+                      "resource_type",
+                      "created_by",
+                      "completed_at",
+                      "created_at",
+                      "dependencies",
+                      "dependents",
+                      "hearted",
+                      "hearts",
+                      "is_rendered_as_separator",
+                      "likes",
+                      "memberships",
+                      "modified_at",
+                      "num_hearts",
+                      "num_likes",
+                      "num_subtasks",
+                      "actual_time_minutes"
+                    ]
                   }
                 }
               }
@@ -170,7 +189,26 @@
                       "projects": {},
                       "tags": {},
                       "workspace": {}
-                    }
+                    },
+                    "x-readonly": [
+                      "gid",
+                      "resource_type",
+                      "created_by",
+                      "completed_at",
+                      "created_at",
+                      "dependencies",
+                      "dependents",
+                      "hearted",
+                      "hearts",
+                      "is_rendered_as_separator",
+                      "likes",
+                      "memberships",
+                      "modified_at",
+                      "num_hearts",
+                      "num_likes",
+                      "num_subtasks",
+                      "actual_time_minutes"
+                    ]
                   }
                 }
               }
@@ -215,7 +253,13 @@
                       "html_text": {},
                       "is_pinned": {},
                       "sticker_name": {}
-                    }
+                    },
+                    "x-readonly": [
+                      "gid",
+                      "resource_type",
+                      "created_at",
+                      "resource_subtype"
+                    ]
                   }
                 }
               }

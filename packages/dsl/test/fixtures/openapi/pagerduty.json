@@ -57,7 +57,14 @@
                           "type": {},
                           "self": {},
                           "html_url": {}
-                        }
+                        },
+                        "x-readonly": [
+                          "id",
+                          "summary",
+                          "type",
+                          "self",
+                          "html_url"
+                        ]
                       },
                       "priority": {},
                       "urgency": {},
