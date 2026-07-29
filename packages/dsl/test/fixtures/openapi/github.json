@@ -1,0 +1,166 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "GitHub v3 REST API",
+    "version": "1.1.4"
+  },
+  "x-naary": {
+    "provider": "github",
+    "pathPrefix": "",
+    "source": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/api.github.com/api.github.com.json",
+    "fetchedAt": "2026-07-29",
+    "note": "PRUNED snapshot — see packages/dsl/scripts/extract-openapi-fixtures.mjs. Do not hand-edit."
+  },
+  "paths": {
+    "/repos/{owner}/{repo}/issues/{issue_number}": {
+      "get": {
+        "operationId": "issues/get",
+        "parameters": [
+          {
+            "name": "owner",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "repo",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "issue_number",
+            "in": "path",
+            "required": true
+          }
+        ]
+      }
+    },
+    "/repos/{owner}/{repo}/pulls/{pull_number}": {
+      "get": {
+        "operationId": "pulls/get",
+        "parameters": [
+          {
+            "name": "owner",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "repo",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "pull_number",
+            "in": "path",
+            "required": true
+          }
+        ]
+      }
+    },
+    "/repos/{owner}/{repo}/issues": {
+      "post": {
+        "operationId": "issues/create",
+        "parameters": [
+          {
+            "name": "owner",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "repo",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "title"
+                ],
+                "properties": {
+                  "title": {},
+                  "body": {},
+                  "assignee": {},
+                  "milestone": {},
+                  "labels": {},
+                  "assignees": {},
+                  "issue_field_values": {},
+                  "type": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/repos/{owner}/{repo}/issues/{issue_number}/comments": {
+      "post": {
+        "operationId": "issues/create-comment",
+        "parameters": [
+          {
+            "name": "owner",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "repo",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "issue_number",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "body"
+                ],
+                "properties": {
+                  "body": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/repos/{owner}/{repo}/issues/{issue_number}/labels": {
+      "post": {
+        "operationId": "issues/add-labels",
+        "parameters": [
+          {
+            "name": "owner",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "repo",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "issue_number",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          }
+        }
+      }
+    }
+  }
+}

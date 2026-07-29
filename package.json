@@ -23,6 +23,7 @@
     "check:control-bytes": "node scripts/check-control-bytes.mjs",
     "gen:integration-docs": "npx tsc -b packages/dsl && node packages/dsl/scripts/gen-integration-docs.mjs",
     "check:integration-docs": "pnpm gen:integration-docs && git diff --exit-code -- docs/integrations",
+    "refresh:openapi-fixtures": "npx tsc -b packages/dsl && node packages/dsl/scripts/extract-openapi-fixtures.mjs",
     "start": "pnpm --filter @naary/api start",
     "dev": "docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d",
     "dev:build": "docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build",

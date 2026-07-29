@@ -1,0 +1,219 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Stripe API",
+    "version": "2026-06-24.dahlia"
+  },
+  "x-naary": {
+    "provider": "stripe",
+    "pathPrefix": "/v1",
+    "source": "https://raw.githubusercontent.com/stripe/openapi/master/openapi/spec3.json",
+    "fetchedAt": "2026-07-29",
+    "note": "PRUNED snapshot — see packages/dsl/scripts/extract-openapi-fixtures.mjs. Do not hand-edit."
+  },
+  "paths": {
+    "/v1/customers": {
+      "post": {
+        "operationId": "PostCustomers",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "properties": {
+                  "address": {},
+                  "balance": {},
+                  "business_name": {},
+                  "cash_balance": {},
+                  "description": {},
+                  "email": {},
+                  "expand": {},
+                  "individual_name": {},
+                  "invoice_prefix": {},
+                  "invoice_settings": {},
+                  "metadata": {},
+                  "name": {},
+                  "next_invoice_sequence": {},
+                  "payment_method": {},
+                  "phone": {},
+                  "preferred_locales": {},
+                  "shipping": {},
+                  "source": {},
+                  "tax": {},
+                  "tax_exempt": {},
+                  "tax_id_data": {},
+                  "test_clock": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/customers/{customer}": {
+      "get": {
+        "operationId": "GetCustomersCustomer",
+        "parameters": [
+          {
+            "name": "customer",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "expand",
+            "in": "query",
+            "required": false
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {}
+            }
+          }
+        }
+      }
+    },
+    "/v1/payment_intents": {
+      "post": {
+        "operationId": "PostPaymentIntents",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "required": [
+                  "amount",
+                  "currency"
+                ],
+                "properties": {
+                  "amount": {},
+                  "amount_details": {},
+                  "application_fee_amount": {},
+                  "automatic_payment_methods": {},
+                  "capture_method": {},
+                  "confirm": {},
+                  "confirmation_method": {},
+                  "confirmation_token": {},
+                  "currency": {},
+                  "customer": {},
+                  "customer_account": {},
+                  "description": {},
+                  "error_on_requires_action": {},
+                  "excluded_payment_method_types": {},
+                  "expand": {},
+                  "hooks": {},
+                  "mandate": {},
+                  "mandate_data": {},
+                  "metadata": {},
+                  "off_session": {},
+                  "on_behalf_of": {},
+                  "payment_details": {},
+                  "payment_method": {},
+                  "payment_method_configuration": {},
+                  "payment_method_data": {},
+                  "payment_method_options": {},
+                  "payment_method_types": {},
+                  "radar_options": {},
+                  "receipt_email": {},
+                  "return_url": {},
+                  "setup_future_usage": {},
+                  "shipping": {},
+                  "statement_descriptor": {},
+                  "statement_descriptor_suffix": {},
+                  "transfer_data": {},
+                  "transfer_group": {},
+                  "use_stripe_sdk": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/charges": {
+      "get": {
+        "operationId": "GetCharges",
+        "parameters": [
+          {
+            "name": "created",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "customer",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "ending_before",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "expand",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "payment_intent",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "starting_after",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "transfer_group",
+            "in": "query",
+            "required": false
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {}
+            }
+          }
+        }
+      }
+    },
+    "/v1/refunds": {
+      "post": {
+        "operationId": "PostRefunds",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "properties": {
+                  "amount": {},
+                  "charge": {},
+                  "currency": {},
+                  "customer": {},
+                  "expand": {},
+                  "instructions_email": {},
+                  "metadata": {},
+                  "origin": {},
+                  "payment_intent": {},
+                  "reason": {},
+                  "refund_application_fee": {},
+                  "reverse_transfer": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
