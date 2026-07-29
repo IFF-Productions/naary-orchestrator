@@ -1,5 +1,11 @@
+import {
+  DEFAULT_SANDBOX_IMAGES,
+  SANDBOX_TOOLS,
+  type SandboxTool,
+} from "./docker-run";
+
 /** Runner config — all from the environment (server-side; never the request). The request
- *  supplies only the per-run data (runId, agentArgs, the tenant key). */
+ *  supplies only the per-run data (runId, tool, agentArgs, the tenant key). */
 export interface RunnerConfig {
   /** Bearer token the worker must present. Required — the runner holds Docker (host-root). */
   token: string;
@@ -11,8 +17,12 @@ export interface RunnerConfig {
   network: string;
   /** The allowlist proxy the sandbox uses to reach Anthropic (and only Anthropic). */
   proxyUrl: string;
-  /** The PINNED sandbox image (never workflow-chosen). */
-  image: string;
+  /**
+   * The PINNED sandbox image PER TOOL (never request-chosen). A request names a tool from the
+   * closed `SANDBOX_TOOLS` set and the runner looks the image up here — so the only image names
+   * that can ever reach `docker run` are ones an operator put in this config.
+   */
+  images: Record<SandboxTool, string>;
   limits: { cpus: string; memoryMb: number; pids: number };
   /** Hard wall-clock cap for a single sandbox run (ms). */
   defaultTimeoutMs: number;
@@ -31,7 +41,7 @@ export function loadConfig(env: NodeJS.ProcessEnv): RunnerConfig {
     runsDir: env.SANDBOX_RUNS_DIR || "/runs",
     network: env.SANDBOX_NETWORK || "naary-sandbox-internal",
     proxyUrl: env.SANDBOX_PROXY_URL || "http://naary-sandbox-proxy:3128",
-    image: env.SANDBOX_IMAGE || "naary-claude-sandbox:latest",
+    images: loadImages(env),
     limits: {
       cpus: env.SANDBOX_CPUS || "1.0",
       memoryMb: posInt(env.SANDBOX_MEMORY_MB, 2048),
@@ -40,6 +50,25 @@ export function loadConfig(env: NodeJS.ProcessEnv): RunnerConfig {
     defaultTimeoutMs: posInt(env.SANDBOX_TIMEOUT_MS, 15 * 60 * 1000),
     port: posInt(env.PORT, 8099),
   };
+}
+
+/**
+ * Per-tool image overrides: `SANDBOX_IMAGE_<TOOL>` (e.g. `SANDBOX_IMAGE_CURSOR`), each defaulting
+ * to that tool's own conventional tag. `SANDBOX_IMAGE` (the pre-#680 single-image var) still
+ * overrides CLAUDE only, so an existing deploy keeps working unchanged.
+ *
+ * Each tool keeps a DISTINCT default — a missing override must never silently fall back to another
+ * tool's image (that is #933's cursor-argv-to-claude-entrypoint bug). If the image simply isn't
+ * built on the host, `docker run` fails loudly for that tool alone.
+ */
+function loadImages(env: NodeJS.ProcessEnv): Record<SandboxTool, string> {
+  const images = {} as Record<SandboxTool, string>;
+  for (const tool of SANDBOX_TOOLS) {
+    const override = env[`SANDBOX_IMAGE_${tool.toUpperCase()}`]?.trim();
+    const legacy = tool === "claude" ? env.SANDBOX_IMAGE?.trim() : undefined;
+    images[tool] = override || legacy || DEFAULT_SANDBOX_IMAGES[tool];
+  }
+  return images;
 }
 
 /** Parse a positive integer env var, falling back to `fallback` for absent/blank/invalid

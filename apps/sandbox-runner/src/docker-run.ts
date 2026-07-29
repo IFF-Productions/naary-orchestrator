@@ -42,24 +42,77 @@ export interface SandboxRunSpec {
   limits: SandboxLimits;
 }
 
+/**
+ * The coding CLIs the runner can launch — a CLOSED set. A request names a TOOL from this set; the
+ * runner maps tool → image from its OWN config (`RunnerConfig.images`). A request can never name an
+ * image: the runner holds the Docker socket (host root), so an attacker-chosen image name is a
+ * root-privileged injection surface, while an attacker-chosen member of a fixed enum is not.
+ */
+export const SANDBOX_TOOLS = ["claude", "cursor", "copilot", "gemini"] as const;
+export type SandboxTool = (typeof SANDBOX_TOOLS)[number];
+
+export function isSandboxTool(v: unknown): v is SandboxTool {
+  return (
+    typeof v === "string" && (SANDBOX_TOOLS as readonly string[]).includes(v)
+  );
+}
+
+/**
+ * The conventional image tag per tool. Each CLI gets its OWN image with its OWN ENTRYPOINT — a
+ * single shared image was the latent bug in #933: `ALLOWED_SANDBOX_IMAGES` pinned only the claude
+ * image, whose ENTRYPOINT is `claude`, so cursor/copilot argv was handed to the wrong binary.
+ * With one image per tool that class of bug is gone BY CONSTRUCTION.
+ *
+ * Note each default is DISTINCT — there is deliberately no fallback to the claude image, which
+ * would re-create exactly that bug behind more machinery. An unbuilt image fails loudly at
+ * `docker run` instead.
+ */
+export const DEFAULT_SANDBOX_IMAGES: Record<SandboxTool, string> = {
+  claude: "naary-claude-sandbox:latest",
+  cursor: "naary-cursor-sandbox:latest",
+  copilot: "naary-copilot-sandbox:latest",
+  gemini: "naary-gemini-sandbox:latest",
+};
+
 /** Images the runner is willing to launch. The workflow can NEVER choose the image. The
- *  `:latest` entry is for dev; a production deploy should build + tag the sandbox image with a
- *  version/digest and list THAT here (and in SANDBOX_IMAGE) so the launched code is immutable. */
-export const ALLOWED_SANDBOX_IMAGES = ["naary-claude-sandbox:latest"] as const;
+ *  `:latest` entries are for dev; a production deploy should build + tag each sandbox image with a
+ *  version/digest and list THAT here (and in SANDBOX_IMAGE_*) so the launched code is immutable. */
+export const ALLOWED_SANDBOX_IMAGES = Object.values(
+  DEFAULT_SANDBOX_IMAGES,
+) as readonly string[];
 
-/** The env var names the sandbox may read its credential from. An allowlist (not a free string)
- *  so a caller can never inject an arbitrary env var into the container. `claude` reads an API key
- *  from ANTHROPIC_API_KEY and a subscription setup-token from CLAUDE_CODE_OAUTH_TOKEN. */
-export const ALLOWED_KEY_ENV_VARS = [
-  "ANTHROPIC_API_KEY",
-  "CLAUDE_CODE_OAUTH_TOKEN",
-] as const;
+/**
+ * The env var names each tool's sandbox may read its credential from. An allowlist (not a free
+ * string) so a caller can never inject an arbitrary env var into the container — and PER TOOL, so
+ * a request also can't forward, say, a GitHub token into the Claude container.
+ *
+ *  - claude  reads an API key from ANTHROPIC_API_KEY, a subscription setup-token from
+ *            CLAUDE_CODE_OAUTH_TOKEN (two kinds of credential, two vars).
+ *  - cursor  CURSOR_API_KEY. copilot COPILOT_GITHUB_TOKEN. gemini GEMINI_API_KEY.
+ *
+ * Extend this deliberately — one var per driver — never by relaxing the check.
+ */
+export const ALLOWED_KEY_ENV_VARS_BY_TOOL: Record<
+  SandboxTool,
+  readonly string[]
+> = {
+  claude: ["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN"],
+  cursor: ["CURSOR_API_KEY"],
+  copilot: ["COPILOT_GITHUB_TOKEN"],
+  gemini: ["GEMINI_API_KEY"],
+};
 
-/** Back-compat default when a request omits the var name (an API key). */
+/** The union of every tool's allowed key var — the backstop `buildSandboxDockerArgs` enforces
+ *  when it is handed an already-resolved image (the per-TOOL check happens at the request layer). */
+export const ALLOWED_KEY_ENV_VARS = Object.values(
+  ALLOWED_KEY_ENV_VARS_BY_TOOL,
+).flat() as readonly string[];
+
+/** Back-compat default when a request omits the var name (a claude API key). */
 export const SANDBOX_KEY_ENV = "ANTHROPIC_API_KEY";
 
 export function assertPinnedImage(image: string): void {
-  if (!(ALLOWED_SANDBOX_IMAGES as readonly string[]).includes(image)) {
+  if (!ALLOWED_SANDBOX_IMAGES.includes(image)) {
     throw new Error(
       `sandbox-runner: refusing to launch un-pinned image "${image}"`,
     );
@@ -67,9 +120,18 @@ export function assertPinnedImage(image: string): void {
 }
 
 export function assertAllowedKeyEnvVar(name: string): void {
-  if (!(ALLOWED_KEY_ENV_VARS as readonly string[]).includes(name)) {
+  if (!ALLOWED_KEY_ENV_VARS.includes(name)) {
     throw new Error(
       `sandbox-runner: refusing to forward un-allowlisted key env var "${name}"`,
+    );
+  }
+}
+
+/** The per-TOOL tightening: `name` must be one of THIS tool's vars, not merely of some tool's. */
+export function assertKeyEnvVarForTool(name: string, tool: SandboxTool): void {
+  if (!ALLOWED_KEY_ENV_VARS_BY_TOOL[tool].includes(name)) {
+    throw new Error(
+      `sandbox-runner: key env var "${name}" is not valid for the "${tool}" sandbox`,
     );
   }
 }

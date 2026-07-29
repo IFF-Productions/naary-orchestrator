@@ -4,7 +4,6 @@ const aiSdk = () => import("ai");
 const anthropicSdk = () => import("@ai-sdk/anthropic");
 const openaiSdk = () => import("@ai-sdk/openai");
 const googleSdk = () => import("@ai-sdk/google");
-import { execFile } from "node:child_process";
 import {
   BadRequestException,
   HttpException,
@@ -46,7 +45,6 @@ import {
   toGraphDef,
   type GraphDraft,
 } from "./graph-generator.parse";
-import { subprocessBaseEnv } from "../config";
 
 // Re-export the metering types so existing importers (builder/turn-metering) keep working.
 export type { GenMeter, GenTokens } from "./graph-generator.prompt";
@@ -61,51 +59,67 @@ async function buildGenModel(provider: GenProvider, apiKey: string) {
   return (await anthropicSdk()).createAnthropic({ apiKey })(model);
 }
 
+/** The sandbox-runner endpoint, from the API's own env. Never request-controlled. */
+export function sandboxRunnerConfig(): { url: string; token: string } {
+  return {
+    url: process.env.SANDBOX_RUNNER_URL ?? "",
+    token: process.env.SANDBOX_RUNNER_TOKEN ?? "",
+  };
+}
+
+/** What the runner's `POST /run` gives back (see apps/sandbox-runner). */
+export interface SandboxRunOutcome {
+  exitCode: number;
+  stdout: string;
+  stderr?: string;
+}
+
 /**
- * Test seam (mirrors the worker's __codeAgentDeps): run the `claude` CLI, resolving
- * {stdout, exitCode} even on a non-zero exit (the CLI still emits its JSON envelope);
- * reject only on spawn failure (binary missing) or timeout (killed).
+ * Test seam: dispatch a headless CLI run to the sandbox-runner.
+ *
+ * #680 — this REPLACES the local `execFile("claude", …)`. The API container no longer ships any
+ * coding CLI, and it never should have run one in-process: the subprocess inherited the API's cwd
+ * (`/app`, the whole source tree), so the read-only tool grant below could read the deployed
+ * application's files. It now runs in the runner's EPHEMERAL workspace — an empty directory in an
+ * egress-isolated container with a read-only root and no gateway — so there is simply nothing to
+ * read. No repo, no git, no diff.
+ *
+ * `AbortSignal.timeout` is load-bearing: `fetch` has no default timeout in Node, and the old
+ * `execFile({ timeout })` was what previously bounded this call. Without it a wedged runner would
+ * hang an HTTP request thread indefinitely.
  */
 export const __genDeps = {
-  exec: (
-    binary: string,
-    args: string[],
-    opts: { env: NodeJS.ProcessEnv; timeoutMs: number },
-  ): Promise<{ stdout: string; stderr?: string; exitCode: number }> =>
-    new Promise((resolve, reject) => {
-      const child = execFile(
-        binary,
-        args,
-        { env: opts.env, timeout: opts.timeoutMs, maxBuffer: 24 * 1024 * 1024 },
-        // Capture stderr too: on a non-zero exit the CLI often writes the real reason there and
-        // emits no JSON on stdout — without it a failure is undiagnosable ("head:" empty).
-        (err, stdout, stderr) => {
-          if (err) {
-            const code = (err as NodeJS.ErrnoException).code;
-            if (
-              typeof code === "string" ||
-              (err as { killed?: boolean }).killed
-            )
-              return reject(err);
-            return resolve({
-              stdout: String(stdout),
-              stderr: String(stderr),
-              exitCode: typeof code === "number" ? code : 1,
-            });
-          }
-          resolve({
-            stdout: String(stdout),
-            stderr: String(stderr),
-            exitCode: 0,
-          });
-        },
-      );
-      // Close the child's stdin immediately. We pass the prompt via `-p`, not stdin, but execFile
-      // leaves stdin an OPEN empty pipe — so `claude` blocks ~3s waiting for stdin, warns, and can
-      // exit 1. Sending EOF (its own suggested `< /dev/null`) makes it proceed at once.
-      child.stdin?.end();
-    }),
+  runSandbox: async (
+    body: Record<string, unknown>,
+    opts: { timeoutMs: number },
+  ): Promise<SandboxRunOutcome> => {
+    const { url, token } = sandboxRunnerConfig();
+    const res = await fetch(`${url}/run`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(body),
+      // Give the runner a little longer than the CLI budget it was handed, so the runner's own
+      // (more informative) timeout fires first rather than this one racing it.
+      signal: AbortSignal.timeout(opts.timeoutMs + 5_000),
+    });
+    if (!res.ok) {
+      throw new SandboxRunnerError(`runner returned ${res.status}`);
+    }
+    const parsed = (await res.json()) as SandboxRunOutcome;
+    return {
+      exitCode: parsed.exitCode ?? 0,
+      stdout: typeof parsed.stdout === "string" ? parsed.stdout : "",
+      stderr: typeof parsed.stderr === "string" ? parsed.stderr : "",
+    };
+  },
 };
+
+/** A failure reaching or using the runner itself (not a failure the CLI reported). Its own class so
+ *  the caller can answer 503-with-operator-instructions instead of a generic 500. */
+export class SandboxRunnerError extends Error {}
 
 @Injectable()
 export class GraphGeneratorService {
@@ -942,34 +956,46 @@ export class GraphGeneratorService {
       "--append-system-prompt",
       SYSTEM_PROMPT,
     ];
+    // The CLI runs in the sandbox now (#680), so the runner must be deployed. Check the config
+    // FIRST and answer with the operator's actual next step: with `COMPOSE_PROFILES=sandbox` off,
+    // the `sandbox-runner` service doesn't exist and even its hostname won't resolve, so the
+    // network error below would otherwise be the only clue.
+    const runner = sandboxRunnerConfig();
+    if (!runner.url || !runner.token) {
+      throw new ServiceUnavailableException(
+        "Claude Code generation runs in the isolated sandbox, which isn't configured on this server (SANDBOX_RUNNER_URL / SANDBOX_RUNNER_TOKEN; see deploy/sandbox/README.md). Add an Anthropic/OpenAI/Google API key in Integrations to generate without it.",
+      );
+    }
+    // authEnv gives { [varName]: value } — exactly one entry (an API key → ANTHROPIC_API_KEY, a
+    // subscription setup-token → CLAUDE_CODE_OAUTH_TOKEN). The runner forwards it into the
+    // container BY NAME; the value never touches an argv, a log, or this response.
+    const [keyEnvVar, authKey] = Object.entries(claudeCodeAuthEnv(apiKey))[0];
+
     let stdout: string;
     let stderr: string | undefined;
     let exitCode: number;
     try {
-      ({ stdout, stderr, exitCode } = await __genDeps.exec("claude", args, {
-        // Minimal env: PATH/HOME + exactly one auth var. Never the API process env
-        // (DB URLs, ENCRYPTION_KEY must not reach the subprocess).
-        env: {
-          ...subprocessBaseEnv(),
-          ...claudeCodeAuthEnv(apiKey),
+      ({ stdout, stderr, exitCode } = await __genDeps.runSandbox(
+        {
+          // No repo and no git: an empty, per-run directory the runner creates and deletes.
+          workspace: "ephemeral",
+          // The runner maps the TOOL to its own pinned image. The API can't name an image — the
+          // runner holds the Docker socket, so that would be a host-root injection surface.
+          tool: "claude",
+          agentArgs: args,
+          authKey,
+          keyEnvVar,
+          timeoutMs,
         },
-        timeoutMs,
-      }));
+        { timeoutMs },
+      ));
     } catch (e) {
-      const code = (e as NodeJS.ErrnoException).code;
-      if (code === "ENOENT") {
-        // The CLI is installed in the backend image (root Dockerfile); a dev host
-        // without it lands here.
-        throw new ServiceUnavailableException(
-          "Claude Code isn't available on this server. Add an Anthropic/OpenAI/Google API key in Integrations instead.",
-        );
-      }
       this.logger.warn(
-        // Class + code only — the error message can echo argv (which contains the prompt).
-        `graph generate (claude-code): subprocess failed (${e instanceof Error ? e.name : "unknown"}${code ? `/${code}` : ""})`,
+        // Class + name only — the error message can echo argv (which contains the prompt).
+        `graph generate (claude-code): sandbox dispatch failed (${e instanceof Error ? e.name : "unknown"})`,
       );
       throw new ServiceUnavailableException(
-        "Claude Code took too long or couldn't start. Try again, or add an API-model provider key in Integrations.",
+        "Claude Code couldn't run: the isolated sandbox is unreachable or took too long. Try again, or add an API-model provider key in Integrations.",
       );
     }
 

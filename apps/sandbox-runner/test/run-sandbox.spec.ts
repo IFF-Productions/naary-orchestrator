@@ -1,19 +1,34 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RunnerConfig } from "../src/config";
-import { SANDBOX_KEY_ENV } from "../src/docker-run";
+import {
+  ALLOWED_KEY_ENV_VARS_BY_TOOL,
+  DEFAULT_SANDBOX_IMAGES,
+  SANDBOX_KEY_ENV,
+  SANDBOX_TOOLS,
+} from "../src/docker-run";
 import { BadRequestError, type Exec, runSandbox } from "../src/run-sandbox";
 
-// runSandbox stats the run dir before touching docker. Mock it so no real FS is needed;
-// default = a directory that exists.
-const { statMock } = vi.hoisted(() => ({ statMock: vi.fn() }));
-vi.mock("node:fs/promises", () => ({ stat: statMock }));
+// runSandbox stats the run dir before touching docker (repo mode) and mkdir/chmod/rm's its own
+// (ephemeral mode). Mock the FS so no real one is needed; default = a directory that exists.
+const { statMock, mkdirMock, chmodMock, rmMock } = vi.hoisted(() => ({
+  statMock: vi.fn(),
+  mkdirMock: vi.fn(),
+  chmodMock: vi.fn(),
+  rmMock: vi.fn(),
+}));
+vi.mock("node:fs/promises", () => ({
+  stat: statMock,
+  mkdir: mkdirMock,
+  chmod: chmodMock,
+  rm: rmMock,
+}));
 
 const CFG: RunnerConfig = {
   token: "t",
   runsDir: "/runs",
   network: "naary-sandbox-internal",
   proxyUrl: "http://naary-sandbox-proxy:3128",
-  image: "naary-claude-sandbox:latest",
+  images: DEFAULT_SANDBOX_IMAGES,
   limits: { cpus: "1.0", memoryMb: 2048, pids: 256 },
   defaultTimeoutMs: 900_000,
   port: 8099,
@@ -28,6 +43,9 @@ const REQ = {
 let exec: ReturnType<typeof vi.fn>;
 beforeEach(() => {
   statMock.mockReset().mockResolvedValue({ isDirectory: () => true });
+  mkdirMock.mockReset().mockResolvedValue(undefined);
+  chmodMock.mockReset().mockResolvedValue(undefined);
+  rmMock.mockReset().mockResolvedValue(undefined);
   exec = vi.fn(async (file: string) =>
     file === "git"
       ? { stdout: "diff --git a/x b/x\n+edited", exitCode: 0 }
@@ -165,4 +183,229 @@ describe.skipIf(process.platform === "win32")("runSandbox", () => {
       runSandbox({ ...REQ, authKey: "" }, CFG, exec as unknown as Exec),
     ).rejects.toBeInstanceOf(BadRequestError);
   });
+
+  it("returns the CLI's stderr (the only signal when it dies before emitting JSON)", async () => {
+    exec = vi.fn(async (file: string) =>
+      file === "git"
+        ? { stdout: "", stderr: "", exitCode: 0 }
+        : {
+            stdout: "",
+            stderr: "Invalid API key sk-ant-secret · Fix external API key",
+            exitCode: 1,
+          },
+    );
+    const out = await runSandbox(REQ, CFG, exec as unknown as Exec);
+    expect(out.stderr).toContain("Invalid API key");
+    // …and it goes through the SAME redaction as stdout.
+    expect(out.stderr).not.toContain("sk-ant-secret");
+  });
 });
+
+/**
+ * Ephemeral workspace (#680) — a prompt-in / JSON-out run with NO repo: the api's `claude-code`
+ * AI-generate source and a codeAgent READ node without `repo`. The point of these tests is that
+ * moving those callers into the sandbox did not buy them a weaker sandbox.
+ */
+describe.skipIf(process.platform === "win32")("runSandbox (ephemeral)", () => {
+  const EPH = { ...REQ, workspace: "ephemeral" as const };
+  /** The `-v <host>:/work` host path out of a docker argv. */
+  const mountOf = (args: string[]) =>
+    args[args.indexOf("-v") + 1].replace(/:\/work$/, "");
+
+  it("runs the container with the IDENTICAL isolation argv — only the workdir differs", async () => {
+    const repo = await runSandbox(REQ, CFG, exec as unknown as Exec);
+    expect(repo.exitCode).toBe(0);
+    const repoArgs: string[] = exec.mock.calls[0][1];
+
+    exec.mockClear();
+    await runSandbox(EPH, CFG, exec as unknown as Exec);
+    const ephArgs: string[] = exec.mock.calls[0][1];
+
+    // Normalize the one legitimate difference (the mount source) and require EXACT equality:
+    // pinned image, --network, --read-only, --tmpfs, no-new-privileges, --cap-drop ALL, cpu/
+    // memory/pids caps, the proxy vars and the by-NAME credential must all be byte-identical.
+    const normalize = (a: string[]) =>
+      a.map((x) => x.replace(mountOf(a), "<WORKDIR>"));
+    expect(normalize(ephArgs)).toEqual(normalize(repoArgs));
+    // …and the ephemeral tree is still confined under runsDir.
+    expect(mountOf(ephArgs).startsWith("/runs/")).toBe(true);
+  });
+
+  it("creates + chmods its own tree, runs docker ONLY, and never touches git", async () => {
+    const out = await runSandbox(EPH, CFG, exec as unknown as Exec);
+    expect(out.diff).toBe(""); // no repo ⇒ no diff, and no bogus "not a git repository" 500
+    expect(exec.mock.calls.map((c) => c[0])).toEqual(["docker"]);
+    const dir = mkdirMock.mock.calls[0][0];
+    // recursive:false — an id collision must error, never silently reuse a live run's tree.
+    expect(mkdirMock.mock.calls[0][1]).toEqual({ recursive: false });
+    // The sandbox runs as an unprivileged uid; the runner is root. Widened explicitly because
+    // mkdir's mode is masked by umask.
+    expect(chmodMock).toHaveBeenCalledWith(dir, 0o777);
+    expect(dir).toBe(mountOf(exec.mock.calls[0][1]));
+  });
+
+  it("IGNORES a caller-supplied runId (no traversal surface at all in this mode)", async () => {
+    await runSandbox(
+      { ...EPH, runId: "../../etc" },
+      CFG,
+      exec as unknown as Exec,
+    );
+    const dir: string = mountOf(exec.mock.calls[0][1]);
+    expect(dir).not.toContain("etc");
+    expect(dir).toMatch(/^\/runs\/eph-[0-9a-f]{32}$/);
+  });
+
+  it("generates a fresh id per run (never reuses another run's tree)", async () => {
+    await runSandbox(EPH, CFG, exec as unknown as Exec);
+    const first = mountOf(exec.mock.calls[0][1]);
+    exec.mockClear();
+    await runSandbox(EPH, CFG, exec as unknown as Exec);
+    expect(mountOf(exec.mock.calls[0][1])).not.toBe(first);
+  });
+
+  it("removes the tree even when the docker run throws (no accumulation under runsDir)", async () => {
+    exec = vi.fn(async () => {
+      throw new Error("docker exploded");
+    });
+    await expect(runSandbox(EPH, CFG, exec as unknown as Exec)).rejects.toThrow(
+      /docker exploded/,
+    );
+    expect(rmMock).toHaveBeenCalledWith(mkdirMock.mock.calls[0][0], {
+      recursive: true,
+      force: true,
+    });
+  });
+
+  it("removes the tree on a normal run too", async () => {
+    await runSandbox(EPH, CFG, exec as unknown as Exec);
+    expect(rmMock).toHaveBeenCalledWith(mkdirMock.mock.calls[0][0], {
+      recursive: true,
+      force: true,
+    });
+  });
+
+  it("still enforces the key allowlist + argv typing before creating anything", async () => {
+    await expect(
+      runSandbox(
+        { ...EPH, keyEnvVar: "AWS_SECRET_ACCESS_KEY" },
+        CFG,
+        exec as unknown as Exec,
+      ),
+    ).rejects.toBeInstanceOf(BadRequestError);
+    expect(mkdirMock).not.toHaveBeenCalled();
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it("rejects an unknown workspace rather than silently defaulting", async () => {
+    await expect(
+      runSandbox(
+        { ...REQ, workspace: "host" as unknown as "repo" },
+        CFG,
+        exec as unknown as Exec,
+      ),
+    ).rejects.toBeInstanceOf(BadRequestError);
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it("does NOT leave the repo path's mkdir behind (repo trees stay caller-owned)", async () => {
+    await runSandbox(REQ, CFG, exec as unknown as Exec);
+    expect(mkdirMock).not.toHaveBeenCalled();
+    expect(rmMock).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * TOOL → IMAGE routing (#680). The request names a TOOL from a closed set; the RUNNER resolves the
+ * image from its own config. This is the security shape: the runner holds the Docker socket (host
+ * root), so a request that could name an image would be a root-privileged injection surface, while
+ * a request naming a member of a fixed enum is not.
+ */
+describe.skipIf(process.platform === "win32")(
+  "runSandbox (tool routing)",
+  () => {
+    /** The image is the arg immediately before the agent argv (`docker run … <image> <args…>`).
+     *  NOT a `startsWith("naary-")` scan — that matches the `naary-sandbox-internal` NETWORK
+     *  name first, which silently made every one of these assertions compare the wrong string. */
+    const imageOf = (args: string[]) =>
+      args[args.length - REQ.agentArgs.length - 1];
+
+    it("launches each tool's OWN pinned image", async () => {
+      for (const tool of SANDBOX_TOOLS) {
+        exec.mockClear();
+        await runSandbox(
+          {
+            ...REQ,
+            tool,
+            keyEnvVar: ALLOWED_KEY_ENV_VARS_BY_TOOL[tool][0],
+          },
+          CFG,
+          exec as unknown as Exec,
+        );
+        expect(imageOf(exec.mock.calls[0][1]), tool).toBe(
+          DEFAULT_SANDBOX_IMAGES[tool],
+        );
+      }
+    });
+
+    it("defaults to claude when the request names no tool (older callers unaffected)", async () => {
+      await runSandbox(REQ, CFG, exec as unknown as Exec);
+      expect(imageOf(exec.mock.calls[0][1])).toBe(
+        DEFAULT_SANDBOX_IMAGES.claude,
+      );
+    });
+
+    it("REJECTS an unknown tool rather than coercing it to a default", async () => {
+      // Coercion is the dangerous option: it is exactly how a cursor argv reached the claude
+      // entrypoint (#933). An unrecognized tool must fail, not silently run something else.
+      for (const tool of ["bash", "naary-claude-sandbox:latest", "", 7]) {
+        await expect(
+          runSandbox(
+            { ...REQ, tool: tool as never },
+            CFG,
+            exec as unknown as Exec,
+          ),
+        ).rejects.toBeInstanceOf(BadRequestError);
+      }
+      expect(exec).not.toHaveBeenCalled();
+    });
+
+    it("cannot be told to run an IMAGE — only the runner's config maps tool → image", async () => {
+      // A request field named `image` is simply not part of the contract; prove it is ignored
+      // rather than honoured, so a future refactor that starts reading it fails here.
+      await runSandbox(
+        { ...REQ, image: "evil/pwn:latest" } as never,
+        CFG,
+        exec as unknown as Exec,
+      );
+      expect(exec.mock.calls[0][1].join(" ")).not.toContain("evil/pwn");
+      expect(imageOf(exec.mock.calls[0][1])).toBe(
+        DEFAULT_SANDBOX_IMAGES.claude,
+      );
+    });
+
+    it("refuses another tool's credential var (no cross-tool key forwarding)", async () => {
+      await expect(
+        runSandbox(
+          { ...REQ, tool: "gemini", keyEnvVar: "ANTHROPIC_API_KEY" },
+          CFG,
+          exec as unknown as Exec,
+        ),
+      ).rejects.toThrow(/not valid for the "gemini" sandbox/);
+      expect(exec).not.toHaveBeenCalled();
+    });
+
+    it("defaults each tool's key var to its own primary (never claude's)", async () => {
+      await runSandbox(
+        { ...REQ, tool: "cursor" },
+        CFG,
+        exec as unknown as Exec,
+      );
+      const [, dargs, opts] = exec.mock.calls[0];
+      expect(dargs).toContain("CURSOR_API_KEY");
+      expect(dargs).not.toContain("ANTHROPIC_API_KEY");
+      // …and the value rides in the exec ENV, never the argv.
+      expect(opts.env.CURSOR_API_KEY).toBe("sk-ant-secret");
+      expect((dargs as string[]).join(" ")).not.toContain("sk-ant-secret");
+    });
+  },
+);

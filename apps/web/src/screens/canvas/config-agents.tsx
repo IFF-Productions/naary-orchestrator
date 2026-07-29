@@ -484,10 +484,11 @@ export function renderAgentSections(c: ConfigSectionCtx) {
               marginBottom: 4,
             }}
           >
-            Runs an agentic coding CLI on your task. <strong>Read</strong> mode
-            reads code and returns a plan (in-worker, no repo).{" "}
-            <strong>Write</strong> mode clones a repo, edits it in an isolated
-            sandbox, and can open a pull request — enabled per deployment.
+            Runs an agentic coding CLI on your task, always inside an isolated
+            sandbox. <strong>Read</strong> mode reads code and returns a plan;
+            with no repo it runs against an empty workspace.{" "}
+            <strong>Write</strong> mode clones a repo, edits it, and can open a
+            pull request — enabled per deployment.
           </div>
 
           <Labeled label="Tool">
@@ -496,13 +497,13 @@ export function renderAgentSections(c: ConfigSectionCtx) {
               onChange={(e) => onChange({ tool: e.target.value })}
               style={inputStyle}
             >
+              {/* All four are live since #680: each CLI has its own isolated sandbox image, so
+                  they are no longer "coming soon". Keep in sync with the DSL `tool` enum
+                  (packages/dsl/src/registry.ts) — the save gate rejects anything not listed there. */}
               <option value="claude">Claude Code</option>
-              <option value="cursor" disabled>
-                Cursor (coming soon)
-              </option>
-              <option value="copilot" disabled>
-                Copilot (coming soon)
-              </option>
+              <option value="cursor">Cursor</option>
+              <option value="copilot">GitHub Copilot</option>
+              <option value="gemini">Gemini</option>
             </select>
           </Labeled>
 

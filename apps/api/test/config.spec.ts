@@ -14,7 +14,6 @@ import {
   requireMfa,
   resumeSnapshotsEnabled,
   ssoSelfService,
-  subprocessBaseEnv,
   swaggerDisabled,
 } from "../src/config";
 
@@ -57,19 +56,10 @@ describe("defaults that are security decisions", () => {
     }
   });
 
-  /** The subprocess env is an allowlist. DATABASE_URL/ENCRYPTION_KEY must never cross into a CLI. */
-  it("subprocessBaseEnv passes PATH and HOME and nothing else", () => {
-    const env = {
-      PATH: "/usr/bin",
-      HOME: "/home/x",
-      ENCRYPTION_KEY: "secret",
-      DATABASE_URL: "postgres://…",
-    };
-    expect(subprocessBaseEnv(env)).toEqual({
-      PATH: "/usr/bin",
-      HOME: "/home/x",
-    });
-  });
+  // `subprocessBaseEnv` was tested here until #680. It built the allowlisted env for the graph
+  // generator's `claude` subprocess; the api spawns no CLI any more, so the helper is gone. The
+  // successor invariant — the api sends the runner ONLY run data, never its own environment — is
+  // asserted in graph-generator.service.spec.ts ("sends the runner ONLY run data").
 
   /** Not stored, not defaulted, not logged — just read. Pinned so a default is never introduced. */
   it("ENCRYPTION_KEY has no fallback value", () => {

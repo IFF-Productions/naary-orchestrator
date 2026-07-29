@@ -50,6 +50,22 @@ const ANTHROPIC_MODELS: Record<string, ModelPrice> = {
   },
 };
 
+/** Google Gemini list prices, USD per million tokens (representative base-tier rates; Gemini tiers
+ *  by context length). As of 2026-06-25. Source: Google AI pricing. Hoisted out of MODEL_PRICING so
+ *  the `google` model-provider slot and the `gemini-cli` code-agent slot share ONE table. */
+const GOOGLE_MODELS: Record<string, ModelPrice> = {
+  "gemini-2.5-pro": {
+    inputPerMTok: 1.25,
+    outputPerMTok: 10,
+    cachedInputPerMTok: 0.31,
+  },
+  "gemini-2.5-flash": {
+    inputPerMTok: 0.3,
+    outputPerMTok: 2.5,
+    cachedInputPerMTok: 0.075,
+  },
+};
+
 export const MODEL_PRICING: Record<string, Record<string, ModelPrice>> = {
   anthropic: ANTHROPIC_MODELS,
   // The Claude Code CLI (codeAgent's `claude-code` BYOK credential — its own provider
@@ -65,6 +81,8 @@ export const MODEL_PRICING: Record<string, Record<string, ModelPrice>> = {
   // code-agent run would silently evade USD budget enforcement). Refine with real tables later.
   cursor: ANTHROPIC_MODELS,
   copilot: ANTHROPIC_MODELS,
+  // The Gemini CLI slot runs Google's own models, so it proxies the `google` table below by
+  // reference (defined further down — assigned after this object literal for that reason).
   // OpenAI list prices, USD per million tokens (cached-input = the discounted
   // prompt-cache read rate). As of 2026-06-25. Source: OpenAI API pricing.
   openai: {
@@ -108,20 +126,13 @@ export const MODEL_PRICING: Record<string, Record<string, ModelPrice>> = {
     "tts-1": { inputPerMTok: 15, outputPerMTok: 0, cachedInputPerMTok: 0 },
     "tts-1-hd": { inputPerMTok: 30, outputPerMTok: 0, cachedInputPerMTok: 0 },
   },
-  // Google Gemini list prices, USD per million tokens (representative base-tier rates;
-  // Gemini tiers by context length). As of 2026-06-25. Source: Google AI pricing.
-  google: {
-    "gemini-2.5-pro": {
-      inputPerMTok: 1.25,
-      outputPerMTok: 10,
-      cachedInputPerMTok: 0.31,
-    },
-    "gemini-2.5-flash": {
-      inputPerMTok: 0.3,
-      outputPerMTok: 2.5,
-      cachedInputPerMTok: 0.075,
-    },
-  },
+  google: GOOGLE_MODELS,
+  // The Gemini CLI's dedicated BYOK credential slot (`gemini-cli`, distinct from the `google`
+  // model-provider key, exactly as `claude-code` is distinct from `anthropic`). It runs the SAME
+  // Gemini models at the same list prices, so it shares the table BY REFERENCE — a price update
+  // applies to both. Without this key every gemini codeAgent run would die in recordUsage with
+  // UnknownModelPricingError AFTER the CLI had already run and cost money.
+  "gemini-cli": GOOGLE_MODELS,
 };
 
 export class UnknownModelPricingError extends Error {

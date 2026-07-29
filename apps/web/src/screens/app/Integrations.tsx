@@ -244,7 +244,9 @@ export function Integrations() {
                 // code-agent CLI slots are rendered on the Apps tab (dedicated cards), not as
                 // model-provider (BYOK) keys here.
                 (c) =>
-                  !["claude-code", "cursor", "copilot"].includes(c.provider),
+                  !["claude-code", "cursor", "copilot", "gemini-cli"].includes(
+                    c.provider,
+                  ),
               )}
               connections={(connections ?? []).filter(
                 (c) => !APP_CONNECTION_TYPES.includes(c.type),

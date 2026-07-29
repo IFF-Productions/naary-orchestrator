@@ -1,11 +1,14 @@
 /**
- * codeAgent WRITE path (design docs/design/CLAUDE-CODE-NODE.md §2.2 + Slice 2). The two-box split:
- * the ACTIVITY (this file, outside the sandbox) does all git I/O — resolve the GitHub App token and
- * clone the repo into the shared runs dir — then dispatches to the sandbox-RUNNER, which mounts that
- * working tree into an egress-isolated container and runs the CLI. The git token NEVER leaves this
- * box: it is not put on any argv (a `credential.helper` reads it from the child's env), not written
- * to disk, and NOT included in the runner request (the runner only ever receives the Anthropic/Claude
- * Code credential). The runner returns the diff of the sandbox's edits.
+ * codeAgent SANDBOX DISPATCH (design docs/design/CLAUDE-CODE-NODE.md §2.2 + Slice 2). Since #680
+ * this is the ONLY way a codeAgent node runs — read and write alike; the in-worker exec is gone.
+ *
+ * The two-box split: the ACTIVITY (this file, outside the sandbox) does all git I/O — resolve the
+ * GitHub App token and clone the repo into the shared runs dir — then dispatches to the sandbox-
+ * RUNNER, which mounts that working tree into an egress-isolated container and runs the CLI. The
+ * git token NEVER leaves this box: it is not put on any argv (a `credential.helper` reads it from
+ * the child's env), not written to disk, and NOT included in the runner request (the runner only
+ * ever receives the Anthropic/Claude Code credential). The runner returns the diff of the edits.
+ * A read node with no repo skips this box entirely and runs in the runner's ephemeral workspace.
  *
  * Pure-ish + seam-injected (`__codeAgentWriteDeps`) so the orchestration is unit-testable without a
  * real runner, git, or GitHub App.
@@ -19,7 +22,6 @@ import { GITHUB_API, resolveAuthHeader } from "@naary/connections";
 
 /** owner/name — conservative: repo path segments only, no protocol/host/`..`. */
 const REPO_RE = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
-
 
 /**
  * A deterministic, runner-safe run id (matches the runner's `RUN_ID_RE` `^[A-Za-z0-9._-]{1,128}$`).
@@ -39,14 +41,9 @@ export interface CodeAgentWriteEnv {
   runnerToken: string;
   /** Shared same-path host bind mount the worker clones into + the runner mounts (Slice 2b). */
   runsDir: string;
-  /** Master gate — write mode is OFF until the runner is wired + egress proven on the deploy host. */
+  /** Master gate — write mode is OFF until the runner is wired + egress proven on the deploy host.
+   *  READ has NO gate: since #680 it is always sandboxed, so there is nothing to opt into. */
   writeEnabled: boolean;
-  /**
-   * Gate for running READ mode in the sandbox instead of in the worker process (#594/#680). OFF by
-   * default → read stays in-worker (legacy, un-sandboxed). Turn ON once the runner is deployed to
-   * isolate read from the worker's filesystem (`/proc/<pid>/environ` → `ENCRYPTION_KEY`).
-   */
-  sandboxReadEnabled: boolean;
 }
 
 /** Read the write-path config from the environment (all worker config, never workflow args). */
@@ -56,7 +53,6 @@ export function codeAgentWriteEnv(): CodeAgentWriteEnv {
     runnerToken: process.env.SANDBOX_RUNNER_TOKEN ?? "",
     runsDir: process.env.CODE_AGENT_RUNS_DIR ?? "",
     writeEnabled: process.env.CODE_AGENT_WRITE_ENABLED === "true",
-    sandboxReadEnabled: process.env.CODE_AGENT_SANDBOX_READ === "true",
   };
 }
 
@@ -66,15 +62,21 @@ export interface CodeAgentWriteParams {
   nodeId: string;
   /**
    * Which posture to run in the sandbox. "write" (default) clones, dispatches write argv, and can
-   * open a PR. "read" (#594/#680) reuses the SAME isolated dispatch — clone + runner — with read-only
-   * argv (Read/Grep/Glob, plan mode) and NO PR, so a read agent runs jailed in the sandbox instead of
-   * in the worker process. The two-box credential split is identical: the git token clones outside
-   * the sandbox and never enters the runner.
+   * open a PR. "read" (#594/#680) uses the SAME isolated dispatch with read-only argv (Read/Grep/
+   * Glob, plan mode) and NO PR. Since #680 read has no in-worker alternative — it is ALWAYS
+   * sandboxed. The two-box credential split is identical: when there is a repo, the git token
+   * clones outside the sandbox and never enters the runner.
    */
   mode?: "read" | "write";
-  repo: string;
+  /** WHICH coding CLI to run (`driver.tool`). The runner maps it to that tool's OWN pinned image
+   *  — the request never names an image. Omitted ⇒ the runner defaults to claude. */
+  tool?: string;
+  /** Required for write. OPTIONAL for read: a read node with no repo runs against an EMPTY
+   *  ephemeral tree the runner creates (there is nothing to clone, and no git token involved). */
+  repo?: string;
   branch?: string;
-  connectionId: string;
+  /** Required whenever `repo` is set (it authorizes the clone); unused for an ephemeral read. */
+  connectionId?: string;
   /** The CLI argv (already built for the mode by the driver). */
   agentArgs: string[];
   /** The Claude Code credential value + the env var to forward it under (from driver.authEnv). */
@@ -94,7 +96,9 @@ export interface CodeAgentWriteResult {
   exitCode: number;
   /** The CLI's stdout (JSON envelope). */
   stdout: string;
-  /** Unified diff of the sandbox's edits. */
+  /** The CLI's stderr — often the only signal when it dies before emitting its envelope. */
+  stderr?: string;
+  /** Unified diff of the sandbox's edits. Always "" for a read run. */
   diff: string;
   /** Opened (or already-existing) PR when `openPr` succeeded and the diff was non-empty (#444). */
   pr?: { number: number; url: string; branch: string };
@@ -147,33 +151,91 @@ function nonRetryable(message: string, type: string): ApplicationFailure {
   return ApplicationFailure.nonRetryable(message, type);
 }
 
+/** POST the run to the sandbox runner and normalize its response. Shared by every posture — the
+ *  body carries the CLI argv + the ANTHROPIC credential and NEVER the git token. */
+async function dispatchToRunner(
+  env: CodeAgentWriteEnv,
+  body: Record<string, unknown>,
+): Promise<CodeAgentWriteResult> {
+  const res = await __codeAgentWriteDeps.fetch(`${env.runnerUrl}/run`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${env.runnerToken}`,
+    },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    throw nonRetryable(
+      `codeAgent: the sandbox runner returned ${res.status}.`,
+      "CODE_AGENT_RUNNER_ERROR",
+    );
+  }
+  const parsed = (await res.json()) as CodeAgentWriteResult;
+  return {
+    exitCode: parsed.exitCode ?? 0,
+    stdout: typeof parsed.stdout === "string" ? parsed.stdout : "",
+    stderr: typeof parsed.stderr === "string" ? parsed.stderr : "",
+    diff: typeof parsed.diff === "string" ? parsed.diff : "",
+  };
+}
+
 /**
- * Clone `repo` (outside the sandbox, with the App token) → dispatch the working tree to the runner →
- * return the CLI output + diff. Always cleans up the working tree. Throws non-retryable on config /
- * gate / clone failures (a user must fix them; at-most-once means no auto-retry anyway).
+ * Run the coding CLI in the isolated sandbox. Three shapes, one dispatch:
+ *
+ *  - write        — clone `repo` (outside the sandbox, with the App token), run edit-mode argv,
+ *                   return the diff, optionally open a PR.
+ *  - read + repo  — same clone + dispatch, read-only argv, no PR.
+ *  - read, no repo — nothing to clone: the RUNNER creates an empty ephemeral tree (#680). This is
+ *                   what a plain "ask the agent" node is, and before #680 it was the un-sandboxed
+ *                   in-worker exec that could read the worker's own filesystem (#594).
+ *
+ * Always cleans up any working tree it created. Throws non-retryable on config / gate / clone
+ * failures (a user or operator must fix them; at-most-once means no auto-retry anyway).
  */
 export async function runCodeAgentWrite(
   params: CodeAgentWriteParams,
   env: CodeAgentWriteEnv = codeAgentWriteEnv(),
 ): Promise<CodeAgentWriteResult> {
   const mode = params.mode ?? "write";
-  // Mode-specific master gate. Read and write are enabled independently: write is destructive
-  // (opens PRs); read is the #594 isolation path. Both share everything below (clone + dispatch).
+  // Write keeps its master gate — it is destructive (edits + opens PRs). Read has no gate: since
+  // #680 it is sandboxed unconditionally, so there is no un-isolated fallback to opt out of.
   if (mode === "write" && !env.writeEnabled) {
     throw nonRetryable(
       "codeAgent write mode is disabled on this worker.",
       "CODE_AGENT_WRITE_DISABLED",
     );
   }
-  if (mode === "read" && !env.sandboxReadEnabled) {
+  if (!env.runnerUrl || !env.runnerToken) {
     throw nonRetryable(
-      "codeAgent sandboxed read mode is disabled on this worker (set CODE_AGENT_SANDBOX_READ).",
-      "CODE_AGENT_SANDBOX_READ_DISABLED",
+      "codeAgent requires the sandbox runner, which is not configured on this worker. Deploy it (COMPOSE_PROFILES=sandbox + SANDBOX_RUNNER_TOKEN — see deploy/sandbox/README.md) and set SANDBOX_RUNNER_URL/SANDBOX_RUNNER_TOKEN.",
+      "CODE_AGENT_SANDBOX_UNCONFIGURED",
     );
   }
-  if (!env.runnerUrl || !env.runnerToken || !env.runsDir) {
+
+  // No repo ⇒ nothing to clone, no git token, no runs-dir mount on this side: hand the whole run to
+  // the runner's ephemeral workspace. Only legal for read — write must have something to edit.
+  if (!params.repo) {
+    if (mode === "write") {
+      throw nonRetryable(
+        "codeAgent write mode requires `repo`.",
+        "CODE_AGENT_WRITE_CONFIG",
+      );
+    }
+    return dispatchToRunner(env, {
+      workspace: "ephemeral",
+      tool: params.tool,
+      agentArgs: params.agentArgs,
+      authKey: params.authKey,
+      keyEnvVar: params.keyEnvVar,
+      timeoutMs: params.timeoutMs,
+    });
+  }
+
+  // From here on there IS a repo: the two-box clone path.
+  if (!env.runsDir) {
     throw nonRetryable(
-      "codeAgent sandbox is not configured (runner URL/token/runs dir).",
+      "codeAgent sandbox is not configured (CODE_AGENT_RUNS_DIR must match the runner's SANDBOX_RUNS_DIR).",
       "CODE_AGENT_SANDBOX_UNCONFIGURED",
     );
   }
@@ -187,7 +249,7 @@ export async function runCodeAgentWrite(
   }
   if (!params.connectionId) {
     throw nonRetryable(
-      "codeAgent write mode requires a GitHub App connection.",
+      "codeAgent requires a GitHub App connection to clone a repo.",
       "CODE_AGENT_NO_CONNECTION",
     );
   }
@@ -254,41 +316,28 @@ export async function runCodeAgentWrite(
       );
     }
 
-    // Dispatch to the runner. The body carries the CLI argv + the ANTHROPIC credential — NEVER the
-    // git token. Plain bearer to the internal runner.
-    const res = await __codeAgentWriteDeps.fetch(`${env.runnerUrl}/run`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${env.runnerToken}`,
-      },
-      body: JSON.stringify({
-        runId,
-        agentArgs: params.agentArgs,
-        authKey: params.authKey,
-        keyEnvVar: params.keyEnvVar,
-        timeoutMs: params.timeoutMs,
-      }),
+    // Dispatch the cloned tree to the runner (workspace "repo" — the default).
+    const result = await dispatchToRunner(env, {
+      runId,
+      tool: params.tool,
+      agentArgs: params.agentArgs,
+      authKey: params.authKey,
+      keyEnvVar: params.keyEnvVar,
+      timeoutMs: params.timeoutMs,
     });
-    if (!res.ok) {
-      throw nonRetryable(
-        `codeAgent: the sandbox runner returned ${res.status}.`,
-        "CODE_AGENT_RUNNER_ERROR",
-      );
-    }
-    const body = (await res.json()) as CodeAgentWriteResult;
-    const result: CodeAgentWriteResult = {
-      exitCode: body.exitCode ?? 0,
-      stdout: typeof body.stdout === "string" ? body.stdout : "",
-      diff: typeof body.diff === "string" ? body.diff : "",
-    };
 
     // Write + PR (#444): only when asked, the CLI succeeded (exit 0), and it actually produced
     // changes (non-empty staged diff — the runner already ran `git add -A`). An empty diff is a
     // clean no-op: return no `pr`, don't error. Done HERE (before the finally rm) because the PR
     // must be opened while the clone still exists on disk.
     if (params.openPr && result.exitCode === 0 && result.diff.trim() !== "") {
-      result.pr = await openPullRequest(params, workdir, gitEnv, gitToken);
+      result.pr = await openPullRequest(
+        params,
+        params.repo,
+        workdir,
+        gitEnv,
+        gitToken,
+      );
     }
     return result;
   } finally {
@@ -316,6 +365,9 @@ function githubHeaders(gitToken: string): Record<string, string> {
  */
 async function openPullRequest(
   params: CodeAgentWriteParams,
+  /** Passed explicitly: `params.repo` is optional on the type (an ephemeral read has none), but a
+   *  PR is only ever opened on the repo branch, where it is known-present. */
+  repo: string,
   workdir: string,
   gitEnv: NodeJS.ProcessEnv,
   gitToken: string,
@@ -327,7 +379,7 @@ async function openPullRequest(
   const commitMessage = params.commitMessage?.trim() || title;
   const body =
     params.prBody ?? "Automated changes by the Naary code-agent node.";
-  const owner = params.repo.split("/")[0];
+  const owner = repo.split("/")[0];
 
   // Commit onto a fresh node-owned branch. The runner already `git add -A`'d, so the edits are
   // staged and carry across the checkout; identity is passed via `-c` (no global git config needed).
@@ -375,7 +427,7 @@ async function openPullRequest(
   let base = params.branch?.trim();
   if (!base) {
     const repoRes = await __codeAgentWriteDeps.githubFetch(
-      `${GITHUB_API}/repos/${params.repo}`,
+      `${GITHUB_API}/repos/${repo}`,
       { method: "GET", headers: githubHeaders(gitToken) },
     );
     if (!repoRes.ok) {
@@ -395,7 +447,7 @@ async function openPullRequest(
   }
 
   const prRes = await __codeAgentWriteDeps.githubFetch(
-    `${GITHUB_API}/repos/${params.repo}/pulls`,
+    `${GITHUB_API}/repos/${repo}/pulls`,
     {
       method: "POST",
       headers: {
@@ -413,7 +465,7 @@ async function openPullRequest(
   // rather than failing — the force-push above already updated that same branch's contents.
   if (prRes.status === 422) {
     const existing = await __codeAgentWriteDeps.githubFetch(
-      `${GITHUB_API}/repos/${params.repo}/pulls?head=${owner}:${headBranch}&state=open`,
+      `${GITHUB_API}/repos/${repo}/pulls?head=${owner}:${headBranch}&state=open`,
       { method: "GET", headers: githubHeaders(gitToken) },
     );
     if (existing.ok) {
