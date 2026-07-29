@@ -32,7 +32,10 @@ describe("resumeButtonState", () => {
 
   /** A refusal added server-side must still say something, even with no `detail`. */
   it("falls back to the machine reason when there is no detail", () => {
-    const s = resumeButtonState({ resumable: false, reason: "parallel_fanout" });
+    const s = resumeButtonState({
+      resumable: false,
+      reason: "parallel_fanout",
+    });
     expect(s.title).toContain("parallel_fanout");
   });
 
@@ -50,12 +53,17 @@ describe("resumeButtonState", () => {
       resumable: true,
       failedNodeId: "email-1",
       warnings: ["at_most_once_node"],
-      warningText: 'The failing "sendEmail" node may already have taken effect.',
+      warningText:
+        'The failing "sendEmail" node may already have taken effect.',
     });
     expect(s.disabled).toBe(false);
     expect(s.needsConfirm).toBe(true);
-    expect(s.confirmText).toContain("sendEmail");
-    expect(s.confirmText).toMatch(/Resume anyway\?/);
+    expect(s.confirmBody).toContain("sendEmail");
+    // The body is the WARNING only. The question lives in the dialog's title and its accept
+    // button ("Resume anyway"), so repeating it here said the same thing three times — and the
+    // "\n\n" that separated it collapsed anyway, since the body renders as flow content.
+    expect(s.confirmBody).not.toMatch(/Resume anyway/);
+    expect(s.confirmBody).not.toContain("\n");
   });
 
   it("disables while a resume is in flight", () => {

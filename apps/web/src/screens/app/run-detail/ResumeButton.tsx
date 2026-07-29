@@ -59,7 +59,7 @@ export function ResumeButton({
       state.needsConfirm &&
       !(await confirm({
         title: "Resume from the failed node?",
-        body: state.confirmText,
+        body: state.confirmBody,
         confirmLabel: "Resume anyway",
         danger: true,
       }))

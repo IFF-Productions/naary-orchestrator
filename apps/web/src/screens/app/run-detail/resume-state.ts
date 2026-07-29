@@ -20,8 +20,16 @@ export interface ResumeButtonState {
   title: string;
   /** Ask for confirmation first: the failing node may already have taken effect. */
   needsConfirm: boolean;
-  /** Shown in the confirm prompt. */
-  confirmText?: string;
+  /**
+   * The BODY of the confirm dialog — the warning only, no trailing question.
+   *
+   * It used to end with "\n\nResume anyway?" because the prompt was `window.confirm`, which has
+   * no title and only OK/Cancel, so the question had to live inside the body text. Our dialog
+   * asks it in the title and answers it on the accept button ("Resume anyway"), which made the
+   * suffix say the same thing a third time — and its newlines collapsed anyway, since the body
+   * renders as ordinary flow content.
+   */
+  confirmBody?: string;
 }
 
 const LOADING: ResumeButtonState = {
@@ -46,7 +54,8 @@ export function resumeButtonState(
     return {
       visible: true,
       disabled: true,
-      title: "Couldn't check whether this run can be resumed. Reload to try again.",
+      title:
+        "Couldn't check whether this run can be resumed. Reload to try again.",
       needsConfirm: false,
     };
   }
@@ -83,10 +92,9 @@ export function resumeButtonState(
     needsConfirm,
     ...(needsConfirm
       ? {
-          confirmText:
-            (eligibility.warningText ??
-              "The failing node may already have taken effect.") +
-            "\n\nResume anyway?",
+          confirmBody:
+            eligibility.warningText ??
+            "The failing node may already have taken effect.",
         }
       : {}),
   };
