@@ -114,10 +114,24 @@ export function WorkflowPicker({
   }
 
   if (loading) {
+    // Render the REAL control, disabled — not a text substitute. Replacing the input with a
+    // sentence removes the field from the dialog until a network call returns: the layout jumps
+    // when it arrives, and there is nothing to focus or tab to meanwhile. Keeping the same
+    // element (and the same test id) also means a slow list reads as "not ready yet" rather than
+    // "not there", which is what made the e2e wait its whole 30s budget on an absent node and
+    // then report a click timeout instead of a slow fetch.
     return (
-      <div style={{ fontSize: "var(--text-sm)", color: "var(--ink-2)" }}>
-        Loading workflows…
-      </div>
+      <input
+        role="combobox"
+        data-testid="workflow-picker"
+        aria-expanded={false}
+        aria-busy="true"
+        disabled
+        readOnly
+        value=""
+        placeholder="Loading workflows…"
+        style={fieldStyle}
+      />
     );
   }
 
