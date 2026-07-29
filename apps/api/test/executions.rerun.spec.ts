@@ -76,6 +76,8 @@ describe("rerun", () => {
       { orderId: 42 },
       "refunds",
       undefined,
+      undefined,
+      false,
     );
   });
 
@@ -102,6 +104,8 @@ describe("rerun", () => {
       { orderId: 1 },
       "refunds",
       undefined,
+      undefined,
+      false,
     );
   });
 
@@ -127,6 +131,37 @@ describe("rerun", () => {
       { orderId: 7 },
       "refunds",
       2,
+      undefined,
+      false,
+    );
+  });
+
+  // "Re-run with debug" (the run-detail menu item) is the only user-facing way to turn the
+  // per-run diagnostics on for a run that already happened — so the flag has to survive the
+  // whole rerun path down to start(), which is what puts it in the workflow's args.
+  it("threads debug:true through to start (re-run with diagnostics on)", async () => {
+    findUnique.mockResolvedValue({
+      workflowId: "wf-old",
+      tenantId: "t-1",
+      workflowKey: "refunds",
+    });
+    const service = makeService(
+      vi.fn().mockResolvedValue(startedWith({ orderId: 9 })),
+    );
+    const start = vi
+      .spyOn(service, "start")
+      .mockResolvedValue({ workflowId: "wf-new" });
+
+    await service.rerun("wf-old", "t-1", undefined, undefined, true);
+
+    expect(start).toHaveBeenCalledWith(
+      "t-1",
+      "env-test",
+      { orderId: 9 },
+      "refunds",
+      undefined,
+      undefined,
+      true,
     );
   });
 
@@ -159,6 +194,8 @@ describe("rerun", () => {
       undefined,
       "wk",
       undefined,
+      undefined,
+      false,
     );
   });
 
@@ -232,7 +269,12 @@ describe("rerun (G1 run gate)", () => {
     await expect(
       service.rerun("wf-old", "t-1", undefined, member),
     ).rejects.toBeInstanceOf(ForbiddenException);
-    expect(assertCan).toHaveBeenCalledWith(member, "run", "refunds", "env-orig");
+    expect(assertCan).toHaveBeenCalledWith(
+      member,
+      "run",
+      "refunds",
+      "env-orig",
+    );
     expect(fetchHistory).not.toHaveBeenCalled(); // gate runs before the history read
     expect(start).not.toHaveBeenCalled();
   });
@@ -260,6 +302,8 @@ describe("rerun (G1 run gate)", () => {
       { a: 1 },
       "refunds",
       undefined,
+      undefined,
+      false,
     );
     expect(assertCan).toHaveBeenCalledTimes(1);
   });

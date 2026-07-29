@@ -391,7 +391,7 @@ export class ExecutionsController {
   @ApiEndpoint({
     summary: "Re-run a past run",
     description:
-      "Starts a NEW run of the same workflow with the original trigger input. Re-runs against the current graph by default; pass `graphVersion` to re-run at a specific saved version (newer or older). 400 if the run predates workflow-key tracking; 404 if the version doesn't exist.",
+      "Starts a NEW run of the same workflow with the original trigger input. Re-runs against the current graph by default; pass `graphVersion` to re-run at a specific saved version (newer or older), and `debug` to run it with diagnostics on. 400 if the run predates workflow-key tracking; 404 if the version doesn't exist.",
     created: StartExecutionResponse,
     notFound: true,
   })
@@ -405,7 +405,13 @@ export class ExecutionsController {
     @Body() body: RerunDto = {},
     @CurrentPrincipal() principal?: Principal,
   ): Promise<{ workflowId: string }> {
-    return this.executions.rerun(id, tenantId, body?.graphVersion, principal);
+    return this.executions.rerun(
+      id,
+      tenantId,
+      body?.graphVersion,
+      principal,
+      body?.debug ?? false,
+    );
   }
 
   @ApiEndpoint({

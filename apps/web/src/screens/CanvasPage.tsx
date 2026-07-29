@@ -1186,6 +1186,7 @@ export function CanvasPage() {
         onCheck={() => void checkFlow()}
         checking={checking}
         onRun={() => void run()}
+        onRunDebug={() => void run({ debug: true })}
       />
 
       {/* hidden file input backing the overflow menu's Import */}

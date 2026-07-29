@@ -518,7 +518,8 @@ function RunView({ id }: { id: string }) {
       // the user debugging a call that step never made. A capture with no nodeId (written by an
       // older worker) falls back to the previous behaviour rather than vanishing.
       http:
-        st === "error" && (!errorHttp?.nodeId || errorHttp.nodeId === selectedId)
+        st === "error" &&
+        (!errorHttp?.nodeId || errorHttp.nodeId === selectedId)
           ? errorHttp
           : null,
     };
@@ -864,6 +865,10 @@ function RunView({ id }: { id: string }) {
             >
               full run history · durable · state checkpointed · resumable for
               30d
+              {/* Name the debug rows where they appear — otherwise the extra per-node lines read as
+                  unexplained noise to whoever opens the run rather than the person who started it. */}
+              {state?.ctx.__debug === true &&
+                " · debug run: one extra row per step (timing + safe metadata)"}
             </div>
           </Card>
         </>

@@ -107,6 +107,7 @@ export function CanvasTopBar({
   onCheck,
   checking,
   onRun,
+  onRunDebug,
 }: {
   name: string;
   onNameChange: (v: string) => void;
@@ -152,6 +153,10 @@ export function CanvasTopBar({
   onCheck: () => void;
   checking: boolean;
   onRun: () => void;
+  /** Same as onRun, but starts the run with diagnostics on (the API's `debug` flag). Lives in
+   *  the overflow menu, not next to "Save & run", because it is the occasional answer to "why
+   *  did that step do that", not the everyday one. */
+  onRunDebug: () => void;
 }) {
   const navigate = useNavigate();
   const phone = useMediaQuery(PHONE_QUERY);
@@ -547,6 +552,15 @@ export function CanvasTopBar({
                   action: onToggleInput,
                   disabled: busy,
                 },
+                // Diagnostics: a normal "Save & run" PLUS the API's per-run `debug` flag. Gated
+                // exactly like "Save & run" (it saves first). The hint is the honest cost — it is
+                // a real run, and it produces more log output than a plain one.
+                {
+                  label: "Save & run with debug",
+                  hint: "Adds a per-step row (timing, model, tokens, cost, HTTP status) to the run's Execution log and logs it verbosely in the worker. Runs the flow for real.",
+                  action: onRunDebug,
+                  disabled: busy || checking || !graphValid || !maySave,
+                },
               ].map((it) => (
                 <button
                   key={it.label}
@@ -572,6 +586,20 @@ export function CanvasTopBar({
                   }}
                 >
                   {it.label}
+                  {"hint" in it && it.hint && (
+                    <span
+                      style={{
+                        display: "block",
+                        fontSize: "var(--text-2xs)",
+                        lineHeight: 1.4,
+                        color: "var(--ink-3)",
+                        marginTop: 2,
+                        whiteSpace: "normal",
+                      }}
+                    >
+                      {it.hint}
+                    </span>
+                  )}
                 </button>
               ))}
 
