@@ -134,6 +134,18 @@
           }
         }
       }
+    },
+    "/me": {
+      "get": {
+        "operationId": "identifyAdmin",
+        "parameters": [
+          {
+            "name": "Intercom-Version",
+            "in": "header",
+            "required": false
+          }
+        ]
+      }
     }
   }
 }

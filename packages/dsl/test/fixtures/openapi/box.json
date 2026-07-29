@@ -148,6 +148,18 @@
           }
         }
       }
+    },
+    "/users/me": {
+      "get": {
+        "operationId": "get_users_me",
+        "parameters": [
+          {
+            "name": "fields",
+            "in": "query",
+            "required": false
+          }
+        ]
+      }
     }
   }
 }
