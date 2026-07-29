@@ -163,6 +163,18 @@ const ACKNOWLEDGED: { finding: string; why: string }[] = [
       'sendgrid.send_mail: body "from.email" is required upstream and reaches the API only inside the free-form JSON field "from"',
     why: 'By design: `from` is a `type: "json"` field hinted `{ email, name? }`. The v3 Mail Send body is deeply structured (personalizations/content are arrays), so the whole envelope is authored as JSON.',
   },
+  {
+    finding: 'gitlab.create_issue: path field "projectId" ↔ upstream "id"',
+    why: 'Deliberate rename: GitLab calls every scoping segment "id", so a bare "id" beside "issueIid" in a config panel says nothing. Substitution is positional.',
+  },
+  {
+    finding: 'gitlab.get_issue: path field "projectId" ↔ upstream "id"',
+    why: "Deliberate rename — same reason as create_issue.",
+  },
+  {
+    finding: 'gitlab.list_issues: path field "projectId" ↔ upstream "id"',
+    why: "Deliberate rename — same reason as create_issue.",
+  },
 ];
 
 /**
@@ -185,6 +197,22 @@ const UNSPECIFIED: { action: string; why: string }[] = [
       "PostHog's schema is generated from DRF and omits this route; `@me` is a viewset alias " +
       "rather than a registered path. Verified live: unauthenticated " +
       "`GET https://app.posthog.com/api/users/@me/` → 401, not 404.",
+  },
+  {
+    action: "gitlab.comment_issue",
+    why:
+      "GitLab's OpenAPI is GENERATED from its Grape routes at release time and is partial — 863 " +
+      "paths out of a much larger API. The Notes API is one of the omissions: the document has " +
+      "`/issues/{issue_iid}/award_emoji`, `/links`, `/time_estimate` but no `/notes`. Verified " +
+      "live: unauthenticated `POST https://gitlab.com/api/v4/projects/278964/issues/1/notes` → " +
+      "401 while `.../issues/1/nonsense` → 404, so the route exists.",
+  },
+  {
+    action: "gitlab.get_me",
+    why:
+      "Same generator gap — `/api/v4/user` (the current-user read the connection probe uses) is " +
+      "absent from the published document, which has `/users/{id}/…` but no `/user`. Verified " +
+      "live: unauthenticated `GET https://gitlab.com/api/v4/user` → 401, `/api/v4/nonsense` → 404.",
   },
 ];
 
@@ -876,7 +904,19 @@ describe("advisory drift — reported, never failed", () => {
  */
 describe("body-encoding coverage (#813)", () => {
   it("reports how much of the catalog a spec can actually vouch for", () => {
+    // The DENOMINATOR is computed from the whole catalog, not from the fixtures (#813 follow-up).
+    // §2.5 of docs/integrations/VERIFICATION.md quotes an "X of Y" — counting Y by hand is how a
+    // coverage claim goes stale silently the next time somebody adds a provider.
+    const bodyBearing = (a: IntegrationAction) =>
+      a.write === true && a.fields.some((f) => f.in === "body");
+    const universe = Object.entries(INTEGRATION_CATALOG).flatMap(
+      ([provider, entry]) =>
+        entry.actions.filter(bodyBearing).map((a) => `${provider}.${a.key}`),
+    );
     const writes = checks.filter((c) => c.action.write);
+    const covered = new Set(
+      writes.filter((c) => bodyBearing(c.action) && c.op).map((c) => c.key),
+    );
     const rows: string[] = [];
     let confirmed = 0;
     let unknowable = 0;
@@ -892,15 +932,25 @@ describe("body-encoding coverage (#813)", () => {
           `${String(counts.unknowable).padStart(2)} unknowable  ${String(counts.wrong).padStart(2)} wrong`,
       );
     }
+    const providersWithBodyWrites = new Set(
+      universe.map((k) => k.split(".")[0]),
+    );
     process.stderr.write(
       `\n#813 spec-verified write bodies — ${writes.length} write action(s) across ` +
         `${new Set(writes.map((c) => c.provider)).size} pinned provider(s):\n` +
         `${rows.join("\n")}\n` +
-        `    ${"TOTAL body fields".padEnd(34)} ${confirmed} confirmed, ${unknowable} unknowable, ${wrong} wrong\n\n`,
+        `    ${"TOTAL body fields".padEnd(34)} ${confirmed} confirmed, ${unknowable} unknowable, ${wrong} wrong\n` +
+        `\n    COVERAGE  ${covered.size} of ${universe.length} body-bearing write actions, ` +
+        `${new Set([...covered].map((k) => k.split(".")[0])).size} of ` +
+        `${providersWithBodyWrites.size} providers.\n` +
+        `    NOT covered: ${universe
+          .filter((k) => !covered.has(k))
+          .join(", ")}\n\n`,
     );
     // The only assertion: the summary must be summarizing something. A fixture directory that
     // stopped loading would otherwise print a tidy table of zeroes.
     expect(writes.length).toBeGreaterThan(0);
     expect(confirmed).toBeGreaterThan(0);
+    expect(universe.length).toBeGreaterThan(covered.size - 1);
   });
 });

@@ -125,6 +125,20 @@ const SOURCES = {
     url: "https://raw.githubusercontent.com/intercom/Intercom-OpenAPI/main/descriptions/2.16/api.intercom.io.yaml",
     pathPrefix: "",
   },
+  digitalocean: {
+    url: "https://raw.githubusercontent.com/digitalocean/openapi/main/specification/DigitalOcean-public.v2.yaml",
+    pathPrefix: "/v2",
+    // The root document is a table of contents — `paths: {/v2/droplets: {$ref: "resources/…"}}`.
+    external: true,
+  },
+  gitlab: {
+    // GitLab generates this from Grape at release time; it is SWAGGER 2.0 and PARTIAL — the Notes
+    // API and `/user` are simply not in it (see UNSPECIFIED in the drift spec). `openapi.yaml`,
+    // the hand-written one #813 looked at, is gone; this is the generated document that replaced it.
+    url: "https://gitlab.com/gitlab-org/gitlab/-/raw/master/doc/api/openapi/openapi_v2.yaml",
+    pathPrefix: "/api/v4",
+    format: "yaml",
+  },
 };
 
 /**
@@ -152,7 +166,6 @@ const SOURCES = {
  *   linear, monday — GraphQL; there are no per-operation request schemas to diff.
  */
 
-const HTTP_METHODS = ["get", "put", "post", "delete", "patch"];
 /** Placeholders differ in name between us and upstream, so match on SHAPE. */
 const shape = (path) => path.replace(/\{[^}]*\}/g, "{}");
 
@@ -175,6 +188,93 @@ function makeDeref(root) {
     }
     return node;
   };
+}
+
+// ── external `$ref`s ────────────────────────────────────────────────────────────────────────────
+//
+// DigitalOcean and GitLab publish a ROOT document that is little more than a table of contents:
+// `paths: { /v2/droplets: { $ref: "resources/droplets/droplets.yml" } }`. `makeDeref` only ever
+// resolved `#/` refs, so those path items arrived with no `get`/`post` key at all and every action
+// looked "removed upstream" — which is why #813 filed them as unvendorable rather than wrong.
+//
+// The fix is deliberately DEMAND-DRIVEN, not a bundler. Fetching the transitive closure of a
+// multi-file spec is hundreds of requests for a catalog that calls four operations; instead the
+// path index is keyed by path SHAPE alone (no method — that is only knowable after resolving), and
+// a path item is materialized ONLY when an action matches its shape. Resolution is memoized per
+// path, so two actions on one path (`GET`/`POST /droplets`) fetch once.
+
+/** Absolute url → parsed document. Shared across providers: a `$ref` chain revisits files. */
+const documents = new Map();
+
+async function loadDocument(url, format) {
+  const cached = documents.get(url);
+  if (cached) return cached;
+  const res = await fetch(url);
+  if (!res.ok)
+    throw new Error(`${res.status} ${res.statusText} — ${url}`);
+  const isYaml =
+    (format ?? (/\.ya?ml($|\?)/.test(url) ? "yaml" : "json")) === "yaml";
+  // `yaml` is a devDependency of this package and imported LAZILY, so a JSON-only refresh still
+  // runs if it isn't installed — and nothing here is reachable from `dist/`, which apps/web bundles.
+  const doc = isYaml
+    ? (await import("yaml")).parse(await res.text())
+    : await res.json();
+  documents.set(url, doc);
+  return doc;
+}
+
+/** A JSON-Pointer fragment (`/components/schemas/Foo`, or "" for the whole document). */
+function pointerInto(doc, pointer) {
+  if (!pointer || pointer === "/") return doc;
+  let cur = doc;
+  for (const raw of pointer.replace(/^\//, "").split("/")) {
+    const part = decodeURIComponent(raw)
+      .replace(/~1/g, "/")
+      .replace(/~0/g, "~");
+    cur = cur?.[part];
+  }
+  return cur;
+}
+
+/**
+ * Inline every `$ref` under `node` — local (`#/…`) and external (`shared/models/x.yml#/foo`),
+ * the latter resolved as a URL RELATIVE to the document that contained it, which is what makes a
+ * split spec resolvable from one entry point.
+ *
+ * `hops` counts REF FOLLOWS, not object depth: a plain nested object costs nothing, so a legitimate
+ * schema is never truncated for being deep, while a `$ref` chain is bounded. Cycles — a schema that
+ * references itself, which both DigitalOcean and GitLab have — are caught by `stack`, the set of
+ * refs already being resolved ON THIS PATH; a depth counter alone cannot tell a cycle from a deep
+ * chain, and the marker left behind says which it was.
+ */
+async function materialize(node, docUrl, stack = new Set(), hops = 0) {
+  if (!node || typeof node !== "object") return node;
+  if (Array.isArray(node))
+    return Promise.all(node.map((n) => materialize(n, docUrl, stack, hops)));
+  if (typeof node.$ref === "string") {
+    if (hops > 12) return { "x-ref-depth-exceeded": node.$ref };
+    const [file, pointer = ""] = node.$ref.split("#");
+    const targetUrl = file ? new URL(file, docUrl).href : docUrl;
+    const key = `${targetUrl}#${pointer}`;
+    if (stack.has(key)) return { "x-circular-ref": node.$ref };
+    const target = pointerInto(await loadDocument(targetUrl), pointer);
+    if (target === undefined) return { "x-unresolved-ref": node.$ref };
+    const resolved = await materialize(
+      target,
+      targetUrl,
+      new Set(stack).add(key),
+      hops + 1,
+    );
+    // OpenAPI 3.1 allows keys beside `$ref` (a `description` override, most often). Ours win.
+    const { $ref: _ignored, ...siblings } = node;
+    return Object.keys(siblings).length
+      ? { ...resolved, ...(await materialize(siblings, docUrl, stack, hops)) }
+      : resolved;
+  }
+  const out = {};
+  for (const [k, v] of Object.entries(node))
+    out[k] = await materialize(v, docUrl, stack, hops);
+  return out;
 }
 
 /**
@@ -365,40 +465,51 @@ function swagger2RequestBody(op, pathItem, root, deref, keep) {
 let total = 0;
 mkdirSync(outDir, { recursive: true });
 
-for (const [provider, { url, pathPrefix, format }] of Object.entries(SOURCES)) {
+for (const [provider, { url, pathPrefix, format, external }] of Object.entries(
+  SOURCES,
+)) {
   const catalogEntry = INTEGRATION_CATALOG[provider];
   if (!catalogEntry) throw new Error(`no catalog provider "${provider}"`);
 
-  // Index upstream by METHOD + path-shape, the same key the drift spec matches on. Each entry
-  // carries its OWN spec + deref, so a multi-document provider (SendGrid) resolves each `$ref`
-  // against the document it came from.
+  // Index upstream by path SHAPE. Deliberately not by method+shape: in a split spec the path item
+  // is itself a `$ref` to another file, so which methods it carries is not knowable without a
+  // fetch. Candidates keep source order, so a multi-document provider (SendGrid) still resolves
+  // FIRST-match-wins, and each carries its OWN document + deref so a `$ref` resolves against the
+  // file it came from.
   const urls = Array.isArray(url) ? url : [url];
-  const index = new Map();
+  const candidates = new Map();
   let firstSpec;
   for (const one of urls) {
     process.stdout.write(`${provider}: fetching ${one}\n`);
-    const res = await fetch(one);
-    if (!res.ok)
-      throw new Error(`${provider}: ${res.status} ${res.statusText} — ${one}`);
-    // `yaml` is a devDependency of this package and is imported LAZILY, so a JSON-only refresh
-    // still runs if it isn't installed — and nothing here is reachable from `dist/`, which is
-    // what apps/web bundles.
-    const isYaml = (format ?? (/\.ya?ml($|\?)/.test(one) ? "yaml" : "json")) === "yaml";
-    const spec = isYaml
-      ? (await import("yaml")).parse(await res.text())
-      : await res.json();
+    const spec = await loadDocument(one, format).catch((e) => {
+      throw new Error(`${provider}: ${e.message}`);
+    });
     firstSpec ??= spec;
     const deref = makeDeref(spec);
     const isSwagger2 = typeof spec.swagger === "string";
     for (const [path, itemRaw] of Object.entries(spec.paths ?? {})) {
-      const item = deref(itemRaw);
-      for (const method of HTTP_METHODS) {
-        const key = `${method.toUpperCase()} ${shape(path)}`;
-        if (item?.[method] && !index.has(key))
-          index.set(key, { path, method, item, spec, deref, isSwagger2 });
-      }
+      const key = shape(path);
+      const list = candidates.get(key) ?? [];
+      list.push({ path, itemRaw, docUrl: one, spec, deref, isSwagger2 });
+      candidates.set(key, list);
     }
   }
+
+  /** The path item with its `$ref`s inlined — fetched at most once per path, and only for a path
+   *  some catalog action actually names. */
+  const resolveItem = async (candidate) =>
+    (candidate.item ??= external
+      ? await materialize(candidate.itemRaw, candidate.docUrl)
+      : candidate.deref(candidate.itemRaw));
+
+  /** The first candidate for this shape that declares this method. */
+  const findOperation = async (method, shapeKey) => {
+    for (const candidate of candidates.get(shapeKey) ?? []) {
+      const item = await resolveItem(candidate);
+      if (item?.[method]) return { ...candidate, item, method };
+    }
+    return undefined;
+  };
 
   // Two catalog actions can share ONE upstream operation (a create and an "upsert" on the same
   // POST). The fixture holds one entry per operation, so the recursion set is the UNION of every
@@ -416,7 +527,10 @@ for (const [provider, { url, pathPrefix, format }] of Object.entries(SOURCES)) {
   const unmatched = [];
   for (const action of catalogEntry.actions) {
     const key = `${action.method} ${shape(pathPrefix + action.pathTemplate)}`;
-    const hit = index.get(key);
+    const hit = await findOperation(
+      action.method.toLowerCase(),
+      shape(pathPrefix + action.pathTemplate),
+    );
     if (!hit) {
       unmatched.push(`${action.key} (${key})`);
       continue;
