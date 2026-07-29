@@ -7,12 +7,12 @@
  * only the person looking at the screen knows which API this token is for.
  *
  * Why some providers are missing: the probe may only ever issue a NON-WRITE, ZERO-ARGUMENT GET,
- * derived from the catalog itself (`pickConnectionTestAction`). Since #835 that covers 32 of the 38;
- * the six left out have no such call (Slack's argument-free `auth.test` answers HTTP 200 with
+ * derived from the catalog itself (`pickConnectionTestAction`). Since #835 that covers 31 of the 38;
+ * the seven left out have no such call (Slack's argument-free `auth.test` answers HTTP 200 with
  * `{"ok": false}` for a dead token, Linear/Monday/Dropbox are POST-only, Graph's `/me` is
- * delegated-token-only, Sheets has no identity endpoint) and are named in the hint instead, pointing
- * at single-node Test. Offering them here just to return "unknown" would be worse than saying so up
- * front.
+ * delegated-token-only, HubSpot's cheapest read is scope-gated, Sheets has no identity endpoint) and
+ * are named in the hint instead, pointing at single-node Test. Offering them here just to return
+ * "unknown" would be worse than saying so up front.
  */
 import { useMemo, useState } from "react";
 import { INTEGRATION_PROVIDERS, pickConnectionTestAction } from "@naary/dsl";
@@ -55,8 +55,8 @@ export function ConnectionTestControl({
   const hint = useMemo(
     () =>
       `${UNTESTABLE_COUNT} of ${INTEGRATION_PROVIDERS.length} providers (Slack, Linear, Monday.com, ` +
-      `Dropbox, Microsoft Graph, Google Sheets) have no read-only call we can make without ` +
-      `arguments — test those with an integration node on the canvas using single-node Test.`,
+      `Dropbox, Microsoft Graph, HubSpot, Google Sheets) have no read-only call we can make ` +
+      `without arguments — test those with an integration node on the canvas using single-node Test.`,
     [],
   );
 

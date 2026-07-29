@@ -303,7 +303,14 @@ describe("ConnectionTestService — declines to probe (`unknown`)", () => {
     expect(out.connectionStatus).toBeNull();
   });
 
-  it.each(["googlesheets", "linear", "monday", "dropbox", "msgraph"])(
+  it.each([
+    "googlesheets",
+    "linear",
+    "monday",
+    "dropbox",
+    "msgraph",
+    "hubspot",
+  ])(
     "%s reports unknown with the catalog's declared reason, and calls nothing",
     async (providerKey) => {
       useLocalProvider();
@@ -492,14 +499,14 @@ describe("the probe can only ever be a safe read (catalog-derived)", () => {
     }
   });
 
-  it("is honest about coverage: 32 of the 38 providers can be probed, and names the other 6", () => {
+  it("is honest about coverage: 31 of the 38 providers can be probed, and names the other 7", () => {
     // A tripwire, not a target (it was 14/24 before #835). If a catalog entry gains or loses a
     // safe probe this fails, and the number in docs/integrations/VERIFICATION.md, the dry-run
     // service docblock and apps/web must be updated with it.
     const probes = INTEGRATION_PROVIDERS.map((p) =>
       pickConnectionTestAction(p.key),
     );
-    expect(probes.filter((p) => p.kind === "read")).toHaveLength(32);
+    expect(probes.filter((p) => p.kind === "read")).toHaveLength(31);
     // Named rather than counted: each of these is a decision with a reason, and the reason is
     // shown to the user. A provider joining this list silently is the bug #835 was about.
     expect(
@@ -511,11 +518,23 @@ describe("the probe can only ever be a safe read (catalog-derived)", () => {
     ).toEqual([
       "dropbox", // POST-only RPC
       "googlesheets", // no identity endpoint on sheets.googleapis.com
+      "hubspot", // no scope-free identity endpoint; a deals-only token would 403
       "linear", // GraphQL POST
       "monday", // GraphQL POST
       "msgraph", // /me is delegated-token-only
       "slack", // answers 200 {"ok":false} to a dead token
     ]);
+  });
+
+  it("no PROBEABLE provider carries a leftover 'why we can't probe this' reason", () => {
+    // The converse rot: a provider that gains a safe read keeps its old excuse, which then sits in
+    // the catalog claiming something untrue and reappears the day the read is removed.
+    const stale = INTEGRATION_PROVIDERS.filter(
+      (p) =>
+        p.unprobeableReason !== undefined &&
+        pickConnectionTestAction(p.key).kind === "read",
+    ).map((p) => p.key);
+    expect(stale).toEqual([]);
   });
 
   it("every unprobeable provider explains itself in words the user can act on", () => {

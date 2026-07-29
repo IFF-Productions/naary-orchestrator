@@ -254,7 +254,7 @@ describe("dry run can never reach a write action", () => {
     }
     // Without this the test passes vacuously if the probe union is ever renamed — which is
     // precisely what happened when this was written against a `kind` value that never existed.
-    // 32 of 38 providers are probeable since #835; the floor only has to rule out "zero".
+    // 31 of 38 providers are probeable since #835; the floor only has to rule out "zero".
     expect(checked, "no provider was actually checked").toBeGreaterThan(100);
   });
 });

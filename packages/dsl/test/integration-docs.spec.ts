@@ -129,9 +129,9 @@ describe("what the guides claim is derived, not asserted", () => {
    * deliberately. A drop means someone made a read action mutating or added a required field to a
    * probe; a rise means a new argument-free read (good, update the list).
    */
-  it("32 providers are one-click testable, 6 are not", () => {
+  it("31 providers are one-click testable, 7 are not", () => {
     // 14/24 before #835, when the rule was "any incidentally argument-free read" and it missed
-    // GitHub, Jira, Notion, GitLab and 14 others. The six that remain are named — each has a
+    // GitHub, Jira, Notion, GitLab and 13 others. The seven that remain are named — each has a
     // catalog `unprobeableReason` saying why, which is what the user is shown.
     const testable = INTEGRATION_PROVIDERS.filter((p) => probeAction(p));
     expect(testable.map((p) => p.key).sort()).toEqual([
@@ -147,7 +147,6 @@ describe("what the guides claim is derived, not asserted", () => {
       "front",
       "github",
       "gitlab",
-      "hubspot",
       "intercom",
       "jira",
       "mailchimp",
@@ -172,6 +171,7 @@ describe("what the guides claim is derived, not asserted", () => {
     expect(unprobeable.map((p) => p.key).sort()).toEqual([
       "dropbox",
       "googlesheets",
+      "hubspot",
       "linear",
       "monday",
       "msgraph",

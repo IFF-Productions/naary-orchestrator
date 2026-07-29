@@ -779,6 +779,11 @@ const HUBSPOT: IntegrationProvider = {
   description:
     "Act on HubSpot CRM — get, create, and update contacts; create deals.",
   auth: "A custom connection whose token is a HubSpot private-app access token.",
+  unprobeableReason:
+    "HubSpot has no identity endpoint a private-app token can call without a scope. The obvious " +
+    "candidate — listing contacts — is gated on `crm.objects.contacts.read`, so a token scoped for " +
+    "deals only would answer 403 and this check would report a perfectly good connection as a dead " +
+    "credential. Test a HubSpot connection with an integration node on a canvas (single-node Test).",
   actions: [
     {
       key: "get_contact",
@@ -846,17 +851,6 @@ const HUBSPOT: IntegrationProvider = {
           bodyPath: "properties",
         },
       ],
-    },
-    {
-      key: "list_contacts",
-      label: "List contacts",
-      description:
-        "List contacts (first page). Needs no arguments, so it is the connection check — HubSpot has no identity endpoint a private-app token can call.",
-      method: "GET",
-      pathTemplate: "/crm/v3/objects/contacts",
-      write: false,
-      probe: true,
-      fields: [],
     },
   ],
 };
@@ -2309,9 +2303,9 @@ const MSGRAPH: IntegrationProvider = {
   auth: "A custom connection whose token is a Microsoft Graph OAuth access token — sent as a Bearer token.",
   unprobeableReason:
     "Microsoft Graph's `/me` answers only for a DELEGATED token; an application (client-credentials) " +
-    "token — which is what the `/users/{id}/…` actions here are built for — fails it with a 400 that " +
-    "looks exactly like a bad credential. Reporting that as a dead token would be a lie, so Graph is " +
-    "left unchecked: test it with an integration node on a canvas (single-node Test).",
+    "token — which is what the `/users/{id}/…` actions here are built for — is rejected by it in a " +
+    "way indistinguishable from a bad credential. Reporting that as a dead token would be a lie, so " +
+    "Graph is left unchecked: test it with an integration node on a canvas (single-node Test).",
   actions: [
     {
       key: "list_messages",

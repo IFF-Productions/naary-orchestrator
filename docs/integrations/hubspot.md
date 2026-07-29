@@ -5,10 +5,9 @@ label: 'HubSpot'
 category: 'Sales (CRM)'
 authType: bearer
 serverUrlRequired: false
-actionCount: 5
+actionCount: 4
 writeActionCount: 3
-oneClickTestable: true
-probeAction: list_contacts
+oneClickTestable: false
 liveVerified: false
 ---
 
@@ -43,9 +42,9 @@ Create and update HubSpot contacts and deals from a workflow.
 
 ## Verify it works
 
-**One-click:** this provider has an argument-free read (`list_contacts` → `GET /crm/v3/objects/contacts`), so a connection test can confirm the credential without touching your data.
+**No one-click check:** its read actions all need an id you have to supply, so there is no safe argument-free call to probe with.
 
-Either way, the definitive check is **single-node Test** on the canvas: drop a **HubSpot** node, pick this connection and the *List contacts* action, and run just that node. It executes the real activity with the real credential and shows you the provider's actual response.
+Either way, the definitive check is **single-node Test** on the canvas: drop a **HubSpot** node, pick this connection, choose a read action and fill its ids, and run just that node. It executes the real activity with the real credential and shows you the provider's actual response.
 
 > **Not yet proven against the real API.** This provider's request shape is typed and unit-tested, but no automated test has ever called the live service. If your first call fails with a 4xx, the fault may be ours — check `docs/integrations/VERIFICATION.md` and open an issue rather than assuming your token is wrong.
 
@@ -57,7 +56,6 @@ Either way, the definitive check is **single-node Test** on the canvas: drop a *
 | **Create contact** (write) | `POST` | `/crm/v3/objects/contacts` | `properties` | — |
 | **Update contact** (write) | `PATCH` | `/crm/v3/objects/contacts/{contactId}` | `contactId`, `properties` | — |
 | **Create deal** (write) | `POST` | `/crm/v3/objects/deals` | `properties` | — |
-| List contacts | `GET` | `/crm/v3/objects/contacts` | — | — |
 
 Fields can be typed in statically or **bound** to an upstream step's output (`{ from: <nodeId>, path: <dotted.path> }`) — ids and generated text are usually bound.
 
