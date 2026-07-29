@@ -368,6 +368,7 @@ export async function callHttpRequest(
           {
             httpStatus: status,
             http: captureHttpFailure({
+              nodeId: meta.nodeId,
               method: cfg.method,
               url: page.sent.url,
               requestHeaders: page.sent.headers,
@@ -622,6 +623,7 @@ export async function callGraphQL(
     // never captures anything.
     const capture = (): HttpFailureCapture =>
       captureHttpFailure({
+        nodeId: meta.nodeId,
         method: "POST",
         url: url.toString(),
         requestHeaders: headers,

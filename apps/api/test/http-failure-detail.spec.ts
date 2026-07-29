@@ -119,6 +119,32 @@ describe("sanitizeHttpFailure — rebuild, never forward", () => {
     expect(out?.request.headers).toEqual({ ok: "v" });
   });
 
+  it("trusts the worker's `truncated`, never re-derives it from text.length", () => {
+    // Redaction shrinks `text` while `bytes` stays the wire length, so `text.length < bytes`
+    // is true for most captures — deriving truncation from it labelled full bodies truncated.
+    const out = sanitizeHttpFailure({
+      request: {
+        method: "GET",
+        url: "https://x/y",
+        headers: {},
+        body: { text: "short", truncated: false, bytes: 4000 },
+      },
+    });
+    expect(out?.request.body).toEqual({
+      text: "short",
+      truncated: false,
+      bytes: 4000,
+    });
+  });
+
+  it("keeps the nodeId so the UI can attribute the call", () => {
+    const out = sanitizeHttpFailure({
+      nodeId: "integration-1",
+      request: { method: "GET", url: "https://x/y", headers: {} },
+    });
+    expect(out?.nodeId).toBe("integration-1");
+  });
+
   it("drops a response with no numeric status (never invents a status 0)", () => {
     const out = sanitizeHttpFailure({
       request: { method: "GET", url: "https://x/y", headers: {} },

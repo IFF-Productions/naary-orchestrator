@@ -162,6 +162,16 @@ export interface CapturedResponse {
 
 /** The blob stored under the failure's `details[0].http`. */
 export interface HttpFailureCapture {
+  /**
+   * The graph node that made this call.
+   *
+   * Needed because a run's history can hold SEVERAL activityTaskFailed events — a node with
+   * `onError: "continue"` records one and the run carries on — so the reader can't assume the
+   * first failure it finds belongs to the node the run died on. A request/response rendered
+   * under the wrong step is worse than none: it sends the user debugging a call that step
+   * never made.
+   */
+  nodeId?: string;
   request: CapturedRequest;
   response?: CapturedResponse;
 }
@@ -260,7 +270,11 @@ export function captureBody(
       // Not JSON (HTML, form-encoded, plain text) — the text passes below handle it.
     }
   }
-  const overflowed = text.length > maxBytes;
+  // Measured against the ORIGINAL, because the claim being made is "we did not show you
+  // everything". Measuring the scrubbed text gets it wrong in both directions: a 2.1KB body that
+  // redacts down to 300 chars was not cut at the boundary, and a 500KB body that redacts to 100
+  // chars inside the window still lost 499.9KB.
+  const overflowed = raw.length > maxBytes;
   text = redactString(
     text
       .slice(0, maxBytes + TRUNCATION_SLACK)
@@ -270,7 +284,7 @@ export function captureBody(
   const bytes = raw.length;
   if (!overflowed) return { text, truncated: false, bytes };
   return {
-    text: `${text.slice(0, maxBytes)}\n…[truncated to ${maxBytes} chars; the original body was ${bytes} bytes]`,
+    text: `${text.slice(0, maxBytes)}\n…[truncated — the original body was ${bytes} bytes]`,
     truncated: true,
     bytes,
   };
@@ -283,6 +297,7 @@ export function captureBody(
  * header for why a captured payload has to be the exception, not the rule.
  */
 export function captureHttpFailure(input: {
+  nodeId?: string;
   method: string;
   url: string;
   requestHeaders?: HeadersLike;
@@ -307,6 +322,7 @@ export function captureHttpFailure(input: {
   }
 
   const capture: HttpFailureCapture = { request };
+  if (input.nodeId) capture.nodeId = String(input.nodeId).slice(0, 200);
   // No status means we never got a response (DNS, TLS, timeout, egress block) — say nothing
   // rather than inventing a zero status the UI would render as a real one.
   if (typeof input.status === "number") {

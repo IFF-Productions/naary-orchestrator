@@ -180,10 +180,20 @@ describe("captureBody — an Authorization value never survives", () => {
     const out = captureBody(raw);
     expect(out?.truncated).toBe(true);
     expect(out?.bytes).toBe(5000);
-    expect(out?.text).toContain("truncated to 2048 chars");
-    expect(out?.text).toContain("the original body was 5000 bytes");
+    expect(out?.text).toContain("truncated — the original body was 5000 bytes");
     // Marker aside, we stored the cap and not a byte more.
     expect(out?.text.split("\n…[")[0].length).toBe(MAX_BODY_BYTES);
+  });
+
+  it("is NOT truncated just because redaction shrank it", () => {
+    // `bytes` is the wire length and `text` is post-redaction, so text.length < bytes is the
+    // NORMAL case for any body that had a credential removed. Only a real cut counts.
+    const out = captureBody(
+      JSON.stringify({ msg: "ok", token: "a-long-secret-value-here" }),
+    );
+    expect(out?.truncated).toBe(false);
+    expect(out?.text.length).toBeLessThan(out?.bytes ?? 0);
+    expect(out?.text).not.toContain("truncated");
   });
 
   it("does not mutate a parsed body handed in as an object", () => {
@@ -229,6 +239,7 @@ describe("captureHttpFailure", () => {
 
     expect(out.request.method).toBe("POST");
     expect(out.request.url).toBe(base.url);
+    expect(out.nodeId).toBeUndefined(); // only set when the caller passes it
     expect(out.request.headers).toEqual({
       authorization: "[REDACTED]",
       "content-type": "application/json",
@@ -245,6 +256,14 @@ describe("captureHttpFailure", () => {
     });
     expect(out.response?.body?.text).toBe('{"message":"Not Found"}');
     expect(JSON.stringify(out)).not.toContain("ghp_0123456789abcdefghij");
+  });
+
+  it("records the node that made the call, so the UI can attribute it", () => {
+    // A run's history can hold several activityTaskFailed events (onError:"continue"), so the
+    // capture has to say which node it belongs to or the step card can show the wrong call.
+    expect(captureHttpFailure({ ...base, nodeId: "integration-1" }).nodeId).toBe(
+      "integration-1",
+    );
   });
 
   it("redacts a credential carried in the URL's query string", () => {

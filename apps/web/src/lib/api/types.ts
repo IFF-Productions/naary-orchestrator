@@ -51,6 +51,8 @@ export interface HttpFailureBody {
  * un-redacts and never has anything to un-redact.
  */
 export interface HttpFailure {
+  /** The node that made the call. Absent on captures from a pre-#916 worker. */
+  nodeId?: string;
   request: {
     method: string;
     url: string;

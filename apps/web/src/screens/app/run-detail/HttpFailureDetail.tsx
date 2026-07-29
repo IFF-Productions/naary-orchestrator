@@ -186,18 +186,23 @@ export function HttpFailureDetail({ http }: { http: HttpFailure }) {
               <Body body={request.body} />
             </>
           )}
+          {/* The reason is already a full sentence from the worker ("withheld — this request
+              body carried a resolved $secret"), so it's rendered as-is under the same label the
+              body would have had — prefixing it would say "request body" twice. */}
           {request.bodyWithheld && (
-            <div
-              className="mono"
-              style={{
-                fontSize: "var(--text-2xs)",
-                color: "var(--ink-faint)",
-                marginTop: 8,
-                fontStyle: "italic",
-              }}
-            >
-              Request body {request.bodyWithheld}.
-            </div>
+            <>
+              <SubLabel>Request body</SubLabel>
+              <div
+                className="mono"
+                style={{
+                  fontSize: "var(--text-2xs)",
+                  color: "var(--ink-faint)",
+                  fontStyle: "italic",
+                }}
+              >
+                {request.bodyWithheld}
+              </div>
+            </>
           )}
 
           <SubLabel>Response</SubLabel>

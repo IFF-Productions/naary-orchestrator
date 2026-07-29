@@ -190,6 +190,7 @@ export async function callIntegration(
         {
           httpStatus: res.status,
           http: captureHttpFailure({
+            nodeId: meta.nodeId,
             method: plan.method,
             url: plan.url,
             requestHeaders: plan.headers,

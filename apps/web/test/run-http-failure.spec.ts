@@ -11,6 +11,7 @@ import type { HttpFailure, RunEvent } from "../src/lib/api";
  */
 
 const CAPTURE: HttpFailure = {
+  nodeId: "integration-1",
   request: {
     method: "POST",
     url: "https://api.github.com/repos/o/r/issues",
@@ -66,5 +67,15 @@ describe("historyTimes — the failing call", () => {
   it("is null for a run with no history at all", () => {
     expect(historyTimes(null).errorHttp).toBeNull();
     expect(historyTimes([]).errorHttp).toBeNull();
+  });
+
+  it("names the node it belongs to, so the card can refuse to show it elsewhere", () => {
+    // A node with onError:"continue" also records an activityTaskFailed, so the run's first
+    // error event isn't always the node that killed the run. The card gates on this id
+    // (RunDetail.tsx) rather than trusting the position.
+    const out = historyTimes([
+      ev({ id: 2, kind: "error", detail: "boom", http: CAPTURE }),
+    ]);
+    expect(out.errorHttp?.nodeId).toBe("integration-1");
   });
 });

@@ -82,7 +82,10 @@ function bodyView(v: unknown): HttpFailureBodyView | undefined {
   if (text === undefined) return undefined;
   return {
     text,
-    truncated: v.truncated === true || text.length < Number(v.bytes ?? 0),
+    // The WORKER is the authority on whether it cut anything. Re-deriving this from
+    // `text.length < bytes` reads as truncated on every body that merely had a credential
+    // scrubbed out of it — redaction shrinks the text while `bytes` stays the wire length.
+    truncated: v.truncated === true,
     bytes: typeof v.bytes === "number" && v.bytes >= 0 ? v.bytes : text.length,
   };
 }
@@ -98,6 +101,8 @@ export function sanitizeHttpFailure(v: unknown): HttpFailureView | undefined {
   const out: HttpFailureView = {
     request: { method, url, headers: headerMap(r.headers) },
   };
+  const nodeId = str(v.nodeId, 200);
+  if (nodeId) out.nodeId = nodeId;
   const reqBody = bodyView(r.body);
   if (reqBody) out.request.body = reqBody;
   const withheld = str(r.bodyWithheld, 200);

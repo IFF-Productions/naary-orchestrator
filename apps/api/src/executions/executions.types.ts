@@ -177,6 +177,8 @@ export interface HttpFailureBodyView {
  *  `HttpFailureCapture` — restated here rather than imported so the API keeps no worker dependency,
  *  and so the validator below has an explicit shape to check the decoded payload against. */
 export interface HttpFailureView {
+  /** The graph node that made the call — a run's history can hold several failures. */
+  nodeId?: string;
   request: {
     method: string;
     url: string;

@@ -370,6 +370,13 @@ export class RunHttpResponseResponse {
  * response body is customer data and a run's happy path must not accumulate copies of it.
  */
 export class RunHttpFailureResponse {
+  @ApiProperty({
+    required: false,
+    example: "integration-1",
+    description:
+      "The graph node that made this call. A run's history can hold several failures (a node with onError:'continue' records one and the run carries on), so the reader must not assume the first failure belongs to the node the run died on. Absent on captures written before this field existed.",
+  })
+  nodeId?: string;
   @ApiProperty({ type: RunHttpRequestResponse })
   request!: RunHttpRequestResponse;
   @ApiProperty({ required: false, type: RunHttpResponseResponse })
