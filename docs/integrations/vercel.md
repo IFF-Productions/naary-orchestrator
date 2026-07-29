@@ -8,7 +8,7 @@ serverUrlRequired: false
 actionCount: 4
 writeActionCount: 1
 oneClickTestable: true
-probeAction: list_deployments
+probeAction: list_projects
 liveVerified: false
 ---
 
@@ -42,9 +42,9 @@ Inspect Vercel projects and deployments from a workflow.
 
 ## Verify it works
 
-**One-click:** this provider has an argument-free read (`list_deployments` → `GET /v6/deployments`), so a connection test can confirm the credential without touching your data.
+**One-click:** this provider has an argument-free read (`list_projects` → `GET /v9/projects`), so a connection test can confirm the credential without touching your data.
 
-Either way, the definitive check is **single-node Test** on the canvas: drop a **Vercel** node, pick this connection and the *List deployments* action, and run just that node. It executes the real activity with the real credential and shows you the provider's actual response.
+Either way, the definitive check is **single-node Test** on the canvas: drop a **Vercel** node, pick this connection and the *List projects* action, and run just that node. It executes the real activity with the real credential and shows you the provider's actual response.
 
 > **Not yet proven against the real API.** This provider's request shape is typed and unit-tested, but no automated test has ever called the live service. If your first call fails with a 4xx, the fault may be ours — check `docs/integrations/VERIFICATION.md` and open an issue rather than assuming your token is wrong.
 

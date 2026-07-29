@@ -5,9 +5,10 @@ label: 'PostHog'
 category: 'Analytics'
 authType: bearer
 serverUrlRequired: false
-actionCount: 4
+actionCount: 5
 writeActionCount: 1
-oneClickTestable: false
+oneClickTestable: true
+probeAction: get_me
 liveVerified: false
 ---
 
@@ -41,9 +42,9 @@ Query PostHog events and people, and annotate releases, from a workflow.
 
 ## Verify it works
 
-**No one-click check:** its read actions all need an id you have to supply, so there is no safe argument-free call to probe with.
+**One-click:** this provider has an argument-free read (`get_me` → `GET /api/users/@me/`), so a connection test can confirm the credential without touching your data.
 
-Either way, the definitive check is **single-node Test** on the canvas: drop a **PostHog** node, pick this connection, choose a read action and fill its ids, and run just that node. It executes the real activity with the real credential and shows you the provider's actual response.
+Either way, the definitive check is **single-node Test** on the canvas: drop a **PostHog** node, pick this connection and the *Get current user* action, and run just that node. It executes the real activity with the real credential and shows you the provider's actual response.
 
 > **Not yet proven against the real API.** This provider's request shape is typed and unit-tested, but no automated test has ever called the live service. If your first call fails with a 4xx, the fault may be ours — check `docs/integrations/VERIFICATION.md` and open an issue rather than assuming your token is wrong.
 
@@ -55,6 +56,7 @@ Either way, the definitive check is **single-node Test** on the canvas: drop a *
 | List persons | `GET` | `/api/projects/{projectId}/persons/` | `projectId` | `search` |
 | Get person | `GET` | `/api/projects/{projectId}/persons/{personId}/` | `projectId`, `personId` | — |
 | **Create annotation** (write) | `POST` | `/api/projects/{projectId}/annotations/` | `projectId`, `content` | `date_marker` |
+| Get current user | `GET` | `/api/users/@me/` | — | — |
 
 Fields can be typed in statically or **bound** to an upstream step's output (`{ from: <nodeId>, path: <dotted.path> }`) — ids and generated text are usually bound.
 

@@ -17,6 +17,7 @@
  * Regenerate with `pnpm gen:integration-docs`.
  */
 import type { IntegrationAction, IntegrationProvider } from "../integrations";
+import { pickConnectionTestAction } from "../integration-request";
 import type { IntegrationProse } from "./integration-prose";
 
 /**
@@ -101,16 +102,20 @@ function article(noun: string): string {
 }
 
 /**
- * The action Test Connection would probe: a NON-WRITE action needing NO arguments. Anything else
- * cannot be a one-click check — either it mutates, or it needs an id only the user has. Same rule
- * the Test Connection route applies, kept here so the docs and the button can't disagree.
+ * The action Test Connection would probe.
+ *
+ * Asks `pickConnectionTestAction` — the SAME function the route calls — rather than re-deriving the
+ * rule here. It used to be a copy ("first non-write GET with no required fields"), which was fine
+ * while the rule was one line and became a drift risk the moment #835 added declared probes and
+ * auth-mode variants. No `authMode` is passed: the docs answer the capability question ("can this
+ * provider be checked at all?"), and a per-connection variant (GitHub App) is prose, not frontmatter.
  */
 export function probeAction(
   p: IntegrationProvider,
 ): IntegrationAction | undefined {
-  return (p.actions ?? []).find(
-    (a) => !a.write && a.method === "GET" && requiredKeys(a).length === 0,
-  );
+  const probe = pickConnectionTestAction(p.key);
+  if (probe.kind !== "read") return undefined;
+  return (p.actions ?? []).find((a) => a.key === probe.action);
 }
 
 function actionRow(a: IntegrationAction): string {

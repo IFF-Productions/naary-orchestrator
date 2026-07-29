@@ -123,8 +123,7 @@ function formEncodeBody(
   // Hand-rolled rather than URLSearchParams: this package is platform-agnostic and also evaluated
   // inside the Temporal workflow sandbox, where a host global is not something to rely on.
   // `encodeURIComponent` + `%20`→`+` matches what URLSearchParams emits for these values.
-  const enc = (v: string): string =>
-    encodeURIComponent(v).replace(/%20/g, "+");
+  const enc = (v: string): string => encodeURIComponent(v).replace(/%20/g, "+");
   const parts: string[] = [];
   const append = (key: string, value: unknown): void => {
     if (value !== null && typeof value === "object") {
@@ -215,14 +214,33 @@ export function planIntegrationCall(
 }
 
 /**
- * A safe connection-test probe: the provider's cheapest **non-write, zero-required-field**
- * read, or an honest `unknown` (#701).
+ * A safe connection-test probe: an **argument-free, non-write GET** from the provider's own
+ * catalog entry, or an honest `unknown` (#701, widened in #835).
  *
- * Derived entirely from the catalog's own `write` flag and `fields[].required` — there is no
- * hand-maintained probe table to drift out of sync with the actions the node can actually run.
- * `unknown` is a first-class answer: a provider whose every action mutates (Slack) or whose
- * cheapest read still needs an id (GitHub needs owner/repo/number) must NOT be probed by
- * guessing an argument or by picking something that writes.
+ * ## The safety gate comes first, and nothing can widen it
+ *
+ * A candidate must be `write: false`, a `GET`, and have no field the user would have to supply.
+ * Everything below only ever CHOOSES among actions that already pass that gate — so a catalog edit
+ * cannot turn this into a call that mutates, and a `probe` declaration on a write is inert rather
+ * than dangerous.
+ *
+ * ## Why a declaration exists at all (#835)
+ *
+ * The original rule — "any zero-argument read" — reached 14 of 38 providers, skipping GitHub, Slack,
+ * Jira, Notion, GitLab and Linear, i.e. the popular half. It was skipping them for a real reason
+ * (GitHub's cheapest read needs owner/repo), so the fix is in the CATALOG: each provider that has a
+ * genuine identity read now declares it with `probe`, which
+ *
+ *   - PINS the choice (otherwise a later zero-field list action could silently displace it), and
+ *   - carries `authModes`, because one provider can need TWO probes. GitHub, verified live: a PAT
+ *     gets 200 from `/user` and 403 from `/installation/repositories`; a GitHub App installation
+ *     token gets exactly the reverse. Probing an App connection with `/user` would report a healthy
+ *     connection as broken — the one outcome worse than not probing.
+ *
+ * `unknown` stays a first-class answer, and the honest one: Slack's argument-free `auth.test`
+ * answers HTTP 200 with `{"ok": false}` for a dead token, Linear and Monday are GraphQL POSTs, and
+ * Google Sheets has no identity endpoint on its own host. Those providers say so (the catalog's
+ * `unprobeableReason`) instead of being probed with something that would mislead.
  */
 export type ConnectionTestProbe =
   | {
@@ -239,8 +257,22 @@ export type ConnectionTestProbe =
 const needsUser = (f: { required: boolean; const?: unknown }): boolean =>
   f.required && f.const === undefined;
 
+export interface ConnectionTestProbeOptions {
+  /**
+   * The connection's `Connection.authMode` (`pat` / `api_token` / `oauth` / `github_app` / …), when
+   * the caller knows it. It selects between a provider's auth-mode-specific probes — GitHub's App
+   * installation token cannot call `/user`, so passing this is what keeps a working App connection
+   * from being reported as broken.
+   *
+   * Omit it to ask the capability question instead ("could this provider be probed at all?"), which
+   * is what the UI does when it decides which providers to offer a Test button for.
+   */
+  authMode?: string | null;
+}
+
 export function pickConnectionTestAction(
   providerKey: string,
+  opts: ConnectionTestProbeOptions = {},
 ): ConnectionTestProbe {
   const provider = getIntegrationProvider(providerKey);
   if (!provider) {
@@ -249,23 +281,58 @@ export function pickConnectionTestAction(
       reason: `Unknown integration provider '${providerKey}'.`,
     };
   }
-  const reads = provider.actions.filter((a) => !a.write);
-  if (reads.length === 0) {
-    return {
-      kind: "unknown",
-      reason:
-        `Every ${provider.label} action in the catalog writes, so there is no call that could ` +
-        `prove this token without changing data. Test it with an integration node on a canvas ` +
-        `(single-node Test) against a scratch target instead.`,
-    };
-  }
-  // Fewest fields wins; Array.prototype.sort is stable, so catalog order breaks ties — the
-  // pick is deterministic for a given catalog.
-  const zeroArg = reads
-    .filter((a) => !a.fields.some(needsUser))
-    .sort((a, b) => a.fields.length - b.fields.length);
-  const pick = zeroArg[0];
+  const authMode = opts.authMode ?? null;
+  const unprobeable = (generated: string): ConnectionTestProbe => ({
+    kind: "unknown",
+    // The catalog's own explanation wins when it has one: for Slack, Linear, Monday, Dropbox,
+    // Microsoft Graph and Google Sheets the GENERATED sentence is true but tells the user nothing
+    // they can act on (#835).
+    reason: provider.unprobeableReason ?? generated,
+  });
+
+  // THE SAFETY GATE. Non-write (the call may not change anything), GET (so a mismarked POST-read
+  // can't be reached either), and nothing the user would have to supply (there is no one to ask).
+  // Everything after this line only chooses among actions that already passed it.
+  const candidates = provider.actions.filter(
+    (a) => !a.write && a.method === "GET" && !a.fields.some(needsUser),
+  );
+
+  // A DECLARED probe wins over an incidental zero-argument read: it pins the choice against a later
+  // catalog addition, and it is the only way to express "this one, for this kind of connection".
+  const declared = candidates.filter((a) => a.probe);
+  const forAuthMode = declared.filter(
+    (a) =>
+      typeof a.probe === "object" &&
+      authMode !== null &&
+      a.probe.authModes.includes(authMode),
+  );
+  const generic = declared.filter((a) => a.probe === true);
+  const pick =
+    forAuthMode[0] ??
+    generic[0] ??
+    // No auth mode to match on (the capability question) — any declared probe answers "yes".
+    (authMode === null ? declared[0] : undefined) ??
+    // Fallback: the pre-#835 rule, which is what the 14 originally-probeable providers still use.
+    // Fewest fields wins; Array.prototype.sort is stable, so catalog order breaks ties — the pick
+    // is deterministic for a given catalog.
+    [...candidates].sort((a, b) => a.fields.length - b.fields.length)[0];
+
   if (!pick) {
+    if (declared.length > 0) {
+      return unprobeable(
+        `${provider.label} has no credential check for a '${authMode}' connection — its probes are ` +
+          `declared for other connection types. Test it with an integration node on a canvas ` +
+          `(single-node Test).`,
+      );
+    }
+    const reads = provider.actions.filter((a) => !a.write);
+    if (reads.length === 0) {
+      return unprobeable(
+        `Every ${provider.label} action in the catalog writes, so there is no call that could ` +
+          `prove this token without changing data. Test it with an integration node on a canvas ` +
+          `(single-node Test) against a scratch target instead.`,
+      );
+    }
     const cheapest = [...reads].sort(
       (a, b) =>
         a.fields.filter(needsUser).length - b.fields.filter(needsUser).length,
@@ -274,13 +341,11 @@ export function pickConnectionTestAction(
       .filter(needsUser)
       .map((f) => f.key)
       .join(", ");
-    return {
-      kind: "unknown",
-      reason:
-        `${provider.label} has no zero-argument read action: its cheapest read ` +
-        `'${cheapest.key}' still needs ${need}. Test it with an integration node on a ` +
-        `canvas (single-node Test), where you can supply those values.`,
-    };
+    return unprobeable(
+      `${provider.label} has no zero-argument read action: its cheapest read ` +
+        `'${cheapest.key}' still needs ${need || "arguments"}. Test it with an integration node ` +
+        `on a canvas (single-node Test), where you can supply those values.`,
+    );
   }
   return {
     kind: "read",

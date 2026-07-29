@@ -5,9 +5,10 @@ label: 'Discord'
 category: 'Communication'
 authType: custom-header
 serverUrlRequired: false
-actionCount: 5
+actionCount: 6
 writeActionCount: 3
-oneClickTestable: false
+oneClickTestable: true
+probeAction: get_me
 liveVerified: false
 ---
 
@@ -43,9 +44,9 @@ Post messages, open DMs and react in Discord from a workflow.
 
 ## Verify it works
 
-**No one-click check:** its read actions all need an id you have to supply, so there is no safe argument-free call to probe with.
+**One-click:** this provider has an argument-free read (`get_me` → `GET /users/@me`), so a connection test can confirm the credential without touching your data.
 
-Either way, the definitive check is **single-node Test** on the canvas: drop a **Discord** node, pick this connection, choose a read action and fill its ids, and run just that node. It executes the real activity with the real credential and shows you the provider's actual response.
+Either way, the definitive check is **single-node Test** on the canvas: drop a **Discord** node, pick this connection and the *Get current bot user* action, and run just that node. It executes the real activity with the real credential and shows you the provider's actual response.
 
 > **Not yet proven against the real API.** This provider's request shape is typed and unit-tested, but no automated test has ever called the live service. If your first call fails with a 4xx, the fault may be ours — check `docs/integrations/VERIFICATION.md` and open an issue rather than assuming your token is wrong.
 
@@ -58,6 +59,7 @@ Either way, the definitive check is **single-node Test** on the canvas: drop a *
 | List messages | `GET` | `/channels/{channelId}/messages` | `channelId` | `limit`, `before`, `after` |
 | **Create DM** (write) | `POST` | `/users/@me/channels` | `recipient_id` | — |
 | **Add reaction** (write) | `PUT` | `/channels/{channelId}/messages/{messageId}/reactions/{emoji}/@me` | `channelId`, `messageId`, `emoji` | — |
+| Get current bot user | `GET` | `/users/@me` | — | — |
 
 Fields can be typed in statically or **bound** to an upstream step's output (`{ from: <nodeId>, path: <dotted.path> }`) — ids and generated text are usually bound.
 

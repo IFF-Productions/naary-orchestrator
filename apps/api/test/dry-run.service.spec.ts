@@ -139,8 +139,10 @@ describe("DryRunService", () => {
   });
 
   /**
-   * A provider with no zero-argument read (GitHub) can't be probed. That is NOT a failure —
-   * reporting it as one would train people to ignore the result.
+   * A provider with nothing safe to call (Slack — its argument-free `auth.test` answers 200 with
+   * `{"ok": false}` for a dead token, so probing it would report a pass) can't be checked. That is
+   * NOT a failure — reporting it as one would train people to ignore the result — but it must not
+   * read as a pass either, which is why the reason travels with the check.
    */
   it("treats an unprobeable provider as skipped, not failed", async () => {
     const test = testFn({
@@ -149,22 +151,25 @@ describe("DryRunService", () => {
       status: "unknown",
       httpStatus: null,
       checkedAction: null,
-      message: "No zero-argument read exists for this provider.",
+      message: "Slack can't be checked from here …",
     });
 
     const res = await svc(test).check(
       "t-1",
       graph(
         node({
-          provider: "github",
-          action: "get_issue",
-          fields: { owner: "a", repo: "b", issueNumber: 1 },
+          provider: "slack",
+          action: "post_message",
+          fields: { channel: "#general", text: "hi" },
         }),
       ),
     );
 
     const cred = res.nodes[0].checks.find((c) => c.kind === "credential");
     expect(cred?.skipped).toBe(true);
+    // The reason reaches the result: a skipped check that arrived silently would be read as a pass,
+    // which is the actual bug #835 was filed about.
+    expect(cred?.message).toContain("Slack");
     expect(res.ok).toBe(true); // a skipped check must not fail the flow
     // …and it is NOT counted as a probe: no request was made, so counting it would overstate both
     // the cost and how much the run actually verified.
@@ -213,26 +218,43 @@ describe("DryRunService", () => {
  * and this test fails if a future catalog edit marks a probe action as a write.
  */
 describe("dry run can never reach a write action", () => {
-  it("every provider's probe action is write:false", () => {
+  it("every provider's probe action, under every auth mode, is write:false", () => {
     let checked = 0;
     for (const provider of INTEGRATION_PROVIDERS) {
-      const probe = pickConnectionTestAction(provider.key);
-      // `unknown` = we declined to probe this provider at all, which is safe by definition.
-      if (probe.kind !== "read") continue;
-      const action = provider.actions.find((a) => a.key === probe.action);
-      expect(
-        action,
-        `${provider.key}.${probe.action} is not in the catalog`,
-      ).toBeDefined();
-      expect(
-        action?.write,
-        `${provider.key}.${probe.action} must be a read`,
-      ).toBe(false);
-      checked += 1;
+      // Swept over auth modes since #835: GitHub is probed with a DIFFERENT action depending on
+      // whether the connection is a PAT or a GitHub App install, so checking one mode is no longer
+      // evidence about the others.
+      for (const authMode of [
+        undefined,
+        "api_token",
+        "pat",
+        "oauth",
+        "github_app",
+        "connection_string",
+      ]) {
+        const probe = pickConnectionTestAction(provider.key, { authMode });
+        // `unknown` = we declined to probe this provider at all, which is safe by definition.
+        if (probe.kind !== "read") continue;
+        const action = provider.actions.find((a) => a.key === probe.action);
+        expect(
+          action,
+          `${provider.key}.${probe.action} is not in the catalog`,
+        ).toBeDefined();
+        expect(
+          action?.write,
+          `${provider.key}.${probe.action} must be a read`,
+        ).toBe(false);
+        // A GET can't carry a body, so even a mismarked action can't POST run data anywhere.
+        expect(
+          action?.method,
+          `${provider.key}.${probe.action} must be a GET`,
+        ).toBe("GET");
+        checked += 1;
+      }
     }
     // Without this the test passes vacuously if the probe union is ever renamed — which is
     // precisely what happened when this was written against a `kind` value that never existed.
-    // 14 of 38 providers are probeable today; the floor only has to rule out "zero" (#835).
-    expect(checked, "no provider was actually checked").toBeGreaterThan(10);
+    // 32 of 38 providers are probeable since #835; the floor only has to rule out "zero".
+    expect(checked, "no provider was actually checked").toBeGreaterThan(100);
   });
 });

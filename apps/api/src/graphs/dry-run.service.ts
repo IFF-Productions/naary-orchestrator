@@ -21,9 +21,13 @@
  * probe action comes from `pickConnectionTestAction`, which filters on the catalog's own `write`
  * flag — so "non-destructive" is a property of the catalog, not of a promise made here.
  *
- * KNOWN COVERAGE LIMIT (#835): layer 3 only reaches the 14 of 38 providers that have a read taking
- * no required fields. GitHub, Slack, Jira, Linear, Notion and GitLab are NOT among them, so a dead
- * token on those reports `skipped`, not `failed`. Layers 1–2 still cover them fully.
+ * COVERAGE (#835): layer 3 reaches 32 of 38 providers — every one with an argument-free, read-only
+ * GET in the catalog, including GitHub (both a PAT and a GitHub App installation, which need
+ * different probes), Jira, Notion, GitLab, Discord, Mattermost and 12 others. The remaining SIX are
+ * unprobed on purpose, each with a declared reason (`unprobeableReason`): Slack answers HTTP 200
+ * with `{"ok": false}` to a dead token, Linear/Monday/Dropbox are POST-only, Microsoft Graph's `/me`
+ * is delegated-token-only, and Google Sheets has no identity endpoint on its own host. Those report
+ * `skipped` WITH the reason — never a pass. Layers 1–2 still cover all 38.
  *
  * Each connection is probed ONCE even when several nodes share it: the verdict is about the
  * credential, not the node, and a flow with six GitHub steps shouldn't cost six probes.

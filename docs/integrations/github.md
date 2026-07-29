@@ -5,9 +5,10 @@ label: 'GitHub'
 category: 'Development'
 authType: bearer
 serverUrlRequired: false
-actionCount: 5
+actionCount: 7
 writeActionCount: 3
-oneClickTestable: false
+oneClickTestable: true
+probeAction: get_authenticated_user
 liveVerified: true
 ---
 
@@ -42,9 +43,9 @@ Read, create, comment on and label GitHub issues and pull requests from a workfl
 
 ## Verify it works
 
-**No one-click check:** its read actions all need an id you have to supply, so there is no safe argument-free call to probe with.
+**One-click:** this provider has an argument-free read (`get_authenticated_user` → `GET /user`), so a connection test can confirm the credential without touching your data.
 
-Either way, the definitive check is **single-node Test** on the canvas: drop a **GitHub** node, pick this connection, choose a read action and fill its ids, and run just that node. It executes the real activity with the real credential and shows you the provider's actual response.
+Either way, the definitive check is **single-node Test** on the canvas: drop a **GitHub** node, pick this connection and the *Get authenticated user* action, and run just that node. It executes the real activity with the real credential and shows you the provider's actual response.
 
 A concrete first run:
 
@@ -62,6 +63,8 @@ A concrete first run:
 | **Create issue** (write) | `POST` | `/repos/{owner}/{repo}/issues` | `owner`, `repo`, `title` | `body`, `labels` |
 | **Comment on issue** (write) | `POST` | `/repos/{owner}/{repo}/issues/{issueNumber}/comments` | `owner`, `repo`, `issueNumber`, `body` | — |
 | **Add labels** (write) | `POST` | `/repos/{owner}/{repo}/issues/{issueNumber}/labels` | `owner`, `repo`, `issueNumber`, `labels` | — |
+| Get authenticated user | `GET` | `/user` | — | — |
+| List installation repositories | `GET` | `/installation/repositories` | — | — |
 
 Fields can be typed in statically or **bound** to an upstream step's output (`{ from: <nodeId>, path: <dotted.path> }`) — ids and generated text are usually bound.
 
