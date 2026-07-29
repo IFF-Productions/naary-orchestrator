@@ -22,12 +22,13 @@
  * Adding a catalog action therefore fails CI until `integration-write.ts` is updated.
  */
 import { describe, expect, it } from "vitest";
+// Deep imports on purpose: the mandatory safety test must not be breakable by barrel churn, and
+// it must read the write-set from the SAME module the interpreter does.
+import { INTEGRATION_CATALOG, getIntegrationAction } from "../src/integrations";
 import {
-  INTEGRATION_CATALOG,
   INTEGRATION_WRITE_ACTIONS,
-  getIntegrationAction,
   isIntegrationWriteAction,
-} from "../src/index";
+} from "../src/integration-write";
 
 /** The write keys the catalog itself implies. Keyed off the RECORD key (what a node's
  *  `config.provider` indexes and what `getIntegrationAction` looks up), not `provider.key`. */

@@ -168,12 +168,11 @@ export {
 // deterministic workflow bundle. Split, but re-exported here identically — no caller changed.
 export { evaluateCondition, nextNodes } from "./branch";
 export { validateGraph, type GraphValidation } from "./validate-graph";
-// The interpreter's write/read (at-most-once vs retryable) classification, derived from the catalog
-// and held to it by a drift test. Exported so the drift test and the web app can read the same set.
-export {
-  isIntegrationWriteAction,
-  INTEGRATION_WRITE_ACTIONS,
-} from "./integration-write";
+// `./integration-write` (the interpreter's write/read, i.e. at-most-once vs retryable,
+// classification) is deliberately NOT re-exported here, for the same reason as ./registry and
+// ./n8n-import: the barrel is the authoring-time surface, and this module exists only to keep the
+// catalog out of the deterministic workflow bundle. Workflow code reaches it via ./workflow; the
+// drift test deep-imports it. Barrel surface is therefore unchanged by #910.
 // Agent handoff (#580 Phase 1) — zod-free by design: `validateGraph` imports it, so it
 // lands in the deterministic workflow bundle. The agent ACTIVITY imports
 // `handoffOutputSchema` from here too, so the save-gate and the runtime schema are the
