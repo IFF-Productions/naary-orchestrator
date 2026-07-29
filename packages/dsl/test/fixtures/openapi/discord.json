@@ -178,6 +178,11 @@
           }
         ]
       }
+    },
+    "/users/@me": {
+      "get": {
+        "operationId": "get_my_user"
+      }
     }
   }
 }

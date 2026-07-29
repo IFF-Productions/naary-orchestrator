@@ -170,7 +170,23 @@ const ACKNOWLEDGED: { finding: string; why: string }[] = [
  * provider's own spec omits an endpoint they document elsewhere, which needs a reason, not a
  * shrug. (Refreshing the fixture is nearly always the right fix instead.)
  */
-const UNSPECIFIED: { action: string; why: string }[] = [];
+const UNSPECIFIED: { action: string; why: string }[] = [
+  {
+    action: "asana.get_me",
+    why:
+      "Asana's OAS models the user read as `/users/{user_gid}` only; `me` is a documented magic " +
+      "gid, not a distinct operation, so the literal path can never appear in the spec. Verified " +
+      "live: unauthenticated `GET https://app.asana.com/api/1.0/users/me` → 401, not 404 — the " +
+      "endpoint exists and is reachable, which is what the connection probe needs.",
+  },
+  {
+    action: "posthog.get_me",
+    why:
+      "PostHog's schema is generated from DRF and omits this route; `@me` is a viewset alias " +
+      "rather than a registered path. Verified live: unauthenticated " +
+      "`GET https://app.posthog.com/api/users/@me/` → 401, not 404.",
+  },
+];
 
 /**
  * WRONG body paths (#813) we have adjudicated and decided to keep — one per (action, field), and
