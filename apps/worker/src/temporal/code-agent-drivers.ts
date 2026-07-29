@@ -609,8 +609,10 @@ const geminiDriver: CliAgentDriver = {
 /**
  * Registry of available drivers. Adding a CLI means a driver here AND its own pinned sandbox image
  * (deploy/sandbox/<tool>.Dockerfile) listed in the runner's `DEFAULT_SANDBOX_IMAGES`, plus its auth
- * var in `ALLOWED_KEY_ENV_VARS_BY_TOOL`. One image per tool, each with that tool's ENTRYPOINT, is
- * what makes "the argv reached the wrong CLI" (#933) impossible by construction.
+ * var in `ALLOWED_KEY_ENV_VARS_BY_TOOL`, plus an entry in the CI build loop
+ * (.github/workflows/sandbox-images.yml) so the image is published to GHCR and pinned by digest in
+ * production rather than built by hand on the box. One image per tool, each with that tool's
+ * ENTRYPOINT, is what makes "the argv reached the wrong CLI" (#933) impossible by construction.
  */
 const DRIVERS: Record<CodeAgentTool, CliAgentDriver> = {
   claude: claudeDriver,

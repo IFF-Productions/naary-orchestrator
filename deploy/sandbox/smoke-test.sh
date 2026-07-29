@@ -17,8 +17,16 @@
 # FAIL = it died before that (ENOENT / EACCES / "executable file not found" / "failed to map
 #        segment from shared object").
 #
-# Usage:  deploy/sandbox/smoke-test.sh [tool …]            (default: all four)
-#         PROXIED=1 deploy/sandbox/smoke-test.sh [tool …]
+# Usage:  deploy/sandbox/smoke-test.sh [tool|image-ref …]   (default: all four, :latest)
+#         PROXIED=1 deploy/sandbox/smoke-test.sh [tool|image-ref …]
+#
+# An argument containing '/' or '@' is an IMAGE REF, not a tool name: the tool is inferred from
+# `naary-<tool>-sandbox` in the ref and that image is smoked instead of the local `:latest`. On a
+# deploy host that is the only useful form — CI publishes digest-pinned GHCR refs and nothing tagged
+# `:latest` exists there at all:
+#   deploy/sandbox/smoke-test.sh ghcr.io/<owner>/naary-claude-sandbox:sha-abc123@sha256:…
+# The refs a box is actually running:
+#   docker inspect naary-sandbox-runner --format '{{range .Config.Env}}{{println .}}{{end}}' | grep SANDBOX_IMAGE_
 #
 # PROXIED=1 is the stronger check and the one that validates squid-allowlist.conf: it puts the CLI
 # on the internal (no-gateway) network behind the allowlist proxy, exactly as the runner does. A
@@ -79,23 +87,30 @@ smoke() { # tool image key-env-var args…
   fi
 }
 
-want() { # no args ⇒ run everything; otherwise only the named tools
+want() { # no args ⇒ run everything; otherwise only the named tools / matching refs
   [ "$#" -eq 0 ] && return 0
-  for t in "$@"; do [ "$t" = "$TOOL" ] && return 0; done
+  for t in "$@"; do
+    case "$t" in
+      # An image REF: match by the `naary-<tool>-sandbox` repo name embedded in it, and use the ref
+      # itself as the image so the bytes tested are the bytes deployed.
+      */*|*@*) case "$t" in *"naary-$TOOL-sandbox"*) IMAGE="$t"; return 0 ;; esac ;;
+      "$TOOL") return 0 ;;
+    esac
+  done
   return 1
 }
 
-TOOL=claude
-want "$@" && smoke claude naary-claude-sandbox:latest ANTHROPIC_API_KEY \
+TOOL=claude IMAGE=naary-claude-sandbox:latest
+want "$@" && smoke claude "$IMAGE" ANTHROPIC_API_KEY \
   -p 'say hi' --output-format json --permission-mode plan --allowedTools Read,Grep,Glob
-TOOL=cursor
-want "$@" && smoke cursor naary-cursor-sandbox:latest CURSOR_API_KEY \
+TOOL=cursor IMAGE=naary-cursor-sandbox:latest
+want "$@" && smoke cursor "$IMAGE" CURSOR_API_KEY \
   -p 'say hi' --output-format json
-TOOL=copilot
-want "$@" && smoke copilot naary-copilot-sandbox:latest COPILOT_GITHUB_TOKEN \
+TOOL=copilot IMAGE=naary-copilot-sandbox:latest
+want "$@" && smoke copilot "$IMAGE" COPILOT_GITHUB_TOKEN \
   -p 'say hi' --output-format json --allow-tool read --deny-tool write --deny-tool shell
-TOOL=gemini
-want "$@" && smoke gemini naary-gemini-sandbox:latest GEMINI_API_KEY \
+TOOL=gemini IMAGE=naary-gemini-sandbox:latest
+want "$@" && smoke gemini "$IMAGE" GEMINI_API_KEY \
   -p 'say hi' -o json --approval-mode plan --skip-trust
 
 echo

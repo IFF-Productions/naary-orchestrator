@@ -29,6 +29,7 @@ const CFG: RunnerConfig = {
   network: "naary-sandbox-internal",
   proxyUrl: "http://naary-sandbox-proxy:3128",
   images: DEFAULT_SANDBOX_IMAGES,
+  requireDigest: false,
   limits: { cpus: "1.0", memoryMb: 2048, pids: 256 },
   defaultTimeoutMs: 900_000,
   port: 8099,
@@ -381,6 +382,37 @@ describe.skipIf(process.platform === "win32")(
       expect(imageOf(exec.mock.calls[0][1])).toBe(
         DEFAULT_SANDBOX_IMAGES.claude,
       );
+    });
+
+    it("launches the operator's DIGEST-pinned images (the production config)", async () => {
+      // The end-to-end version of the docker-run regression: with the allowlist hardcoded to the
+      // four `:latest` tags, this configuration — which is exactly what deploy.yml now ships —
+      // threw `refusing to launch un-pinned image` on every run, so nobody could actually pin.
+      const digestCfg: RunnerConfig = {
+        ...CFG,
+        images: {
+          claude: `ghcr.io/iff-productions/naary-claude-sandbox:sha-aaaaaaaaaaaa@sha256:${"1".repeat(64)}`,
+          cursor: `ghcr.io/iff-productions/naary-cursor-sandbox:sha-bbbbbbbbbbbb@sha256:${"2".repeat(64)}`,
+          copilot: `ghcr.io/iff-productions/naary-copilot-sandbox:sha-cccccccccccc@sha256:${"3".repeat(64)}`,
+          gemini: `ghcr.io/iff-productions/naary-gemini-sandbox:sha-dddddddddddd@sha256:${"4".repeat(64)}`,
+        },
+        requireDigest: true,
+      };
+      for (const tool of SANDBOX_TOOLS) {
+        exec.mockClear();
+        await runSandbox(
+          {
+            ...REQ,
+            tool,
+            keyEnvVar: ALLOWED_KEY_ENV_VARS_BY_TOOL[tool][0],
+          },
+          digestCfg,
+          exec as unknown as Exec,
+        );
+        expect(imageOf(exec.mock.calls[0][1]), tool).toBe(
+          digestCfg.images[tool],
+        );
+      }
     });
 
     it("refuses another tool's credential var (no cross-tool key forwarding)", async () => {
