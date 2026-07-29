@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { http, HttpResponse } from "msw";
+import { expect, userEvent, waitFor, within } from "storybook/test";
 import { ModeProvider } from "../../mode";
 import { WorkspaceProvider } from "../../workspace/WorkspaceProvider";
 import { Settings } from "./Settings";
@@ -219,6 +220,34 @@ export const Secrets: Story = {
 export const Variables: Story = {
   parameters: {
     router: { initialEntries: ["/app/settings?section=variables"] },
+  },
+};
+
+/** The CREATE path — "Add variable" open, draft row live.
+ *
+ *  It exists as a story because it had no phone branch and nobody noticed: with `adding` false by
+ *  default, no story reached the draft row, so the responsive sweep
+ *  (`scripts/responsive-audit.mjs`) measured the edit path only and reported the screen clean
+ *  while the draft row laid out 512px of content in a 360px box at 390px (#511). A state the
+ *  harness cannot open is a state nobody measures. */
+export const VariablesAdding: Story = {
+  parameters: {
+    router: { initialEntries: ["/app/settings?section=variables"] },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    // Re-query inside the wait, every time. The button starts disabled (it needs the per-env
+    // variable fetches, which take longer than waitFor's 1s default), and the section remounts
+    // as that data lands — so a node captured once goes stale, stays disabled forever, and a
+    // click on it silently does nothing. That failure mode is invisible: no error, just a story
+    // that renders the state it was written to open.
+    const addButton = () =>
+      canvas.getByRole("button", { name: /Add variable/ });
+    await waitFor(() => expect(addButton()).toBeEnabled(), { timeout: 5000 });
+    await userEvent.click(addButton());
+    await waitFor(() =>
+      expect(canvas.getByPlaceholderText("KEY")).toBeInTheDocument(),
+    );
   },
 };
 

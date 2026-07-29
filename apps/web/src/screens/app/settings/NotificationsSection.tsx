@@ -654,6 +654,16 @@ export function NotificationsSection({
                     tabIndex={0}
                     onClick={() => setExpanded((x) => ({ ...x, [key]: !open }))}
                     onKeyDown={(e) => {
+                      // ONLY when the row itself has focus. Enter/Space keydown from a nested
+                      // control bubbles here, and this handler's `preventDefault()` suppresses
+                      // the click the browser would have synthesized from it — so before this
+                      // guard, focusing an event toggle and pressing Enter expanded the card and
+                      // never toggled the alert. Measured at 390px: `aria-expanded` false→true,
+                      // `aria-checked` unchanged. That is the same wrong action the pointer path
+                      // had, surviving on the keyboard; `stopPropagation` on the child cannot fix
+                      // it alone, because a child that stops the event also has to not break its
+                      // own native activation.
+                      if (e.target !== e.currentTarget) return;
                       if (e.key === "Enter" || e.key === " ") {
                         e.preventDefault();
                         setExpanded((x) => ({ ...x, [key]: !open }));

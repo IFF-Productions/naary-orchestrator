@@ -226,35 +226,41 @@ export function VariablesSection({ envs }: { envs: Environment[] }) {
           }}
         >
           {!phone && (
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: gridColumns,
-              gap: 10,
-              alignItems: "center",
-              padding: "11px 18px",
-              borderBottom: "1px solid var(--line)",
-              background: "var(--card-2)",
-            }}
-          >
-            <span style={headCellStyle}>Key</span>
-            {envs.map((env) => (
-              <span key={env.id} style={headCellStyle}>
-                {env.name}
-              </span>
-            ))}
-            <span />
-          </div>
-          )}
-
-          {adding && (
             <div
               style={{
                 display: "grid",
                 gridTemplateColumns: gridColumns,
                 gap: 10,
                 alignItems: "center",
-                padding: "10px 18px",
+                padding: "11px 18px",
+                borderBottom: "1px solid var(--line)",
+                background: "var(--card-2)",
+              }}
+            >
+              <span style={headCellStyle}>Key</span>
+              {envs.map((env) => (
+                <span key={env.id} style={headCellStyle}>
+                  {env.name}
+                </span>
+              ))}
+              <span />
+            </div>
+          )}
+
+          {adding && (
+            <div
+              style={{
+                display: "grid",
+                // The CREATE path had no phone branch while the rows below it did (#511). At 390px
+                // its desktop columns laid out 512px of content in a 360px box — 152px, including
+                // the last environment's value box and the Save button (right edge 473 in a 390
+                // viewport), reachable only by panning a scroller with no affordance. It gets the
+                // same card as an existing row: key + Save on line one, then a labelled input per
+                // environment.
+                gridTemplateColumns: phone ? "1fr auto" : gridColumns,
+                gap: phone ? 8 : 10,
+                alignItems: "center",
+                padding: phone ? "12px 16px" : "10px 18px",
                 borderBottom: "1px solid var(--line)",
                 background: "var(--brand-soft)",
               }}
@@ -264,28 +270,59 @@ export function VariablesSection({ envs }: { envs: Environment[] }) {
                 value={draftKey}
                 onChange={(e) => setDraftKey(e.target.value)}
                 placeholder="KEY"
-                style={{ height: 32, fontSize: 12 }}
+                // Phone: 44px touch minimum, and 16px type because iOS Safari zooms the page in
+                // on focusing an input under 16px. Same rule `.naary-var-cell` gets in Settings.
+                style={
+                  phone
+                    ? { height: 44, fontSize: 16 }
+                    : { height: 32, fontSize: 12 }
+                }
                 disabled={busy}
                 autoFocus
               />
-              {envs.map((env) => (
-                <TextInput
-                  key={env.id}
-                  className="mono"
-                  value={draftVals[env.id] ?? ""}
-                  onChange={(e) =>
-                    setDraftVals((v) => ({ ...v, [env.id]: e.target.value }))
-                  }
-                  placeholder="—"
-                  style={{ height: 32, fontSize: 12 }}
-                  disabled={busy}
-                />
-              ))}
+              {envs.map((env) => {
+                const input = (
+                  <TextInput
+                    key={env.id}
+                    className="mono"
+                    value={draftVals[env.id] ?? ""}
+                    onChange={(e) =>
+                      setDraftVals((v) => ({ ...v, [env.id]: e.target.value }))
+                    }
+                    placeholder="—"
+                    style={
+                      phone
+                        ? { height: 44, fontSize: 16 }
+                        : { height: 32, fontSize: 12 }
+                    }
+                    disabled={busy}
+                  />
+                );
+                if (!phone) return input;
+                return (
+                  <label
+                    key={env.id}
+                    style={{
+                      order: 2,
+                      gridColumn: "1 / -1",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      fontSize: "var(--text-xs)",
+                      color: "var(--ink-3)",
+                    }}
+                  >
+                    <span style={{ width: 62, flex: "none" }}>{env.name}</span>
+                    {input}
+                  </label>
+                );
+              })}
               <Button
                 variant="primary"
                 size="sm"
                 icon="check"
                 iconOnly
+                style={phone ? { order: 1 } : undefined}
                 aria-label="Save variable"
                 loading={busy}
                 disabled={!draftKey.trim()}

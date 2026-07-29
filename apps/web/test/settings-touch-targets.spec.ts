@@ -67,8 +67,27 @@ describe("Settings — phone touch targets (#511)", () => {
     const body = functionBody(notifications, "EventRow");
     expect(body).toMatch(/role="checkbox"/);
     expect(body).toMatch(/\{title\}/);
-    // ...and it must not re-propagate to `.naary-set-row`'s expand handler.
+    // ...and a POINTER activation must not re-propagate to `.naary-set-row`'s expand handler.
     expect(body).toMatch(/stopPropagation/);
+  });
+
+  it("the row's expand handler ignores keydown from nested controls", () => {
+    // The keyboard path had the same wrong action and `stopPropagation` on the child does not
+    // fix it: `.naary-set-row`'s onKeyDown calls preventDefault() on Enter/Space, which
+    // suppresses the click the browser synthesizes for the focused button. Measured at 390px
+    // before the guard, with the toggle focused: Enter AND Space both gave aria-expanded
+    // false->true with aria-checked unchanged. The row must only act on its OWN key events.
+    const row = notifications.slice(
+      notifications.indexOf('className="naary-set-row"'),
+    );
+    const handler = row.slice(
+      row.indexOf("onKeyDown"),
+      row.indexOf("style={{"),
+    );
+    expect(handler).toMatch(/e\.target !== e\.currentTarget/);
+    expect(handler.indexOf("e.target !== e.currentTarget")).toBeLessThan(
+      handler.indexOf("e.preventDefault("),
+    );
   });
 
   it("the 22px tile stays presentational so the phone control is not nested", () => {
@@ -92,5 +111,25 @@ describe("Settings — phone touch targets (#511)", () => {
     expect(phoneBlock![1]).toMatch(/height:44px/);
     // Under 16px, iOS Safari zooms the page on focus.
     expect(phoneBlock![1]).toMatch(/font-size:16px/);
+  });
+
+  it("the variables CREATE path has a phone branch too", () => {
+    // The draft row kept the desktop `gridColumns` unconditionally while the rows below it
+    // branched on `phone`. Measured at 390px with "Add variable" open: 512px of content in a
+    // 360px box, the last env's value box and Save at right edge 473 in a 390 viewport. No story
+    // opened that state, so no sweep ever saw it — `Settings.stories.tsx#VariablesAdding` now
+    // does. `.naary-var-cell` cannot cover these: the draft inputs are inline-styled TextInputs.
+    const variables = readFileSync(
+      path.join(SRC, "screens/app/settings/VariablesSection.tsx"),
+      "utf8",
+    );
+    const draft = variables.slice(
+      variables.indexOf("{adding && ("),
+      variables.indexOf("Save variable"),
+    );
+    expect(draft).toMatch(/gridTemplateColumns:\s*phone \?/);
+    // Both the key input and every env input: 44px / 16px on phone, 32/12 on desktop.
+    expect(draft.match(/height:\s*44,\s*fontSize:\s*16/g)?.length).toBe(2);
+    expect(draft.match(/height:\s*32,\s*fontSize:\s*12/g)?.length).toBe(2);
   });
 });
