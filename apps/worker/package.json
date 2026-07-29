@@ -12,9 +12,9 @@
     "start": "node src/worker.cjs"
   },
   "dependencies": {
-    "@ai-sdk/anthropic": "^4.0.19",
-    "@ai-sdk/google": "^4.0.23",
-    "@ai-sdk/openai": "^4.0.20",
+    "@ai-sdk/anthropic": "^4.0.23",
+    "@ai-sdk/google": "^4.0.27",
+    "@ai-sdk/openai": "^4.0.23",
     "@naary/connections": "workspace:*",
     "@naary/contracts": "workspace:*",
     "@naary/db": "workspace:*",
@@ -31,7 +31,7 @@
     "@temporalio/activity": "^1.21.1",
     "@temporalio/worker": "^1.21.1",
     "@temporalio/workflow": "^1.21.1",
-    "ai": "7.0.37",
+    "ai": "7.0.41",
     "dotenv": "^17.4.2",
     "fast-xml-parser": "^5.10.1",
     "jose": "^6.2.4",
