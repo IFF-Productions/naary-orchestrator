@@ -235,6 +235,7 @@ export function CanvasPage() {
     setVersion,
     setStatus,
     setSearchParams,
+    onGraphPresented: resetBaseline,
   });
 
   const [watchState, setWatchState] = useState<ExecutionState | null>(null);
@@ -396,6 +397,23 @@ export function CanvasPage() {
     [nodes, edges, pins, workflowKey],
   );
 
+  /** The key to save/run under: an opened workflow's key, else slug(name). */
+  const activeKey = workflowKey || slugify(name);
+
+  // Affordance gating (RBAC-GROUPS G2): saving an EXISTING key needs `edit` on it, a NEW
+  // key needs `create`. Disabled-not-hidden (with a tooltip) so the state is explainable;
+  // the API enforces regardless — a forced request still 403s.
+  //
+  // Declared UP HERE, above its main consumers, because the "save before I test / check this?"
+  // dialogs have to know it: offering "Save and test" to someone whose save can only 403 asks
+  // them to authorize something that cannot happen.
+  const perms = usePermissions();
+  const keyExists = workflows.some((w) => w.workflowKey === activeKey);
+  const maySave = canSaveWorkflow(perms, activeKey, keyExists);
+  const saveDeniedTitle = keyExists
+    ? "You don't have edit permission on this workflow"
+    : "You don't have permission to create workflows in this environment";
+
   // Single-node test runner — the ONE path the dock's "Test step", the config panel's
   // "Test node" and the per-node ▶ all use, so card state / measured duration / the
   // dock's output stay in sync. Wraps the existing api.testNode machinery. Duration:
@@ -418,6 +436,12 @@ export function CanvasPage() {
       // they can't see (which is the confusion the dialog exists to end).
       let key = workflowKey;
       if (!key || dirty) {
+        // Don't offer a save this user isn't allowed to make — the same explanation the Save
+        // button's tooltip gives, instead of a dialog that leads to a 403.
+        if (!maySave) {
+          setStatus(saveDeniedTitle);
+          throw new Error(saveDeniedTitle);
+        }
         const ok = await confirm({
           title: "Test the saved version?",
           body: "Node tests run against the saved workflow, so the unsaved edits on this canvas wouldn't be part of the test. Saving first makes the thing tested the thing on screen.",
@@ -481,7 +505,7 @@ export function CanvasPage() {
         throw e;
       }
     },
-    [workflowKey, dirty, confirm],
+    [workflowKey, dirty, confirm, maySave, saveDeniedTitle],
   );
 
   // The per-node ▶ (node card): run the test and select the node so its output
@@ -713,12 +737,7 @@ export function CanvasPage() {
   useEffect(() => {
     const finished = wasGenerating.current && !generating;
     wasGenerating.current = generating;
-    if (!finished) return;
-    // A finished generation PRESENTS a graph rather than editing one — re-baseline the
-    // unsaved-changes guard here (and not mid-stream, where each streamed node would baseline a
-    // half-drawn flow) so it measures from what the generator actually produced.
-    resetBaseline();
-    if (allIssues.length === 0) return;
+    if (!finished || allIssues.length === 0) return;
     setShowIssues(true);
     const nodeCount = new Set(allIssues.map((i) => i.nodeId)).size;
     // "Issue" is what the panel this opens calls them — matching copy so the toast and the panel
@@ -727,7 +746,7 @@ export function CanvasPage() {
       `${allIssues.length} issue${allIssues.length === 1 ? "" : "s"} to fix`,
       `in ${nodeCount} node${nodeCount === 1 ? "" : "s"} — resolve these before running`,
     );
-  }, [generating, allIssues, pushToast, resetBaseline]);
+  }, [generating, allIssues, pushToast]);
 
   // Jump to a node from the issues panel: select it (opens the dock) and clear other selection.
   function selectNode(id: string): void {
@@ -905,19 +924,6 @@ export function CanvasPage() {
     );
   }
 
-  /** The key to save/run under: an opened workflow's key, else slug(name). */
-  const activeKey = workflowKey || slugify(name);
-
-  // Affordance gating (RBAC-GROUPS G2): saving an EXISTING key needs `edit` on it, a NEW
-  // key needs `create`. Disabled-not-hidden (with a tooltip) so the state is explainable;
-  // the API enforces regardless — a forced request still 403s.
-  const perms = usePermissions();
-  const keyExists = workflows.some((w) => w.workflowKey === activeKey);
-  const maySave = canSaveWorkflow(perms, activeKey, keyExists);
-  const saveDeniedTitle = keyExists
-    ? "You don't have edit permission on this workflow"
-    : "You don't have permission to create workflows in this environment";
-
   // "New" replaces the canvas HERE, in state, and only then rewrites the URL — so the route
   // blocker can't cover it (by the time the navigation is blocked the work is already gone).
   // It asks for itself, before touching anything.
@@ -1000,6 +1006,11 @@ export function CanvasPage() {
       // Nothing to save — the saved workflow already IS what's on screen. Check it as it
       // stands, with no question and no gratuitous new version.
       if (workflowKey && !dirty) return workflowKey;
+      // As in a node test: don't offer a save this user can't make.
+      if (!maySave) {
+        setStatus(saveDeniedTitle);
+        return null;
+      }
       // Asked BEFORE `busy`, so the top bar isn't stuck showing work in progress behind a
       // modal that hasn't been answered yet.
       const ok = await confirm({
