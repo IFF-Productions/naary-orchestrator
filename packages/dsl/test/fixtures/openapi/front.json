@@ -1,0 +1,95 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Core API",
+    "version": "1.0.0"
+  },
+  "x-naary": {
+    "provider": "front",
+    "pathPrefix": "",
+    "source": "https://raw.githubusercontent.com/frontapp/front-api-specs/main/core-api/core-api.json",
+    "fetchedAt": "2026-07-29",
+    "note": "PRUNED snapshot — see packages/dsl/scripts/extract-openapi-fixtures.mjs. Do not hand-edit."
+  },
+  "paths": {
+    "/conversations": {
+      "get": {
+        "operationId": "list-conversations",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "page_token",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "sort_by",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "sort_order",
+            "in": "query",
+            "required": false
+          }
+        ]
+      }
+    },
+    "/conversations/{conversation_id}": {
+      "get": {
+        "operationId": "get-conversation-by-id",
+        "parameters": [
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "required": true
+          }
+        ]
+      }
+    },
+    "/conversations/{conversation_id}/comments": {
+      "post": {
+        "operationId": "add-comment",
+        "parameters": [
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "body"
+                ],
+                "properties": {
+                  "author_id": {},
+                  "body": {},
+                  "is_pinned": {},
+                  "attachments": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/inboxes": {
+      "get": {
+        "operationId": "list-inboxes"
+      }
+    }
+  }
+}

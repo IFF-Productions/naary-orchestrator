@@ -33,10 +33,26 @@ import { type ApiOperation, parseOpenApi } from "../src/introspection";
  *      field and declared as a path parameter upstream
  *   3. everything upstream marks REQUIRED — query, header, body, nested — exists somewhere in
  *      our `fields[]`
+ *   5. every `in:"body"` field lands on a property the spec DECLARES (#813) — the check that
+ *      catches a wrong `bodyPath`: a missing envelope key, a doubled one, or a `const`
+ *      discriminator at the wrong depth. Tri-stated, and only WRONG is hard: see below.
  *
  * REPORTED, never failed — the #909 class:
  *   4. we model something `required: false` that upstream marks required, or our field name
  *      differs from upstream's parameter name.
+ *   6. the media types upstream declares don't include the one we send (#707/#813). Advisory
+ *      ONLY, and deliberately so: Slack's spec declares `application/x-www-form-urlencoded`
+ *      because it is Swagger 2, yet Slack accepts JSON with a Bearer token. A spec's content map
+ *      is evidence, not proof — the proof for changing an encoding is the provider's own docs.
+ *
+ * ## Why the body-path check is tri-stated (#813)
+ *
+ * "Not reported" must never be read as "verified". A `bodyPath` lands in one of three states:
+ * CONFIRMED (it resolved to a property the spec declares), UNKNOWABLE (it landed inside a
+ * free-form map like Notion's `properties`, or below where the fixture was pruned, so the spec
+ * says nothing either way), or WRONG (the parent declares properties and this name is not among
+ * them). Only WRONG fails. The counts of all three are printed by the coverage summary at the
+ * bottom, because an audit that reports only its failures inflates its own coverage.
  *
  * (4) cannot be a hard failure because the honest answer is often "upstream is over-strict":
  * PagerDuty's spec marks `From` required on every write, but it is only required when the API key
@@ -78,6 +94,18 @@ const TRANSPORT_HEADERS = new Set([
 ]);
 
 /**
+ * Per-provider parameters that ARE the credential under a different name. Swagger 2 has no
+ * `bearerFormat`, so Slack's spec models its OAuth token as a required header parameter literally
+ * named `token`; `planIntegrationCall` sends it as `Authorization: Bearer …`, which is what Slack
+ * documents. Listed per provider rather than globally: a header called `token` on some OTHER
+ * provider might genuinely be a user-supplied value, and silently excusing it everywhere would
+ * hide exactly the kind of missing field this test exists to find.
+ */
+const AUTH_PARAMETERS: Record<string, Set<string>> = {
+  slack: new Set(["token"]),
+};
+
+/**
  * Findings of class (4) we have looked at and decided to keep. Each MUST still be produced —
  * an acknowledgment that no longer matches anything is either a fixed catalog entry whose note
  * was left behind, or upstream having changed its mind. Both deserve a look.
@@ -112,6 +140,29 @@ const ACKNOWLEDGED: { finding: string; why: string }[] = [
     finding: 'twilio.get_message: path field "messageSid" ↔ upstream "Sid"',
     why: 'Deliberate rename: Twilio calls every id "Sid"; the action already has an accountSid, so an unqualified "Sid" would be ambiguous in the UI.',
   },
+  {
+    finding:
+      'cloudflare.delete_dns_record: path field "recordId" ↔ upstream "dns_record_id"',
+    why: 'Deliberate rename: the action is already scoped to DNS records, so the "dns_record_" prefix is noise in a config panel. Substitution is positional.',
+  },
+  {
+    finding: 'discord.add_reaction: path field "emoji" ↔ upstream "emoji_name"',
+    why: 'Deliberate rename: the segment takes either a unicode emoji or a custom `name:id`, so "emoji" describes the input better than upstream\'s "emoji_name".',
+  },
+  {
+    finding: 'posthog.get_person: path field "personId" ↔ upstream "id"',
+    why: 'Deliberate rename: a bare "id" in a config panel is ambiguous when the same action also takes a projectId.',
+  },
+  {
+    finding:
+      'box.create_folder: body "parent.id" is required upstream and reaches the API only inside the free-form JSON field "parent"',
+    why: 'By design: `parent` is a `type: "json"` field whose hint is `{ "id": "0" } for root`. Splitting it into a scalar `parent.id` would drop the other keys Box accepts there.',
+  },
+  {
+    finding:
+      'sendgrid.send_mail: body "from.email" is required upstream and reaches the API only inside the free-form JSON field "from"',
+    why: 'By design: `from` is a `type: "json"` field hinted `{ email, name? }`. The v3 Mail Send body is deeply structured (personalizations/content are arrays), so the whole envelope is authored as JSON.',
+  },
 ];
 
 /**
@@ -120,6 +171,14 @@ const ACKNOWLEDGED: { finding: string; why: string }[] = [
  * shrug. (Refreshing the fixture is nearly always the right fix instead.)
  */
 const UNSPECIFIED: { action: string; why: string }[] = [];
+
+/**
+ * WRONG body paths (#813) we have adjudicated and decided to keep — one per (action, field), and
+ * each must STILL be produced, asserted below in the same both-directions way as ACKNOWLEDGED. An
+ * entry is a claim that the spec is wrong or incomplete about a field we send on purpose; it is
+ * not a place to park a finding nobody wanted to read.
+ */
+const ACKNOWLEDGED_BODY: { action: string; field: string; why: string }[] = [];
 
 // ── helpers ─────────────────────────────────────────────────────────────────────────────────────
 
@@ -181,6 +240,25 @@ const coveringFields = (
         bodyPathOf(f).startsWith(`${requiredPath}.`)),
   );
 
+/**
+ * A `type: "json"` field ABOVE the required path — the author pastes a whole object there, so the
+ * required key is reachable but not something the catalog can guarantee. Box's `parent` (hint:
+ * `{ "id": "0" } for root`) is how upstream's required `parent.id` gets sent; SendGrid's `from`
+ * (`{ email, name? }`) is how `from.email` does. Not a hard failure — there IS a field, and its
+ * hint names the key — but reported as an advisory, because "required" here lands on the author
+ * rather than on the save gate.
+ */
+const jsonBlobAncestor = (
+  action: IntegrationAction,
+  requiredPath: string,
+): IntegrationField | undefined =>
+  action.fields.find(
+    (f) =>
+      f.in === "body" &&
+      f.type === "json" &&
+      requiredPath.startsWith(`${bodyPathOf(f)}.`),
+  );
+
 interface Fixture {
   provider: string;
   pathPrefix: string;
@@ -208,19 +286,28 @@ function loadFixtures(): Fixture[] {
     });
 }
 
-/** The pruned requestBody schema for an operation, preferring JSON then form (Stripe and Twilio
- *  accept ONLY form — #707 — and their specs say so). */
-function requestBodySchema(
+/** The pruned requestBody `content` map for an operation, or undefined when it declares no body. */
+function requestBodyContent(
   fixture: Fixture,
   path: string,
   method: string,
-): unknown {
+): Record<string, { schema?: unknown }> | undefined {
   const paths = (fixture.raw.paths ?? {}) as Record<string, unknown>;
   const item = (paths[path] ?? {}) as Record<string, unknown>;
   const op = (item[method.toLowerCase()] ?? {}) as Record<string, unknown>;
   const body = op.requestBody as
     { content?: Record<string, { schema?: unknown }> } | undefined;
-  const content = body?.content;
+  return body?.content;
+}
+
+/** The pruned requestBody schema, preferring JSON then form (Stripe and Twilio accept ONLY form —
+ *  #707 — and their specs say so). */
+function requestBodySchema(
+  fixture: Fixture,
+  path: string,
+  method: string,
+): unknown {
+  const content = requestBodyContent(fixture, path, method);
   if (!content) return undefined;
   const media =
     content["application/json"] ??
@@ -228,6 +315,89 @@ function requestBodySchema(
     Object.values(content)[0];
   return media?.schema;
 }
+
+// ── the body-path check (#813) ──────────────────────────────────────────────────────────────────
+
+/** Where one `bodyPath` landed against the spec. `unknowable` is a first-class answer. */
+type BodyState = "confirmed" | "unknowable" | "wrong";
+interface BodyVerdict {
+  state: BodyState;
+  /** Present for `unknowable` and `wrong` — the sentence a reader needs. */
+  why?: string;
+}
+
+interface PrunedSchema {
+  required?: string[];
+  properties?: Record<string, PrunedSchema>;
+  items?: PrunedSchema;
+  type?: string;
+  "x-freeform"?: boolean;
+}
+
+/**
+ * Walk a dotted `bodyPath` down the pruned schema.
+ *
+ * The three exits, in the order they are reached:
+ *   - the node is free-form (`additionalProperties`, or an object declaring no properties) — the
+ *     spec permits any key, so nothing under it can be called wrong. UNKNOWABLE.
+ *   - the node was never expanded (the fixture pruned it, or the spec is silent). UNKNOWABLE.
+ *   - the node declares properties and ours is not one of them. WRONG, naming what it does declare.
+ */
+function resolveBodyPath(schema: unknown, dotted: string): BodyVerdict {
+  let node = schema as PrunedSchema | undefined;
+  if (!node || typeof node !== "object")
+    return {
+      state: "unknowable",
+      why: "the operation declares no body schema",
+    };
+  const segments = dotted.split(".");
+  for (const [i, segment] of segments.entries()) {
+    const so_far = segments.slice(0, i).join(".");
+    const where = so_far ? `"${so_far}"` : "the body root";
+    if (node["x-freeform"] && !node.properties?.[segment])
+      return {
+        state: "unknowable",
+        why: `${where} is a free-form object upstream — any key is legal there`,
+      };
+    if (node.type === "array")
+      return {
+        state: "wrong",
+        why: `${where} is an ARRAY upstream, so "${dotted}" cannot address it — a dotted bodyPath only builds objects`,
+      };
+    const properties = node.properties;
+    // A name upstream REQUIRES is a name upstream declares, whether or not it also bothered to
+    // give it a `properties` entry. PagerDuty's `incident.body` requires `type` and lists only
+    // `details` — its own docs show `{"type": "incident_body", "details": …}`, so calling our
+    // `incident.body.type` wrong there would be believing the spec over the API.
+    const requiredHere = new Set(node.required ?? []);
+    if (!properties)
+      return requiredHere.has(segment) && i === segments.length - 1
+        ? { state: "confirmed" }
+        : {
+            state: "unknowable",
+            why: `the pinned spec says nothing about the properties of ${where}`,
+          };
+    const next = properties[segment];
+    if (!next) {
+      if (requiredHere.has(segment)) {
+        node = {}; // declared by `required` alone; nothing below it is knowable
+        continue;
+      }
+      return {
+        state: "wrong",
+        why: `${where} declares {${Object.keys(properties).sort().join(", ")}} upstream — not "${segment}"`,
+      };
+    }
+    node = next;
+  }
+  return { state: "confirmed" };
+}
+
+/** The media type `planIntegrationCall` will actually send for this action. */
+const sentMediaType = (action: IntegrationAction): string =>
+  action.bodyEncoding === "form"
+    ? "application/x-www-form-urlencoded"
+    : "application/json";
 
 // ── analysis ────────────────────────────────────────────────────────────────────────────────────
 
@@ -253,6 +423,10 @@ interface ActionCheck {
   pathProblems: string[];
   paramProblems: string[];
   bodyProblems: string[];
+  /** WRONG body paths (#813) — hard, unless ACKNOWLEDGED_BODY excuses one. */
+  bodyPathProblems: string[];
+  /** One entry per `in:"body"` field, so the coverage summary can count what was NOT proven. */
+  bodyPathVerdicts: { field: string; path: string; verdict: BodyVerdict }[];
   /** Class-(4) differences: reported, never failed. */
   advisories: string[];
 }
@@ -275,6 +449,8 @@ function checkAction(
     pathProblems: [],
     paramProblems: [],
     bodyProblems: [],
+    bodyPathProblems: [],
+    bodyPathVerdicts: [],
     advisories: [],
   };
   const op = check.op;
@@ -333,9 +509,11 @@ function checkAction(
         : []),
     ].map((h) => h.toLowerCase()),
   );
+  const authParams = AUTH_PARAMETERS[fixture.provider];
   for (const param of op.parameters) {
     if (!param.required) continue;
     if (param.in !== "query" && param.in !== "header") continue;
+    if (authParams?.has(param.name)) continue; // it IS the credential — see AUTH_PARAMETERS
     if (
       param.in === "header" &&
       (TRANSPORT_HEADERS.has(param.name.toLowerCase()) ||
@@ -361,6 +539,13 @@ function checkAction(
   for (const required of requiredBodyPaths(schema)) {
     const covering = coveringFields(action, required);
     if (covering.length === 0) {
+      const blob = jsonBlobAncestor(action, required);
+      if (blob) {
+        check.advisories.push(
+          `${key}: body "${required}" is required upstream and reaches the API only inside the free-form JSON field "${blob.key}"`,
+        );
+        continue;
+      }
       check.bodyProblems.push(
         `upstream requires body "${required}" and no catalog field writes there (none whose bodyPath is it, or nests under it)`,
       );
@@ -373,6 +558,32 @@ function checkAction(
         `${key}: body "${required}" is required upstream, catalog says required:false`,
       );
   }
+
+  // (5) every body field lands on a declared property (#813) ---------------------------------------
+  for (const field of action.fields) {
+    if (field.in !== "body") continue;
+    const dotted = bodyPathOf(field);
+    const verdict = resolveBodyPath(schema, dotted);
+    check.bodyPathVerdicts.push({ field: field.key, path: dotted, verdict });
+    if (verdict.state === "wrong")
+      check.bodyPathProblems.push(
+        `field "${field.key}" writes body "${dotted}": ${verdict.why}`,
+      );
+  }
+
+  // (6) media type — advisory, never a failure -----------------------------------------------------
+  const content = requestBodyContent(fixture, op.path, op.method);
+  const declared = Object.keys(content ?? {});
+  const sent = sentMediaType(action);
+  // Only when the action HAS body fields: an upstream body we never populate says nothing.
+  if (
+    declared.length > 0 &&
+    action.fields.some((f) => f.in === "body") &&
+    !declared.some((m) => m.split(";")[0].trim() === sent)
+  )
+    check.advisories.push(
+      `${key}: we send ${sent}, upstream declares only {${declared.sort().join(", ")}}`,
+    );
   return check;
 }
 
@@ -467,6 +678,22 @@ for (const check of checks) {
     it("has a field for every required body property", () => {
       expect(check.bodyProblems, check.key).toEqual([]);
     });
+
+    it("writes every body field to a property the spec declares", () => {
+      // #813. The envelope check: a missing `incident.` prefix, a doubled one, or a `const`
+      // discriminator hung at the wrong depth all surface here as a name upstream doesn't have.
+      const excused = new Set(
+        ACKNOWLEDGED_BODY.filter((a) => a.action === check.key).map(
+          (a) => a.field,
+        ),
+      );
+      expect(
+        check.bodyPathProblems.filter(
+          (p) => !excused.has(p.match(/^field "([^"]+)"/)?.[1] ?? ""),
+        ),
+        check.key,
+      ).toEqual([]);
+    });
   });
 }
 
@@ -498,5 +725,57 @@ describe("advisory drift — reported, never failed", () => {
       );
     // Deliberately NOT an assertion on `fresh` — see the file docblock. The report is the output.
     expect(advisories.length).toBeGreaterThanOrEqual(ACKNOWLEDGED.length);
+  });
+
+  it("still finds every acknowledged WRONG body path", () => {
+    for (const { action, field, why } of ACKNOWLEDGED_BODY) {
+      const check = checks.find((c) => c.key === action);
+      expect(check, `${action} is no longer a checked action`).toBeDefined();
+      expect(
+        check?.bodyPathProblems.some((p) => p.startsWith(`field "${field}"`)),
+        `${action}.${field} is no longer reported as a wrong body path.\n  it was ` +
+          `acknowledged because: ${why}\n  Either the catalog was fixed (delete the entry) or ` +
+          "upstream changed the schema (worth a look).",
+      ).toBe(true);
+    }
+  });
+});
+
+/**
+ * The honest coverage number for #813, printed rather than asserted.
+ *
+ * The audit's whole point is that "not reported" ≠ "verified", so the count that matters is how
+ * many body fields were CONFIRMED against a spec versus how many the spec simply cannot speak to.
+ * Printed from the same data the assertions above run on, so the table in the PR body cannot drift
+ * from what the test actually checked.
+ */
+describe("body-encoding coverage (#813)", () => {
+  it("reports how much of the catalog a spec can actually vouch for", () => {
+    const writes = checks.filter((c) => c.action.write);
+    const rows: string[] = [];
+    let confirmed = 0;
+    let unknowable = 0;
+    let wrong = 0;
+    for (const check of writes) {
+      const counts = { confirmed: 0, unknowable: 0, wrong: 0 };
+      for (const v of check.bodyPathVerdicts) counts[v.verdict.state]++;
+      confirmed += counts.confirmed;
+      unknowable += counts.unknowable;
+      wrong += counts.wrong;
+      rows.push(
+        `    ${check.key.padEnd(34)} ${String(counts.confirmed).padStart(2)} confirmed  ` +
+          `${String(counts.unknowable).padStart(2)} unknowable  ${String(counts.wrong).padStart(2)} wrong`,
+      );
+    }
+    process.stderr.write(
+      `\n#813 spec-verified write bodies — ${writes.length} write action(s) across ` +
+        `${new Set(writes.map((c) => c.provider)).size} pinned provider(s):\n` +
+        `${rows.join("\n")}\n` +
+        `    ${"TOTAL body fields".padEnd(34)} ${confirmed} confirmed, ${unknowable} unknowable, ${wrong} wrong\n\n`,
+    );
+    // The only assertion: the summary must be summarizing something. A fixture directory that
+    // stopped loading would otherwise print a tidy table of zeroes.
+    expect(writes.length).toBeGreaterThan(0);
+    expect(confirmed).toBeGreaterThan(0);
   });
 });

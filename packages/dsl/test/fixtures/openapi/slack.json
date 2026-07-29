@@ -1,0 +1,179 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Slack Web API",
+    "version": "1.7.0"
+  },
+  "x-naary": {
+    "provider": "slack",
+    "pathPrefix": "",
+    "source": "https://raw.githubusercontent.com/slackapi/slack-api-specs/master/web-api/slack_web_openapi_v2.json",
+    "fetchedAt": "2026-07-29",
+    "note": "PRUNED snapshot — see packages/dsl/scripts/extract-openapi-fixtures.mjs. Do not hand-edit."
+  },
+  "paths": {
+    "/chat.postMessage": {
+      "post": {
+        "operationId": "chat_postMessage",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "header",
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "required": [
+                  "channel"
+                ],
+                "properties": {
+                  "as_user": {},
+                  "attachments": {},
+                  "blocks": {},
+                  "channel": {},
+                  "icon_emoji": {},
+                  "icon_url": {},
+                  "link_names": {},
+                  "mrkdwn": {},
+                  "parse": {},
+                  "reply_broadcast": {},
+                  "text": {},
+                  "thread_ts": {},
+                  "unfurl_links": {},
+                  "unfurl_media": {},
+                  "username": {}
+                }
+              }
+            },
+            "application/json": {
+              "schema": {
+                "required": [
+                  "channel"
+                ],
+                "properties": {
+                  "as_user": {},
+                  "attachments": {},
+                  "blocks": {},
+                  "channel": {},
+                  "icon_emoji": {},
+                  "icon_url": {},
+                  "link_names": {},
+                  "mrkdwn": {},
+                  "parse": {},
+                  "reply_broadcast": {},
+                  "text": {},
+                  "thread_ts": {},
+                  "unfurl_links": {},
+                  "unfurl_media": {},
+                  "username": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/chat.update": {
+      "post": {
+        "operationId": "chat_update",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "header",
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "required": [
+                  "channel",
+                  "ts"
+                ],
+                "properties": {
+                  "as_user": {},
+                  "attachments": {},
+                  "blocks": {},
+                  "channel": {},
+                  "link_names": {},
+                  "parse": {},
+                  "text": {},
+                  "ts": {}
+                }
+              }
+            },
+            "application/json": {
+              "schema": {
+                "required": [
+                  "channel",
+                  "ts"
+                ],
+                "properties": {
+                  "as_user": {},
+                  "attachments": {},
+                  "blocks": {},
+                  "channel": {},
+                  "link_names": {},
+                  "parse": {},
+                  "text": {},
+                  "ts": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/reactions.add": {
+      "post": {
+        "operationId": "reactions_add",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "header",
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "required": [
+                  "channel",
+                  "name",
+                  "timestamp"
+                ],
+                "properties": {
+                  "channel": {},
+                  "name": {},
+                  "timestamp": {}
+                }
+              }
+            },
+            "application/json": {
+              "schema": {
+                "required": [
+                  "channel",
+                  "name",
+                  "timestamp"
+                ],
+                "properties": {
+                  "channel": {},
+                  "name": {},
+                  "timestamp": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

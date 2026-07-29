@@ -1,0 +1,243 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "PostHog API",
+    "version": "1.0.0"
+  },
+  "x-naary": {
+    "provider": "posthog",
+    "pathPrefix": "",
+    "source": "https://app.posthog.com/api/schema/?format=json",
+    "fetchedAt": "2026-07-29",
+    "note": "PRUNED snapshot — see packages/dsl/scripts/extract-openapi-fixtures.mjs. Do not hand-edit."
+  },
+  "paths": {
+    "/api/projects/{project_id}/events/": {
+      "get": {
+        "operationId": "events_list",
+        "parameters": [
+          {
+            "name": "after",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "distinct_id",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "event",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "include_person",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "person_id",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "properties",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "select",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "where",
+            "in": "query",
+            "required": false
+          }
+        ]
+      }
+    },
+    "/api/projects/{project_id}/persons/": {
+      "get": {
+        "operationId": "persons_list",
+        "parameters": [
+          {
+            "name": "distinct_id",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "email",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "format",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "properties",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false
+          }
+        ]
+      }
+    },
+    "/api/projects/{project_id}/persons/{id}/": {
+      "get": {
+        "operationId": "persons_retrieve",
+        "parameters": [
+          {
+            "name": "format",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true
+          }
+        ]
+      }
+    },
+    "/api/projects/{project_id}/annotations/": {
+      "post": {
+        "operationId": "annotations_create",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "id": {},
+                  "content": {},
+                  "date_marker": {},
+                  "creation_type": {},
+                  "dashboard_item": {},
+                  "dashboard_id": {},
+                  "dashboard_name": {},
+                  "insight_short_id": {},
+                  "insight_name": {},
+                  "insight_derived_name": {},
+                  "created_by": {},
+                  "created_at": {},
+                  "updated_at": {},
+                  "deleted": {},
+                  "scope": {},
+                  "emoji": {},
+                  "hidden_in_user_interface": {}
+                }
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "properties": {
+                  "id": {},
+                  "content": {},
+                  "date_marker": {},
+                  "creation_type": {},
+                  "dashboard_item": {},
+                  "dashboard_id": {},
+                  "dashboard_name": {},
+                  "insight_short_id": {},
+                  "insight_name": {},
+                  "insight_derived_name": {},
+                  "created_by": {},
+                  "created_at": {},
+                  "updated_at": {},
+                  "deleted": {},
+                  "scope": {},
+                  "emoji": {},
+                  "hidden_in_user_interface": {}
+                }
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "properties": {
+                  "id": {},
+                  "content": {},
+                  "date_marker": {},
+                  "creation_type": {},
+                  "dashboard_item": {},
+                  "dashboard_id": {},
+                  "dashboard_name": {},
+                  "insight_short_id": {},
+                  "insight_name": {},
+                  "insight_derived_name": {},
+                  "created_by": {},
+                  "created_at": {},
+                  "updated_at": {},
+                  "deleted": {},
+                  "scope": {},
+                  "emoji": {},
+                  "hidden_in_user_interface": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

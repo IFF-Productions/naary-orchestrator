@@ -1,0 +1,139 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Intercom API",
+    "version": "2.16"
+  },
+  "x-naary": {
+    "provider": "intercom",
+    "pathPrefix": "",
+    "source": "https://raw.githubusercontent.com/intercom/Intercom-OpenAPI/main/descriptions/2.16/api.intercom.io.yaml",
+    "fetchedAt": "2026-07-29",
+    "note": "PRUNED snapshot — see packages/dsl/scripts/extract-openapi-fixtures.mjs. Do not hand-edit."
+  },
+  "paths": {
+    "/contacts/{contact_id}": {
+      "get": {
+        "operationId": "ShowContact",
+        "parameters": [
+          {
+            "name": "Intercom-Version",
+            "in": "header",
+            "required": false
+          },
+          {
+            "name": "contact_id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "include_merge_history",
+            "in": "query",
+            "required": false
+          }
+        ]
+      }
+    },
+    "/contacts": {
+      "post": {
+        "operationId": "CreateContact",
+        "parameters": [
+          {
+            "name": "Intercom-Version",
+            "in": "header",
+            "required": false
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "role": {},
+                  "external_id": {},
+                  "email_verified": {},
+                  "email": {},
+                  "phone": {},
+                  "name": {},
+                  "avatar": {},
+                  "signed_up_at": {},
+                  "last_seen_at": {},
+                  "owner_id": {},
+                  "unsubscribed_from_emails": {},
+                  "custom_attributes": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/contacts/{contact_id}/notes": {
+      "post": {
+        "operationId": "createNote",
+        "parameters": [
+          {
+            "name": "Intercom-Version",
+            "in": "header",
+            "required": false
+          },
+          {
+            "name": "contact_id",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "body"
+                ],
+                "properties": {
+                  "body": {},
+                  "admin_id": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/messages": {
+      "post": {
+        "operationId": "createMessage",
+        "parameters": [
+          {
+            "name": "Intercom-Version",
+            "in": "header",
+            "required": false
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "message_type": {},
+                  "subject": {},
+                  "body": {},
+                  "template": {},
+                  "from": {},
+                  "to": {},
+                  "cc": {},
+                  "bcc": {},
+                  "created_at": {},
+                  "create_conversation_without_contact_reply": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

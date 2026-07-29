@@ -52,12 +52,23 @@
                       "title": {},
                       "service": {
                         "properties": {
-                          "type": {}
+                          "id": {},
+                          "summary": {},
+                          "type": {},
+                          "self": {},
+                          "html_url": {}
                         }
                       },
                       "priority": {},
                       "urgency": {},
-                      "body": {},
+                      "body": {
+                        "required": [
+                          "type"
+                        ],
+                        "properties": {
+                          "details": {}
+                        }
+                      },
                       "incident_key": {},
                       "assignments": {},
                       "incident_type": {},

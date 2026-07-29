@@ -69,7 +69,9 @@
           "required": false,
           "content": {
             "application/x-www-form-urlencoded": {
-              "schema": {}
+              "schema": {
+                "x-freeform": true
+              }
             }
           }
         }
@@ -181,7 +183,9 @@
           "required": false,
           "content": {
             "application/x-www-form-urlencoded": {
-              "schema": {}
+              "schema": {
+                "x-freeform": true
+              }
             }
           }
         }
