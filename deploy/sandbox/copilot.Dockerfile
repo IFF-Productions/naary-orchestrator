@@ -25,6 +25,22 @@ RUN apt-get update \
   && npm install -g "@github/copilot@${COPILOT_CLI_VERSION}" \
   && npm cache clean --force
 
+# PRE-EXTRACT the CLI's bundled package at BUILD time, into the image.
+#
+# `copilot` is a self-extracting bundle: on first run it unpacks an app.js plus a NATIVE addon
+# (`runtime.node`) into $XDG_CACHE_HOME and dlopen()s it. In the sandbox that cache would land on
+# the writable tmpfs the runner mounts at HOME — which is `noexec`, so the load fails with
+# "failed to map segment from shared object" and the CLI never starts.
+#
+# The fix is deliberately NOT to add `exec` to that tmpfs: that would let a run extract and execute
+# arbitrary native code it fetched at runtime. Instead the addon is unpacked here, ships as part of
+# the PINNED image, and is loaded from the read-only root — so what executes is fixed at build
+# time. `--version` is the cheapest command that triggers extraction (it needs no credential), and
+# it doubles as a smoke test that the install actually runs.
+ENV XDG_CACHE_HOME=/opt/copilot-cache
+RUN copilot --version \
+  && chmod -R a+rX /opt/copilot-cache
+
 # Non-root: the model's tools run as an unprivileged user (defense in depth alongside the
 # runner's --cap-drop ALL / no-new-privileges / read-only root).
 RUN useradd --create-home --uid 10001 sandbox

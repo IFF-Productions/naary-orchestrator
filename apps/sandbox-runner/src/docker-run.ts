@@ -162,10 +162,26 @@ export function buildSandboxDockerArgs(spec: SandboxRunSpec): string[] {
     // Isolation: internal network (no gateway) is the egress boundary.
     "--network",
     spec.network,
-    // Filesystem: read-only root + a small writable tmpfs; the working tree is the only mount.
+    // Filesystem: read-only root + small writable tmpfs mounts; the working tree is the only
+    // real mount.
     "--read-only",
     "--tmpfs",
     "/tmp:size=256m",
+    // The CLIs' HOME. Every sandbox image runs as the same unprivileged `sandbox` user, whose
+    // home sits on the now-read-only root — and these tools all write there at startup
+    // (`~/.gemini`, `~/.cache` for copilot's bundled-package extraction, `~/.claude`). Verified:
+    // without this, copilot and gemini die before running with
+    // `ENOENT … mkdir '/home/sandbox/.gemini'`.
+    //
+    // This does NOT loosen the sandbox: a tmpfs is per-container RAM, discarded when the
+    // container exits, and `/tmp` above already provides exactly this kind of scratch space. The
+    // point of `--read-only` is that the IMAGE's files can't be modified, which still holds.
+    //
+    // `mode=1777` is REQUIRED, not decorative: a bare `--tmpfs` mounts root-owned 0755, so the
+    // unprivileged `sandbox` user still can't write and the failure merely changes from ENOENT to
+    // EACCES (verified for all three of cursor/copilot/gemini). Same mode Docker gives `/tmp`.
+    "--tmpfs",
+    "/home/sandbox:size=64m,mode=1777",
     "-v",
     `${spec.workdir}:/work`,
     "-w",
