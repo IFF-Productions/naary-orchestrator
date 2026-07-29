@@ -8,15 +8,25 @@
  * can drift. Adding an integration is a catalog entry, not a new node type (Tier-1:
  * interpreter, not codegen).
  *
- * Pure + dependency-free (no zod, no I/O) so it stays in the worker bundle cheaply and
- * both the interpreter and the web app can import it.
+ * Pure + dependency-free (no zod, no I/O), but NOT small: 38 providers with every action,
+ * field and UI hint string is ~161KB. It must therefore stay OUT of the deterministic Temporal
+ * workflow bundle (#910) — the config panel, the activity's request construction, the save gate
+ * and the docs generator all load it happily; the interpreter must not. The two helpers the
+ * interpreter genuinely needs live in ./integration-fields and ./integration-write, which are
+ * catalog-free. Nothing in this file may be imported from `apps/worker/src/temporal/workflow/**`;
+ * `apps/worker/test/workflow-bundle.spec.ts` fails the build if it is.
  */
-import type { ArgBinding, IntegrationNodeConfig } from "./types";
-import {
-  bindingNamesSource,
-  getByPath,
-  hasForbiddenPathSegment,
-} from "./mcp-args";
+import type { IntegrationNodeConfig } from "./types";
+import { bindingNamesSource, hasForbiddenPathSegment } from "./mcp-args";
+// `resolveIntegrationFields` + `isEmptyFieldValue` moved to a catalog-free module (#910) so the
+// interpreter can reach them without loading this file. Re-exported here (and from the barrel via
+// ./integration-fields) so every existing import site keeps working unchanged.
+import { isEmptyFieldValue } from "./integration-fields";
+
+export {
+  resolveIntegrationFields,
+  isEmptyFieldValue,
+} from "./integration-fields";
 
 /** `header` = a per-REQUEST header whose wire name IS the field key (mirroring how `query`
  *  uses the key as the param name) — for APIs that require a caller-supplied header on a
@@ -4441,25 +4451,6 @@ export function getIntegrationAction(
   return INTEGRATION_CATALOG[provider]?.actions.find((a) => a.key === action);
 }
 
-/** Resolve a node's concrete field values from the run context — static `fields` are the
- *  base, each `fieldBindings` entry overrides its key with `getByPath(ctx[from], path)`.
- *  Mirrors resolveMcpArguments; pure graph-traversal, runs in the interpreter. */
-export function resolveIntegrationFields(
-  config: IntegrationNodeConfig,
-  ctx: Record<string, unknown>,
-): Record<string, unknown> {
-  const out: Record<string, unknown> = { ...(config.fields ?? {}) };
-  for (const [name, binding] of Object.entries(config.fieldBindings ?? {})) {
-    if (hasForbiddenPathSegment(name)) continue; // #591: never assign prototype-chain keys
-    // A row that names no source is an unfinished edit, not "blank this field" — see
-    // bindingNamesSource. Without this, a typed-in value is silently replaced by undefined.
-    if (!bindingNamesSource(binding)) continue;
-    const b = binding as ArgBinding;
-    out[name] = getByPath(ctx[b.from], b.path);
-  }
-  return out;
-}
-
 /** Set a dotted path on an object, creating intermediate objects. Pure. */
 function setPath(
   target: Record<string, unknown>,
@@ -4495,15 +4486,6 @@ function hasObjectAtPath(
     obj = (obj as Record<string, unknown>)[key];
   }
   return obj != null && typeof obj === "object";
-}
-
-/** A field value that carries nothing to send: unset, blank, empty array, or empty object.
- *  Shared by request construction (omit it) and validation (treat as missing) so they agree. */
-export function isEmptyFieldValue(v: unknown): boolean {
-  if (v === undefined || v === null || v === "") return true;
-  if (Array.isArray(v)) return v.length === 0;
-  if (typeof v === "object") return Object.keys(v as object).length === 0;
-  return false;
 }
 
 export interface BuiltIntegrationRequest {

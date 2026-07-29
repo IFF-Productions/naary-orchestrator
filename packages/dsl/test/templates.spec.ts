@@ -8,7 +8,7 @@ import {
   moderationGraph,
   supportReplyGraph,
 } from "../src";
-import { validateGraph } from "../src/branch";
+import { validateGraph } from "../src/validate-graph";
 import type { GraphDef } from "../src/types";
 
 // Product starter templates: a shipped template with a broken graph is a bad first

@@ -20,7 +20,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { NODE_TYPES } from "../src/node-catalog";
-import { validateGraph } from "../src/branch";
+import { validateGraph } from "../src/validate-graph";
 import { validateGraphConfigs } from "../src/registry";
 import { convertN8nExpression } from "../src/n8n-expressions";
 import {

@@ -11,7 +11,7 @@ import {
   resolveSqlExec,
   resolveRss,
   asNodeConfig,
-} from "@naary/dsl";
+} from "@naary/dsl/dist/workflow";
 import type { NodeOutputMap } from "@naary/dsl";
 import {
   callPoll,

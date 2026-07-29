@@ -6,10 +6,10 @@
 import {
   resolveMcpArguments,
   resolveIntegrationFields,
-  getIntegrationAction,
+  isIntegrationWriteAction,
   asNodeConfig,
   getByPath,
-} from "@naary/dsl";
+} from "@naary/dsl/dist/workflow";
 import * as wf from "@temporalio/workflow";
 import type { NodeOutputMap } from "@naary/dsl";
 import type * as activities from "../../activities";
@@ -241,9 +241,15 @@ export const handleIntegration: NodeHandler = async ({
   // action runs AT-MOST-ONCE (no retry) so a lost response can't duplicate a create
   // (design §4); reads retry. No per-node retryOverride — the write/read split governs
   // idempotency and a retry override must never re-enable retries on a write.
+  //
+  // The write/read bit comes from the derived write-set, NOT from a catalog lookup (#910):
+  // `getIntegrationAction()` here loaded all 161KB of catalog into the deterministic bundle to
+  // answer one boolean. `isIntegrationWriteAction` is total and returns the SAME answer for every
+  // catalog pair (held there by integration-write-drift.spec.ts, both directions) and the same
+  // `false` for an unknown pair that `undefined?.write` used to give — so no wf.patched() gate is
+  // needed: no in-flight history can replay onto a different activity.
   const iCfg = asNodeConfig(cfg, "integration");
-  const action = getIntegrationAction(iCfg.provider, iCfg.action);
-  const runIntegration = action?.write
+  const runIntegration = isIntegrationWriteAction(iCfg.provider, iCfg.action)
     ? callIntegrationWrite
     : callIntegrationRead;
   ctx[node.id] = (await runIntegration(
