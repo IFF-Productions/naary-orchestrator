@@ -1,0 +1,330 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Cloudflare API",
+    "version": "4.0.0"
+  },
+  "x-naary": {
+    "provider": "cloudflare",
+    "pathPrefix": "",
+    "source": "https://raw.githubusercontent.com/cloudflare/api-schemas/main/openapi.json",
+    "fetchedAt": "2026-07-29",
+    "note": "PRUNED snapshot — see packages/dsl/scripts/extract-openapi-fixtures.mjs. Do not hand-edit."
+  },
+  "paths": {
+    "/zones": {
+      "get": {
+        "operationId": "zones-get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "account.id",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "account.name",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "per_page",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "direction",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "match",
+            "in": "query",
+            "required": false
+          }
+        ]
+      }
+    },
+    "/zones/{zone_id}/dns_records": {
+      "get": {
+        "operationId": "dns-records-for-a-zone-list-dns-records",
+        "parameters": [
+          {
+            "name": "zone_id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "name",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "name.exact",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "name.contains",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "name.startswith",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "name.endswith",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "content",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "content.exact",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "content.contains",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "content.startswith",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "content.endswith",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "proxied",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "match",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "comment",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "comment.present",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "comment.absent",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "comment.exact",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "comment.contains",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "comment.startswith",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "comment.endswith",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "tag",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "tag.present",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "tag.absent",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "tag.exact",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "tag.contains",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "tag.startswith",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "tag.endswith",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "tag_match",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "per_page",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "order",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "direction",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "include_shadow_metadata",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "shadowed_by_name",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "shadowing_name",
+            "in": "query",
+            "required": false
+          }
+        ]
+      },
+      "post": {
+        "operationId": "dns-records-for-a-zone-create-dns-record",
+        "parameters": [
+          {
+            "name": "zone_id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "include_shadow_metadata",
+            "in": "query",
+            "required": false
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "comment": {},
+                  "name": {},
+                  "proxied": {},
+                  "settings": {},
+                  "tags": {},
+                  "ttl": {},
+                  "content": {},
+                  "private_routing": {},
+                  "type": {},
+                  "priority": {},
+                  "data": {}
+                },
+                "x-readonly": [
+                  "content"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/zones/{zone_id}/dns_records/{dns_record_id}": {
+      "delete": {
+        "operationId": "dns-records-for-a-zone-delete-dns-record",
+        "parameters": [
+          {
+            "name": "dns_record_id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "zone_id",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {}
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,153 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Box Platform API",
+    "version": "2024.0"
+  },
+  "x-naary": {
+    "provider": "box",
+    "pathPrefix": "",
+    "source": "https://raw.githubusercontent.com/box/box-openapi/en/openapi.json",
+    "fetchedAt": "2026-07-29",
+    "note": "PRUNED snapshot — see packages/dsl/scripts/extract-openapi-fixtures.mjs. Do not hand-edit."
+  },
+  "paths": {
+    "/folders/{folder_id}/items": {
+      "get": {
+        "operationId": "get_folders_id_items",
+        "parameters": [
+          {
+            "name": "folder_id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "fields",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "usemarker",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "marker",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "boxapi",
+            "in": "header",
+            "required": false
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "direction",
+            "in": "query",
+            "required": false
+          }
+        ]
+      }
+    },
+    "/files/{file_id}": {
+      "get": {
+        "operationId": "get_files_id",
+        "parameters": [
+          {
+            "name": "file_id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "fields",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "if-none-match",
+            "in": "header",
+            "required": false
+          },
+          {
+            "name": "boxapi",
+            "in": "header",
+            "required": false
+          },
+          {
+            "name": "x-rep-hints",
+            "in": "header",
+            "required": false
+          }
+        ]
+      },
+      "delete": {
+        "operationId": "delete_files_id",
+        "parameters": [
+          {
+            "name": "file_id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "if-match",
+            "in": "header",
+            "required": false
+          }
+        ]
+      }
+    },
+    "/folders": {
+      "post": {
+        "operationId": "post_folders",
+        "parameters": [
+          {
+            "name": "fields",
+            "in": "query",
+            "required": false
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "name",
+                  "parent"
+                ],
+                "properties": {
+                  "name": {},
+                  "parent": {
+                    "required": [
+                      "id"
+                    ],
+                    "properties": {
+                      "id": {}
+                    }
+                  },
+                  "folder_upload_email": {},
+                  "sync_state": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

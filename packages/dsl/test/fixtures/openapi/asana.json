@@ -1,0 +1,272 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Asana",
+    "version": "1.0"
+  },
+  "x-naary": {
+    "provider": "asana",
+    "pathPrefix": "",
+    "source": "https://raw.githubusercontent.com/Asana/openapi/master/defs/asana_oas.yaml",
+    "fetchedAt": "2026-07-29",
+    "note": "PRUNED snapshot — see packages/dsl/scripts/extract-openapi-fixtures.mjs. Do not hand-edit."
+  },
+  "paths": {
+    "/tasks/{task_gid}": {
+      "get": {
+        "operationId": "getTask",
+        "parameters": [
+          {
+            "name": "task_gid",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "opt_pretty",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "opt_fields",
+            "in": "query",
+            "required": false
+          }
+        ]
+      },
+      "put": {
+        "operationId": "updateTask",
+        "parameters": [
+          {
+            "name": "task_gid",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "opt_pretty",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "opt_fields",
+            "in": "query",
+            "required": false
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "data": {
+                    "properties": {
+                      "gid": {},
+                      "resource_type": {},
+                      "name": {},
+                      "resource_subtype": {},
+                      "created_by": {},
+                      "approval_status": {},
+                      "assignee_status": {},
+                      "assigned_by": {},
+                      "completed": {},
+                      "completed_at": {},
+                      "completed_by": {},
+                      "created_at": {},
+                      "dependencies": {},
+                      "dependents": {},
+                      "due_at": {},
+                      "due_on": {},
+                      "external": {},
+                      "html_notes": {},
+                      "hearted": {},
+                      "hearts": {},
+                      "is_rendered_as_separator": {},
+                      "liked": {},
+                      "likes": {},
+                      "memberships": {},
+                      "modified_at": {},
+                      "notes": {},
+                      "num_hearts": {},
+                      "num_likes": {},
+                      "num_subtasks": {},
+                      "start_at": {},
+                      "start_on": {},
+                      "actual_time_minutes": {},
+                      "assignee": {},
+                      "assignee_section": {},
+                      "custom_fields": {},
+                      "parent": {},
+                      "custom_type": {},
+                      "custom_type_status_option": {}
+                    },
+                    "x-readonly": [
+                      "gid",
+                      "resource_type",
+                      "created_by",
+                      "completed_at",
+                      "created_at",
+                      "dependencies",
+                      "dependents",
+                      "hearted",
+                      "hearts",
+                      "is_rendered_as_separator",
+                      "likes",
+                      "memberships",
+                      "modified_at",
+                      "num_hearts",
+                      "num_likes",
+                      "num_subtasks",
+                      "actual_time_minutes"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tasks": {
+      "post": {
+        "operationId": "createTask",
+        "parameters": [
+          {
+            "name": "opt_pretty",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "opt_fields",
+            "in": "query",
+            "required": false
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "data": {
+                    "properties": {
+                      "gid": {},
+                      "resource_type": {},
+                      "name": {},
+                      "resource_subtype": {},
+                      "created_by": {},
+                      "approval_status": {},
+                      "assignee_status": {},
+                      "assigned_by": {},
+                      "completed": {},
+                      "completed_at": {},
+                      "completed_by": {},
+                      "created_at": {},
+                      "dependencies": {},
+                      "dependents": {},
+                      "due_at": {},
+                      "due_on": {},
+                      "external": {},
+                      "html_notes": {},
+                      "hearted": {},
+                      "hearts": {},
+                      "is_rendered_as_separator": {},
+                      "liked": {},
+                      "likes": {},
+                      "memberships": {},
+                      "modified_at": {},
+                      "notes": {},
+                      "num_hearts": {},
+                      "num_likes": {},
+                      "num_subtasks": {},
+                      "start_at": {},
+                      "start_on": {},
+                      "actual_time_minutes": {},
+                      "assignee": {},
+                      "assignee_section": {},
+                      "custom_fields": {},
+                      "parent": {},
+                      "followers": {},
+                      "projects": {},
+                      "tags": {},
+                      "workspace": {}
+                    },
+                    "x-readonly": [
+                      "gid",
+                      "resource_type",
+                      "created_by",
+                      "completed_at",
+                      "created_at",
+                      "dependencies",
+                      "dependents",
+                      "hearted",
+                      "hearts",
+                      "is_rendered_as_separator",
+                      "likes",
+                      "memberships",
+                      "modified_at",
+                      "num_hearts",
+                      "num_likes",
+                      "num_subtasks",
+                      "actual_time_minutes"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/tasks/{task_gid}/stories": {
+      "post": {
+        "operationId": "createStoryForTask",
+        "parameters": [
+          {
+            "name": "task_gid",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "opt_pretty",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "opt_fields",
+            "in": "query",
+            "required": false
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "data": {
+                    "properties": {
+                      "gid": {},
+                      "resource_type": {},
+                      "created_at": {},
+                      "resource_subtype": {},
+                      "text": {},
+                      "html_text": {},
+                      "is_pinned": {},
+                      "sticker_name": {}
+                    },
+                    "x-readonly": [
+                      "gid",
+                      "resource_type",
+                      "created_at",
+                      "resource_subtype"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,183 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Discord HTTP API (Preview)",
+    "version": "10"
+  },
+  "x-naary": {
+    "provider": "discord",
+    "pathPrefix": "",
+    "source": "https://raw.githubusercontent.com/discord/discord-api-spec/main/specs/openapi.json",
+    "fetchedAt": "2026-07-29",
+    "note": "PRUNED snapshot — see packages/dsl/scripts/extract-openapi-fixtures.mjs. Do not hand-edit."
+  },
+  "paths": {
+    "/channels/{channel_id}/messages": {
+      "post": {
+        "operationId": "create_message",
+        "parameters": [
+          {
+            "name": "channel_id",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "content": {},
+                  "embeds": {},
+                  "allowed_mentions": {},
+                  "sticker_ids": {},
+                  "components": {},
+                  "flags": {},
+                  "attachments": {},
+                  "poll": {},
+                  "shared_client_theme": {},
+                  "message_reference": {},
+                  "nonce": {},
+                  "enforce_nonce": {},
+                  "tts": {}
+                }
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "properties": {
+                  "content": {},
+                  "embeds": {},
+                  "allowed_mentions": {},
+                  "sticker_ids": {},
+                  "components": {},
+                  "flags": {},
+                  "attachments": {},
+                  "poll": {},
+                  "shared_client_theme": {},
+                  "message_reference": {},
+                  "nonce": {},
+                  "enforce_nonce": {},
+                  "tts": {}
+                }
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "properties": {
+                  "content": {},
+                  "embeds": {},
+                  "allowed_mentions": {},
+                  "sticker_ids": {},
+                  "components": {},
+                  "flags": {},
+                  "attachments": {},
+                  "poll": {},
+                  "shared_client_theme": {},
+                  "message_reference": {},
+                  "nonce": {},
+                  "enforce_nonce": {},
+                  "tts": {},
+                  "files[0]": {},
+                  "files[1]": {},
+                  "files[2]": {},
+                  "files[3]": {},
+                  "files[4]": {},
+                  "files[5]": {},
+                  "files[6]": {},
+                  "files[7]": {},
+                  "files[8]": {},
+                  "files[9]": {}
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "list_messages",
+        "parameters": [
+          {
+            "name": "channel_id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "around",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false
+          }
+        ]
+      }
+    },
+    "/channels/{channel_id}": {
+      "get": {
+        "operationId": "get_channel",
+        "parameters": [
+          {
+            "name": "channel_id",
+            "in": "path",
+            "required": true
+          }
+        ]
+      }
+    },
+    "/users/@me/channels": {
+      "post": {
+        "operationId": "create_dm",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "recipient_id": {},
+                  "access_tokens": {},
+                  "nicks": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/channels/{channel_id}/messages/{message_id}/reactions/{emoji_name}/@me": {
+      "put": {
+        "operationId": "add_my_message_reaction",
+        "parameters": [
+          {
+            "name": "channel_id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "message_id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "emoji_name",
+            "in": "path",
+            "required": true
+          }
+        ]
+      }
+    }
+  }
+}

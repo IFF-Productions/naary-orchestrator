@@ -1,0 +1,166 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Twilio SendGrid Mail API",
+    "version": "1.0.0"
+  },
+  "x-naary": {
+    "provider": "sendgrid",
+    "pathPrefix": "/v3",
+    "source": "https://raw.githubusercontent.com/twilio/sendgrid-oai/main/spec/json/tsg_mail_v3.json, https://raw.githubusercontent.com/twilio/sendgrid-oai/main/spec/json/tsg_mc_contacts_v3.json, https://raw.githubusercontent.com/twilio/sendgrid-oai/main/spec/json/tsg_templates_v3.json",
+    "fetchedAt": "2026-07-29",
+    "note": "PRUNED snapshot — see packages/dsl/scripts/extract-openapi-fixtures.mjs. Do not hand-edit."
+  },
+  "paths": {
+    "/v3/mail/send": {
+      "post": {
+        "operationId": "SendMail",
+        "parameters": [
+          {
+            "name": "Content-Encoding",
+            "in": "header",
+            "required": false
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "personalizations",
+                  "from"
+                ],
+                "properties": {
+                  "personalizations": {
+                    "type": "array",
+                    "items": {
+                      "required": [
+                        "to"
+                      ],
+                      "properties": {
+                        "from": {},
+                        "to": {
+                          "type": "array",
+                          "items": {
+                            "required": [
+                              "email"
+                            ],
+                            "properties": {
+                              "email": {},
+                              "name": {}
+                            }
+                          }
+                        },
+                        "cc": {},
+                        "bcc": {},
+                        "subject": {},
+                        "headers": {},
+                        "substitutions": {},
+                        "dynamic_template_data": {},
+                        "custom_args": {},
+                        "send_at": {}
+                      }
+                    }
+                  },
+                  "from": {
+                    "required": [
+                      "email"
+                    ],
+                    "properties": {
+                      "email": {},
+                      "name": {}
+                    }
+                  },
+                  "reply_to": {},
+                  "reply_to_list": {},
+                  "subject": {},
+                  "content": {},
+                  "attachments": {},
+                  "template_id": {},
+                  "headers": {},
+                  "categories": {},
+                  "custom_args": {},
+                  "send_at": {},
+                  "batch_id": {},
+                  "asm": {},
+                  "ip_pool_name": {},
+                  "mail_settings": {},
+                  "tracking_settings": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v3/marketing/contacts": {
+      "put": {
+        "operationId": "UpdateContact",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "contacts"
+                ],
+                "properties": {
+                  "list_ids": {},
+                  "contacts": {
+                    "type": "array",
+                    "items": {
+                      "properties": {
+                        "address_line_1": {},
+                        "address_line_2": {},
+                        "alternate_emails": {},
+                        "city": {},
+                        "country": {},
+                        "email": {},
+                        "phone_number_id": {},
+                        "external_id": {},
+                        "anonymous_id": {},
+                        "first_name": {},
+                        "last_name": {},
+                        "postal_code": {},
+                        "state_province_region": {},
+                        "custom_fields": {}
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v3/templates": {
+      "get": {
+        "operationId": "ListTemplate",
+        "parameters": [
+          {
+            "name": "generations",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": true
+          },
+          {
+            "name": "page_token",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "on-behalf-of",
+            "in": "header",
+            "required": false
+          }
+        ]
+      }
+    }
+  }
+}

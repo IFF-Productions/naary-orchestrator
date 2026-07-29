@@ -262,6 +262,41 @@ silently rot.
 **Ordering note:** an `unknown` answer comes *before* the missing-Server-URL check — telling someone to
 fill in a Server URL for a provider we can't probe at all would send them to fix the wrong thing.
 
+### 2.5 Which write bodies a SPEC can vouch for — 29 of 76 (#813)
+
+A third evidence tier, between "unit-tested" and "run live": the request body an action builds,
+diffed against the provider's own OpenAPI document. `packages/dsl/test/integration-catalog-openapi.drift.spec.ts`
+resolves every `in: "body"` field's `bodyPath` against a pinned spec and classifies it
+**confirmed** (it names a property the spec declares), **unknowable** (it lands in a free-form
+object, or the spec is silent), or **wrong**. Only *wrong* fails the build. Run `pnpm test` and the
+spec prints the per-action table; the totals below come from that run.
+
+This does **not** replace the `Live proof` column. A spec proves the shape is *sayable*, not that
+anyone has ever sent it. It does close the specific hole #707 and #811 came out of: an action whose
+body could never be accepted, shipped looking exactly as trustworthy as one that works.
+
+**Spec-verified (13 providers, 29 of the 76 body-bearing write actions):** `asana` · `box` ·
+`cloudflare` · `discord` · `front` · `github` · `intercom` · `pagerduty` · `posthog` · `sendgrid` ·
+`slack` · `stripe` · `twilio` — 74 body fields confirmed, 3 unknowable, 0 wrong. The three
+unknowable ones are properties their own spec marks `readOnly` while the provider's docs require
+them on a write (PagerDuty's `incident.service.id`/`.type`, Cloudflare's DNS `content`); the spec
+contradicts itself there, so it neither confirms nor denies.
+
+**Not spec-verified (22 providers, 47 actions)** — grouped by why, because "we didn't check" and
+"there is nothing to check against" are different claims:
+
+| Why | Providers |
+| --- | --- |
+| GraphQL — the request body is a query string, so there are no per-operation request schemas to diff | `linear` `monday` |
+| Spec exists, but documents different endpoints than we call | `pipedrive` (v1 CRUD moved to the v2 API), `sentry` (only the org-scoped issue route; ours is the legacy one) |
+| Spec exists, but its paths don't line up without a rewrite seam | `zendesk` (canonicalises without the `.json` suffix our paths use) |
+| Spec is split across external `$ref` files, or is too large to vendor cheaply | `digitalocean` `gitlab` `msgraph` |
+| No official machine-readable OpenAPI document found by this audit | `airtable` `calendly` `clickup` `dropbox` `googlesheets` (Discovery doc, not OpenAPI) `hubspot` `jira` (v3 spec only; our actions target v2 deliberately) `mailchimp` `mattermost` `notion` `shopify` `todoist` `webflow` `zoom` |
+
+Adding one is a `SOURCES` entry in `packages/dsl/scripts/extract-openapi-fixtures.mjs` plus
+`pnpm refresh:openapi-fixtures`; the reasons above live next to that list so they can be argued
+with rather than rediscovered.
+
 ## 3. Non-catalog product integrations
 
 | Integration | Surface | Credential / config | Real-environment check | Writes? | Live proof |
@@ -379,7 +414,9 @@ Stated as facts, not as a plan.
    each for a named reason the product shows the user.
 2. **37 of 38 catalog providers have no real-environment proof.** Only GitHub is exercised
    live (plus Slack's webhook notification path, which is not the `integration` node). The
-   other 36 are typed, unit-tested, and unproven against the real API.
+   other 36 are typed, unit-tested, and unproven against the real API. Since #813, 13 of them
+   also have their write bodies diffed against the provider's own OpenAPI spec (§2.5) — which
+   narrows the gap without closing it: a spec proves the shape is sayable, not that it works.
 3. **Only Postgres of the three SQL engines is live-covered.** MySQL and SQL Server have
    unit + integration coverage; no live DSN gate exists.
 4. **`codeAgent` live coverage is Claude Code, read-only.** Cursor and Copilot have no live

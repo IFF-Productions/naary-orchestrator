@@ -243,10 +243,12 @@ describe("integration catalog — request construction", () => {
       generations: "dynamic",
     });
     expect(req.method).toBe("GET");
-    expect(req.path).toBe("/templates?generations=dynamic");
-    // …and when omitted, no query string is appended.
+    expect(req.path).toBe("/templates?generations=dynamic&page_size=200");
+    // …and when generations is omitted, only the catalog-supplied page_size remains. It is NOT
+    // optional: SendGrid rejects `GET /v3/templates` outright without it (#813), which is why it
+    // is a `const` the catalog always sends rather than a field the author must remember.
     expect(buildIntegrationRequest("sendgrid", "list_templates", {}).path).toBe(
-      "/templates",
+      "/templates?page_size=200",
     );
   });
 
@@ -1887,7 +1889,10 @@ describe("bindings that name no source", () => {
 
   it("keeps it for a blank/whitespace `from` too — an editor leaves those behind", () => {
     for (const from of ["", "   "]) {
-      const out = resolveIntegrationFields(cfg({ id: { from, path: "x" } }) as never, {});
+      const out = resolveIntegrationFields(
+        cfg({ id: { from, path: "x" } }) as never,
+        {},
+      );
       expect(out.id).toBe("PINC123");
     }
   });

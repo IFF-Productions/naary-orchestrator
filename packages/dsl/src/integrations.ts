@@ -937,6 +937,22 @@ const SENDGRID: IntegrationProvider = {
           required: false,
           hint: "legacy|dynamic",
         },
+        // SendGrid REQUIRES page_size on this endpoint (1–200) — without it the call is a 400,
+        // every time, which is what the catalog shipped (#813). Supplied as a `const` rather than
+        // asked of the author for two reasons: nothing else about "list my templates" needs an
+        // argument, and this is the action `pickConnectionTestAction` uses to prove a SendGrid
+        // token — a required field the user must fill would take SendGrid out of one-click
+        // "Test connection" (VERIFICATION.md §2.4) to model an API quirk. 200 is the maximum the
+        // spec allows, so one call returns as much as the endpoint can give.
+        {
+          key: "page_size",
+          label: "Page size",
+          in: "query",
+          required: true,
+          type: "number",
+          const: 200,
+          hint: "fixed at SendGrid's maximum — the API rejects the call without it",
+        },
       ],
     },
   ],
@@ -4865,11 +4881,20 @@ export function buildIntegrationRequest(
   // resolved and the failure would fall through to "transient" — losing this message.
   if (act.bodyEncoding === "form" && body !== undefined) {
     for (const [key, value] of Object.entries(body)) {
-      if (Array.isArray(value)) continue; // a list is fine — it becomes repeated keys
-      if (value !== null && typeof value === "object") {
-        throw new Error(
-          `Integration ${provider}/${action}: form-encoded actions can't send a nested value for '${key}' — flatten it in the catalog (e.g. Stripe's metadata[key] as its own field).`,
-        );
+      // A list is fine — it becomes repeated keys (`MediaUrl=a&MediaUrl=b`). Its ELEMENTS are
+      // not: `formEncodeBody` appends each one through the same `String(v)`-or-throw path, so an
+      // object inside an array is exactly as unsendable as an object at the top. Checking only
+      // the array itself let `{name: ["a", {x: 1}]}` past the builder and left the throw to the
+      // planner — after auth resolution, where the activity's catch treats it as
+      // INTEGRATION_TRANSIENT and sanitizes this message away (and retries a read three times).
+      // Reachable from a `type: "string[]"` field bound to run data that yields objects.
+      const values: unknown[] = Array.isArray(value) ? value : [value];
+      for (const v of values) {
+        if (v !== null && typeof v === "object") {
+          throw new Error(
+            `Integration ${provider}/${action}: form-encoded actions can't send a nested value for '${key}' — flatten it in the catalog (e.g. Stripe's metadata[key] as its own field).`,
+          );
+        }
       }
     }
   }

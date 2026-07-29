@@ -80,7 +80,9 @@
                   "title"
                 ],
                 "properties": {
-                  "title": {},
+                  "title": {
+                    "x-freeform": true
+                  },
                   "body": {},
                   "assignee": {},
                   "milestone": {},
@@ -156,7 +158,11 @@
           "required": false,
           "content": {
             "application/json": {
-              "schema": {}
+              "schema": {
+                "properties": {
+                  "labels": {}
+                }
+              }
             }
           }
         }
