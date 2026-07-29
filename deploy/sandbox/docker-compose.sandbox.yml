@@ -66,11 +66,18 @@ services:
       SANDBOX_PROXY_URL: http://naary-sandbox-proxy:3128
       # Per-TOOL images (#680): the runner maps the request's `tool` to one of these — a request
       # can never name an image (the runner holds the Docker socket). Each default is DISTINCT;
-      # `SANDBOX_IMAGE` remains a claude-only alias for pre-#680 deploys. Pin by digest in prod.
+      # `SANDBOX_IMAGE` remains a claude-only alias for pre-#680 deploys.
+      #
+      # This file is the DEV/standalone stack, so `:latest` local builds are the right default here.
+      # Production does not use this file: CI publishes the four images to GHCR and deploy.yml hands
+      # the prod runner digest-pinned refs + SANDBOX_REQUIRE_DIGEST=1
+      # (.github/workflows/sandbox-images.yml). You can point this stack at those same refs by
+      # exporting SANDBOX_IMAGE_* / SANDBOX_REQUIRE_DIGEST before `compose up`.
       SANDBOX_IMAGE_CLAUDE: "${SANDBOX_IMAGE_CLAUDE:-naary-claude-sandbox:latest}"
       SANDBOX_IMAGE_CURSOR: "${SANDBOX_IMAGE_CURSOR:-naary-cursor-sandbox:latest}"
       SANDBOX_IMAGE_COPILOT: "${SANDBOX_IMAGE_COPILOT:-naary-copilot-sandbox:latest}"
       SANDBOX_IMAGE_GEMINI: "${SANDBOX_IMAGE_GEMINI:-naary-gemini-sandbox:latest}"
+      SANDBOX_REQUIRE_DIGEST: "${SANDBOX_REQUIRE_DIGEST:-}"
     volumes:
       # Docker socket — this container's (contained) privilege.
       - /var/run/docker.sock:/var/run/docker.sock

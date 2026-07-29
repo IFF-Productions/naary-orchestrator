@@ -39,6 +39,7 @@ const CFG = (): RunnerConfig => ({
   network: "naary-sandbox-internal",
   proxyUrl: "http://naary-sandbox-proxy:3128",
   images: DEFAULT_SANDBOX_IMAGES,
+  requireDigest: false,
   limits: { cpus: "1.0", memoryMb: 2048, pids: 256 },
   defaultTimeoutMs: 900_000,
   port: 8099,

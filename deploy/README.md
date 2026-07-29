@@ -248,6 +248,16 @@ Deploys are **release-driven**, semver-tagged (`v0.0.1`):
    `…/naary-web:<tag>` in CI (gha layer cache) and pushes to GHCR — **unless both tags
    already exist**, so re-runs/rollbacks reuse the exact original artifact. The web
    image bakes `VITE_*` from repo **variables** and `VITE_APP_VERSION=<tag>`.
+2b. **Sandbox images** (`deploy.yml` → `sandbox-images.yml`): the four codeAgent sandbox
+   images (`naary-{claude,cursor,copilot,gemini}-sandbox`) are built + pushed to GHCR here
+   too — never on the box. They are tagged by **content**
+   (`sha-<hash of IMAGE_EPOCH + tool + that tool's Dockerfile>`), not by release tag: ~1.7GiB
+   of coding CLIs that change monthly must not be rebuilt on every release, so the job skips
+   the build whenever the tag already exists and just resolves the existing **digest**.
+   Force a rebuild without a Dockerfile change (base-image CVE refresh; cursor's installer is
+   an unpinned remote script) by bumping `EPOCH` in `deploy/sandbox/IMAGE_EPOCH`.
+   The job's outputs are `<ref>@sha256:<digest>` — the runner holds the host Docker socket, so
+   what it launches must be immutable bytes, not a re-pushable tag.
 3. **Deploy** (`deploy.yml`, deploy job): `scp`s the compose files, logs the box into
    GHCR with the run's **ephemeral** `GITHUB_TOKEN` (nothing long-lived on the server),
    `compose pull` → run `migrate` to completion → **rolling replace** of api, worker,
@@ -257,7 +267,11 @@ Deploys are **release-driven**, semver-tagged (`v0.0.1`):
    re-resolved per request) → `docker logout`. If a new container never goes healthy
    the rollout fails the run **with the previous release still serving**. Consequence:
    migrations must be backward-compatible (expand/contract) — the old api/worker run
-   against the new schema during the overlap.
+   against the new schema during the overlap. When the `sandbox` profile is active on the box
+   (`$COMPOSE config --services` names `sandbox-runner`) the deploy additionally pulls the four
+   sandbox images **by digest** — compose can't, since the runner launches them through the host
+   Docker rather than as services — and starts the runner with `SANDBOX_REQUIRE_DIGEST=1`, which
+   makes it refuse to boot on a mutable tag. A box without the profile pulls none of them.
 4. **Rollback / redeploy:** run *Deploy* manually with any older tag as the ref — it
    pulls the existing images for that tag, byte-identical to what ran before.
    Releases created by hand in the GitHub UI also trigger a deploy (`release: published`).
@@ -315,8 +329,18 @@ each deploy, add a *required reviewers* rule to the auto-created `production` en
   clean up: revoke that PAT, then keep only the env file —
   `find /opt/naary -mindepth 1 -maxdepth 1 ! -name '.env' -exec rm -rf {} +`
   (the deploy re-ships the compose files every run).
-- **GHCR visibility:** the first push creates both packages **private** and linked to
+- **GHCR visibility:** the first push creates the packages **private** and linked to
   the repo, which is what lets the workflow's `GITHUB_TOKEN` pull them — no action needed.
+  This applies to the four `naary-*-sandbox` packages too; if a sandbox box ever fails the
+  deploy at `failed to pull …`, check that package's *Manage Actions access* lists this repo
+  (`naary-sandbox-runner` is the working precedent to compare against).
+- **Disk with the sandbox profile on:** the four sandbox images add ~1.7GiB (they share the
+  231MB `node:24-bookworm-slim` base, stored once), so the pre-pull free-space guard rises
+  from 12GiB to 14GiB — but only on boxes running the profile. They carry a
+  `com.naary.sandbox=1` label and are **excluded** from the general
+  `docker image prune -af --filter until=…`: nothing references them between `--rm` runs, so
+  the prune would otherwise delete them every deploy and re-download 1.7GiB. Superseded ones
+  are removed by a targeted sweep after a successful rollout.
 - **Costs:** Hetzner `cx33` ~€7/mo · Neon free tier (or Launch $19/mo) · Temporal Cloud
   (usage-based) · Cloudflare free · GHCR free for private packages within GitHub's
   storage quota.

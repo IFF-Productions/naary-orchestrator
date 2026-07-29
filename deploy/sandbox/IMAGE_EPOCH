@@ -1,0 +1,20 @@
+# Sandbox-image rebuild epoch.
+#
+# The GHCR tag for each sandbox image is CONTENT-ADDRESSED: sha256(this file + the tool name +
+# that tool's Dockerfile), truncated. CI (.github/workflows/sandbox-images.yml) skips the build
+# entirely when that tag already exists in GHCR, which is what keeps ~1.7GiB of coding CLIs off
+# the critical path of every app release — they change on the order of once a month, releases
+# happen several times a week.
+#
+# BUMP THIS INTEGER to force a rebuild of ALL FOUR images when nothing in a Dockerfile changed
+# but the resulting bytes should:
+#   - a base-image security refresh (`node:24-bookworm-slim` is a MOVING tag — a Debian CVE fix
+#     lands there with no diff here);
+#   - the cursor image's installer (`https://cursor.com/install`) is an unpinned remote script, so
+#     it is the one CLI whose version cannot be pinned from the Dockerfile at all.
+# A version bump inside a Dockerfile (CLAUDE_CODE_VERSION, COPILOT_CLI_VERSION, …) needs NO epoch
+# bump — that already changes the file, hence the hash, hence the tag.
+#
+# Bumping is a reviewable commit, on purpose: a rebuild replaces the bytes that run with the host
+# Docker socket in reach, so it should never be a side effect of an unrelated release.
+EPOCH=1

@@ -74,9 +74,20 @@ export const DEFAULT_SANDBOX_IMAGES: Record<SandboxTool, string> = {
   gemini: "naary-gemini-sandbox:latest",
 };
 
-/** Images the runner is willing to launch. The workflow can NEVER choose the image. The
- *  `:latest` entries are for dev; a production deploy should build + tag each sandbox image with a
- *  version/digest and list THAT here (and in SANDBOX_IMAGE_*) so the launched code is immutable. */
+/**
+ * The DEV default allowlist — the images the runner will launch when an operator has configured
+ * none. The workflow can NEVER choose the image either way.
+ *
+ * This used to be the ONLY allowlist, which made the documented production posture impossible:
+ * an operator who set `SANDBOX_IMAGE_CLAUDE=ghcr.io/…/naary-claude-sandbox:abc@sha256:…` got
+ * `refusing to launch un-pinned image` on every run, because a digest ref is (correctly) not one
+ * of these four `:latest` tags. Pinning therefore meant editing this file per deploy.
+ *
+ * The allowlist is now the OPERATOR'S configured set (`RunnerConfig.images`, env-only) — see
+ * `assertPinnedImage(image, allowed)`. These stay as the default so a dev box with no
+ * `SANDBOX_IMAGE_*` behaves exactly as before. In production, `SANDBOX_REQUIRE_DIGEST=1`
+ * additionally forces every configured image to be `@sha256:`-pinned (config.ts).
+ */
 export const ALLOWED_SANDBOX_IMAGES = Object.values(
   DEFAULT_SANDBOX_IMAGES,
 ) as readonly string[];
@@ -111,8 +122,20 @@ export const ALLOWED_KEY_ENV_VARS = Object.values(
 /** Back-compat default when a request omits the var name (a claude API key). */
 export const SANDBOX_KEY_ENV = "ANTHROPIC_API_KEY";
 
-export function assertPinnedImage(image: string): void {
-  if (!ALLOWED_SANDBOX_IMAGES.includes(image)) {
+/**
+ * The image must be one the OPERATOR pinned. `allowed` is `Object.values(cfg.images)` at the real
+ * call site — a set that can only ever come from the runner's environment, never from a request.
+ *
+ * Note this is deliberately NOT "any ref that looks digest-pinned": a digest is immutable, but an
+ * immutable ref to an ATTACKER'S image is exactly as fatal (the runner holds the Docker socket).
+ * Membership of an operator-supplied set is the control; the digest is what makes each member's
+ * bytes immutable. `SANDBOX_REQUIRE_DIGEST` (config.ts) enforces the second half at boot.
+ */
+export function assertPinnedImage(
+  image: string,
+  allowed: readonly string[] = ALLOWED_SANDBOX_IMAGES,
+): void {
+  if (!allowed.includes(image)) {
     throw new Error(
       `sandbox-runner: refusing to launch un-pinned image "${image}"`,
     );
@@ -140,9 +163,16 @@ export function assertKeyEnvVarForTool(name: string, tool: SandboxTool): void {
  * Build the `docker run …` argv. The returned array is passed to execFile("docker", args)
  * — no shell. The credential is forwarded by name only (`spec.keyEnvVar`); the caller must set
  * its value in the exec environment (`{ [spec.keyEnvVar]: key }`), never inline it here.
+ *
+ * `allowedImages` is the operator's configured image set; it defaults to the dev tags so every
+ * existing caller/test is unchanged. The real caller (`run-sandbox.ts`) passes
+ * `Object.values(cfg.images)`, which is what lets a production deploy pin by DIGEST.
  */
-export function buildSandboxDockerArgs(spec: SandboxRunSpec): string[] {
-  assertPinnedImage(spec.image);
+export function buildSandboxDockerArgs(
+  spec: SandboxRunSpec,
+  allowedImages: readonly string[] = ALLOWED_SANDBOX_IMAGES,
+): string[] {
+  assertPinnedImage(spec.image, allowedImages);
   assertAllowedKeyEnvVar(spec.keyEnvVar);
   if (!spec.network || /\s/.test(spec.network)) {
     throw new Error("sandbox-runner: invalid network name");

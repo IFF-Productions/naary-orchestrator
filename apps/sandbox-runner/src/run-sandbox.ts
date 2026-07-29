@@ -202,16 +202,23 @@ export async function runSandbox(
   }
 
   try {
-    const dockerArgs = buildSandboxDockerArgs({
-      // tool → image, from RUNNER config only. `buildSandboxDockerArgs` re-asserts the pin.
-      image: cfg.images[tool],
-      network: cfg.network,
-      proxyUrl: cfg.proxyUrl,
-      workdir,
-      agentArgs: req.agentArgs,
-      keyEnvVar,
-      limits: cfg.limits,
-    });
+    const dockerArgs = buildSandboxDockerArgs(
+      {
+        // tool → image, from RUNNER config only. `buildSandboxDockerArgs` re-asserts the pin.
+        image: cfg.images[tool],
+        network: cfg.network,
+        proxyUrl: cfg.proxyUrl,
+        workdir,
+        agentArgs: req.agentArgs,
+        keyEnvVar,
+        limits: cfg.limits,
+      },
+      // The allowlist is the OPERATOR's configured set, not a compile-time list of `:latest`
+      // tags — that is what makes a digest-pinned production image launchable at all. Yes, this
+      // makes the assertion tautological AT THIS call site; it stays because it is the backstop
+      // for any future caller that builds a spec from something other than `cfg.images`.
+      Object.values(cfg.images),
+    );
 
     const {
       stdout,

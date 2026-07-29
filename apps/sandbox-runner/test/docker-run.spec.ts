@@ -153,6 +153,39 @@ describe("per-tool images + key vars", () => {
     );
   });
 
+  /**
+   * REGRESSION: the allowlist is the OPERATOR'S configured image set, not a compile-time list of
+   * `:latest` tags.
+   *
+   * Before this, `ALLOWED_SANDBOX_IMAGES` was the only allowlist — so an operator who followed the
+   * documented production advice ("pin by digest") got `refusing to launch un-pinned image` on
+   * EVERY run, because a digest ref is correctly not one of the four dev tags. Pinning by digest
+   * meant editing this source file per deploy. Since the runner holds the host Docker socket, a
+   * digest is exactly what the pin is supposed to name; this makes that reachable.
+   */
+  const PINNED = `ghcr.io/iff-productions/naary-claude-sandbox:sha-0123456789ab@sha256:${"a".repeat(64)}`;
+
+  it("accepts a DIGEST-pinned image when the operator's config lists it", () => {
+    expect(() => assertPinnedImage(PINNED, [PINNED])).not.toThrow();
+    expect(() =>
+      buildSandboxDockerArgs({ ...SPEC, image: PINNED }, [PINNED]),
+    ).not.toThrow();
+    expect(
+      buildSandboxDockerArgs({ ...SPEC, image: PINNED }, [PINNED]),
+    ).toContain(PINNED);
+  });
+
+  it("still refuses an image outside the operator's set — a digest is not a free pass", () => {
+    // The immutability of a digest says nothing about WHOSE image it is: an immutable ref to an
+    // attacker's image is just as fatal. Membership of the operator-supplied set is the control.
+    const other = `evil/pwn@sha256:${"b".repeat(64)}`;
+    expect(() => assertPinnedImage(other, [PINNED])).toThrow(/un-pinned image/);
+    // …and the dev default no longer leaks in once an operator has configured a set.
+    expect(() =>
+      assertPinnedImage(DEFAULT_SANDBOX_IMAGES.claude, [PINNED]),
+    ).toThrow(/un-pinned image/);
+  });
+
   it("isSandboxTool is a CLOSED set — a request can name a tool, never an image", () => {
     for (const tool of SANDBOX_TOOLS) expect(isSandboxTool(tool)).toBe(true);
     for (const bad of [

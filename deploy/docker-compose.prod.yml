@@ -218,11 +218,16 @@ services:
   # deploy — on boxes that haven't set one, and an empty token would just crash-loop a
   # Docker-privileged container. So they start only when the operator opts in:
   #
-  #   1. docker build -t naary-claude-sandbox:latest /opt/naary/deploy/sandbox   (the image
-  #      the runner launches; hard-pinned by name in the runner, never workflow-chosen)
-  #   2. /opt/naary/deploy/sandbox/egress-test.sh   (the acceptance gate — prove the sandbox
+  #   1. add SANDBOX_RUNNER_TOKEN=<random> and COMPOSE_PROFILES=sandbox to /opt/naary/.env
+  #   2. re-run Deploy. The four sandbox images the runner launches are BUILT IN CI and PULLED
+  #      here like every other image — nothing is built on this box any more. deploy.yml pulls
+  #      them by DIGEST and hands the runner SANDBOX_IMAGE_* + SANDBOX_REQUIRE_DIGEST=1, so what
+  #      runs with the Docker socket in reach is immutable bytes rather than a re-pushable tag.
+  #      (Local/dev hosts with no GHCR access keep building them by hand — deploy/sandbox/README.md.)
+  #   3. /opt/naary/deploy/sandbox/egress-test.sh   (the acceptance gate — prove the sandbox
   #      can reach Anthropic and NOTHING else, on this host)
-  #   3. add SANDBOX_RUNNER_TOKEN=<random> and COMPOSE_PROFILES=sandbox to /opt/naary/.env
+  #   4. /opt/naary/deploy/sandbox/smoke-test.sh "$SANDBOX_IMAGE_CLAUDE" …   (each image starts
+  #      under the isolation flags — pass the digest refs so you smoke the bytes you deployed)
   #
   # Enabling codeAgent write mode (CODE_AGENT_WRITE_ENABLED) is a SEPARATE, later step —
   # this only makes the infrastructure available.
@@ -277,11 +282,20 @@ services:
       SANDBOX_PROXY_URL: http://naary-sandbox-proxy:3128
       # Per-TOOL images (#680): the runner maps the request's `tool` to one of these — a request
       # can never name an image (the runner holds the Docker socket). Each default is DISTINCT;
-      # `SANDBOX_IMAGE` remains a claude-only alias for pre-#680 deploys. Pin by digest in prod.
+      # `SANDBOX_IMAGE` remains a claude-only alias for pre-#680 deploys.
+      #
+      # The `:latest` values here are the LOCAL-BUILD defaults, for a host without GHCR access.
+      # A real deploy never uses them: deploy/docker-compose.ghcr.yml (layered last by CD)
+      # replaces all four with digest-pinned GHCR refs and sets SANDBOX_REQUIRE_DIGEST=1, which
+      # makes the runner refuse to boot on a mutable tag. That split is what keeps a contributor's
+      # `docker build … :latest` working without weakening prod.
       SANDBOX_IMAGE_CLAUDE: "${SANDBOX_IMAGE_CLAUDE:-naary-claude-sandbox:latest}"
       SANDBOX_IMAGE_CURSOR: "${SANDBOX_IMAGE_CURSOR:-naary-cursor-sandbox:latest}"
       SANDBOX_IMAGE_COPILOT: "${SANDBOX_IMAGE_COPILOT:-naary-copilot-sandbox:latest}"
       SANDBOX_IMAGE_GEMINI: "${SANDBOX_IMAGE_GEMINI:-naary-gemini-sandbox:latest}"
+      # OFF by default (a dev/local host builds `:latest` images). CD exports =1 when the sandbox
+      # profile is active, so prod fails CLOSED if the digest refs ever go missing.
+      SANDBOX_REQUIRE_DIGEST: "${SANDBOX_REQUIRE_DIGEST:-}"
     volumes:
       # Docker socket — this container's (contained) privilege.
       - /var/run/docker.sock:/var/run/docker.sock

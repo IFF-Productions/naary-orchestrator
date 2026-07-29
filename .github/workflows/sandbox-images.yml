@@ -1,0 +1,190 @@
+name: Sandbox images
+
+# Builds the four codeAgent SANDBOX images (claude / cursor / copilot / gemini) and pushes them to
+# GHCR, exactly like every other image this repo deploys. Before this they were built BY HAND on
+# the box (`docker build -t naary-claude-sandbox:latest deploy/sandbox`, ×4 per host).
+#
+# WHY IT MATTERS (the security half, not just the convenience half). The sandbox-runner holds the
+# host Docker socket — i.e. host root — so `apps/sandbox-runner/src/docker-run.ts` treats the image
+# as a PINNED security control: a request names a *tool* from a closed enum and the runner maps
+# tool → image from its own config. A mutable `:latest` tag defeats that pin: whatever the runner is
+# configured to launch can be rebuilt underneath it, and the "pinned" name still resolves. This
+# workflow publishes an immutable ref (`…:sha-<content>@sha256:<digest>`) and deploy.yml hands the
+# DIGEST to the runner, so the pin names bytes rather than a label.
+#
+# TAGGING — content-addressed, so an app release does NOT rebuild them.
+#   tag = "sha-" + sha256(EPOCH + tool + that tool's Dockerfile)[:12]
+# These images are ~1.7GiB of coding CLIs and change on the order of once a month; releases happen
+# several times a week. If the tag already exists in GHCR the build is SKIPPED and the existing
+# digest reused — so a release either reuses bytes that were already reviewed and smoke-tested, or
+# rebuilds because someone deliberately changed a Dockerfile / bumped deploy/sandbox/IMAGE_EPOCH.
+# (Rebuild-on-release would also be *wrong*, not merely slow: cursor's installer is an unpinned
+# remote script, so "same commit ⇒ same image" only holds because we don't rebuild.)
+#
+# Nothing here is reproducible byte-for-byte — `node:24-bookworm-slim` moves and cursor's installer
+# is unpinned — which is precisely why the DIGEST, not the recipe hash, is what the runner pins.
+#
+# Three ways in:
+#   - workflow_call from deploy.yml — resolves (and, if needed, builds) the four refs for a deploy
+#   - push to main touching a sandbox Dockerfile or IMAGE_EPOCH — pre-warms GHCR so the next
+#     release doesn't pay for the build
+#   - workflow_dispatch — manual, with `force` to rebuild a tag that already exists
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - deploy/sandbox/Dockerfile
+      - deploy/sandbox/cursor.Dockerfile
+      - deploy/sandbox/copilot.Dockerfile
+      - deploy/sandbox/gemini.Dockerfile
+      - deploy/sandbox/IMAGE_EPOCH
+      - .github/workflows/sandbox-images.yml
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Rebuild + overwrite even if the content tag already exists in GHCR
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      ref:
+        description: Ref to build the sandbox images from (the deployed tag)
+        type: string
+        required: true
+    outputs:
+      claude:
+        description: Digest-pinned ref for the claude sandbox image
+        value: ${{ jobs.images.outputs.claude }}
+      cursor:
+        description: Digest-pinned ref for the cursor sandbox image
+        value: ${{ jobs.images.outputs.cursor }}
+      copilot:
+        description: Digest-pinned ref for the copilot sandbox image
+        value: ${{ jobs.images.outputs.copilot }}
+      gemini:
+        description: Digest-pinned ref for the gemini sandbox image
+        value: ${{ jobs.images.outputs.gemini }}
+
+# One at a time: two concurrent runs would race to push the same content tag.
+concurrency:
+  group: sandbox-images
+  cancel-in-progress: false
+
+jobs:
+  images:
+    runs-on: ubuntu-latest
+    # A cold build of all four is ~15 min (three npm CLIs + cursor's installer); the common case is
+    # four `imagetools inspect` calls and no build at all.
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      claude: ${{ steps.resolve.outputs.claude }}
+      cursor: ${{ steps.resolve.outputs.cursor }}
+      copilot: ${{ steps.resolve.outputs.copilot }}
+      gemini: ${{ steps.resolve.outputs.gemini }}
+    steps:
+      # GHCR repository paths MUST be lowercase, but github.repository_owner preserves the org's
+      # canonical case ("IFF-Productions"), which buildx rejects with `repository name must be
+      # lowercase`. Same lowercasing deploy.yml does — see the note there.
+      - name: Lowercase IMAGE_BASE for GHCR
+        run: echo "IMAGE_BASE=ghcr.io/$(printf '%s' "$OWNER" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_ENV"
+        env:
+          OWNER: ${{ github.repository_owner }}
+
+      - uses: actions/checkout@v7
+        with:
+          # workflow_call passes the deployed tag; the push/dispatch paths build the ref that
+          # triggered them.
+          ref: ${{ inputs.ref || github.ref }}
+
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Resolve (build only if missing) the four sandbox images
+        id: resolve
+        env:
+          FORCE: ${{ inputs.force == true }}
+        run: |
+          set -euo pipefail
+
+          # Only the `EPOCH=` VALUE feeds the hash, not the whole file — editing the long comment
+          # block in IMAGE_EPOCH must not trigger four ~1.7GiB rebuilds.
+          EPOCH="$(grep -E '^EPOCH=' deploy/sandbox/IMAGE_EPOCH | head -1 | cut -d= -f2 | tr -d '[:space:]')"
+          if ! printf '%s' "$EPOCH" | grep -Eq '^[0-9]+$'; then
+            echo "::error::deploy/sandbox/IMAGE_EPOCH must contain a line 'EPOCH=<integer>' (got '$EPOCH')"
+            exit 1
+          fi
+          echo "sandbox image epoch: $EPOCH"
+
+          # tool:dockerfile. runner.Dockerfile is deliberately absent — the RUNNER image is an app
+          # image, built per release tag by deploy.yml; these are the images it LAUNCHES.
+          for entry in claude:Dockerfile cursor:cursor.Dockerfile copilot:copilot.Dockerfile gemini:gemini.Dockerfile; do
+            tool="${entry%%:*}"
+            dockerfile="${entry#*:}"
+
+            # Content address: epoch + tool + the Dockerfile bytes. The tool name is IN the hash so
+            # two tools whose Dockerfiles ever became identical still get distinct tags — one tag
+            # shared across tools is how #933's wrong-ENTRYPOINT bug happened. None of these
+            # Dockerfiles COPY anything (verified), so the Dockerfile IS the whole recipe.
+            hash="$( { printf 'epoch=%s\ntool=%s\n' "$EPOCH" "$tool"; cat "deploy/sandbox/$dockerfile"; } \
+                     | sha256sum | cut -c1-12 )"
+            ref="$IMAGE_BASE/naary-$tool-sandbox:sha-$hash"
+
+            digest=""
+            if [ "$FORCE" != "true" ]; then
+              digest="$(docker buildx imagetools inspect "$ref" --format '{{.Manifest.Digest}}' 2>/dev/null || true)"
+            fi
+
+            if [ -n "$digest" ]; then
+              echo "$ref already in GHCR — reusing it (no rebuild)."
+            else
+              echo "building $ref"
+              # --provenance/--sbom off on purpose: with them buildx pushes an OCI INDEX and
+              # `.Manifest.Digest` is the index digest, not the image's. The runner passes this ref
+              # straight to `docker run`, so it must be the image manifest digest.
+              # --platform linux/amd64 pins the arch the deploy host runs, rather than leaving the
+              # runner at the mercy of whatever the builder defaulted to.
+              docker buildx build \
+                --platform linux/amd64 \
+                --provenance=false --sbom=false \
+                --file "deploy/sandbox/$dockerfile" \
+                --tag "$ref" \
+                --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
+                --label "org.opencontainers.image.revision=${GITHUB_SHA}" \
+                --push \
+                deploy/sandbox
+              digest="$(docker buildx imagetools inspect "$ref" --format '{{.Manifest.Digest}}')"
+            fi
+
+            # FATAL if the digest is missing or malformed. CD consumes this output verbatim and the
+            # runner boots with SANDBOX_REQUIRE_DIGEST=1, so an empty value would abort the deploy
+            # anyway — failing here says why, and before anything has been shipped.
+            if ! printf '%s' "$digest" | grep -Eq '^sha256:[0-9a-f]{64}$'; then
+              echo "::error::could not resolve an image digest for $ref (got '$digest')"
+              exit 1
+            fi
+
+            echo "$tool=$ref@$digest" >> "$GITHUB_OUTPUT"
+            echo "  → $ref@$digest"
+          done
+
+      - name: Summary
+        run: |
+          {
+            echo "### codeAgent sandbox images"
+            echo
+            echo "| tool | digest-pinned ref |"
+            echo "| --- | --- |"
+            echo "| claude | \`${{ steps.resolve.outputs.claude }}\` |"
+            echo "| cursor | \`${{ steps.resolve.outputs.cursor }}\` |"
+            echo "| copilot | \`${{ steps.resolve.outputs.copilot }}\` |"
+            echo "| gemini | \`${{ steps.resolve.outputs.gemini }}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -35,9 +35,28 @@ services:
     build: !reset null
 
   # codeAgent sandbox runner (profile-gated `sandbox` in the prod overlay — pulled/started
-  # only when that profile is on). NOT the sandbox image itself: `naary-claude-sandbox` is
-  # launched by the runner through the host Docker, not by compose, and is built on the box
-  # (see the prod overlay's enablement steps).
+  # only when that profile is on).
+  #
+  # The four SANDBOX images it launches are NOT compose services — the runner starts them through
+  # the host Docker — so they can't be given an `image:` here. This overlay is still where they get
+  # their GHCR identity, one level down: it hands the runner DIGEST-pinned refs, the same way it
+  # hands every app service a GHCR image instead of a local build.
+  #
+  # `${VAR:-}` and NOT `${VAR:?}` on purpose: compose interpolates regardless of profile, so a
+  # required-var marker here would break `compose config` — and therefore EVERY deploy — on boxes
+  # that never enable the sandbox (exactly why SANDBOX_RUNNER_TOKEN is `:-` in the prod overlay).
+  # Enforcement lives in the runner instead: with SANDBOX_REQUIRE_DIGEST=1 (set by deploy.yml when
+  # the profile is on) it refuses to boot on anything that isn't `@sha256:`-pinned. Fail-closed,
+  # and it can't take down a non-sandbox box.
+  #
+  # These override the prod overlay's `:latest` dev defaults by key merge — same service, same env
+  # key, last file wins.
   sandbox-runner:
     image: ${IMAGE_BASE:-ghcr.io/tarazena}/naary-sandbox-runner:${APP_VERSION:?set APP_VERSION to the release tag (e.g. v0.0.1)}
     build: !reset null
+    environment:
+      SANDBOX_IMAGE_CLAUDE: "${SANDBOX_IMAGE_CLAUDE:-}"
+      SANDBOX_IMAGE_CURSOR: "${SANDBOX_IMAGE_CURSOR:-}"
+      SANDBOX_IMAGE_COPILOT: "${SANDBOX_IMAGE_COPILOT:-}"
+      SANDBOX_IMAGE_GEMINI: "${SANDBOX_IMAGE_GEMINI:-}"
+      SANDBOX_REQUIRE_DIGEST: "${SANDBOX_REQUIRE_DIGEST:-}"

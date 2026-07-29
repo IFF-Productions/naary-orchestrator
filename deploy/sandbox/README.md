@@ -48,12 +48,32 @@ endpoint all **blocked**. Prints `✅ EGRESS OK …` or fails non-zero.
 > `CODE_AGENT_SANDBOX_UNCONFIGURED` / a 503 naming the settings to add — deliberately, so a
 > missing sandbox can never silently degrade into running a CLI inside the api/worker process.
 
-## Build the sandbox images — one per tool
+## The sandbox images — one per tool, built in CI
 
 Each coding CLI gets its **own** image whose `ENTRYPOINT` is that CLI's binary. That is what makes
 "the argv reached the wrong CLI" structurally impossible: the runner maps `tool` → image from its
 own config, and a request can only name a tool from a closed set, never an image. (Before #680 a
 single claude-entrypoint image was pinned for all tools — see #933.)
+
+**In production you do not build them.** `.github/workflows/sandbox-images.yml` builds all four and
+pushes them to GHCR; `deploy.yml` pulls them onto the box **by digest** and passes the runner
+`SANDBOX_IMAGE_{CLAUDE,CURSOR,COPILOT,GEMINI}` + `SANDBOX_REQUIRE_DIGEST=1`.
+
+Why digest and not `:latest`: the runner holds the **host Docker socket**, so the image it launches
+is a security control, not a convenience. A mutable tag defeats the pin — whatever the runner is
+configured to launch can be re-pushed underneath it and the "pinned" name still resolves. With
+`SANDBOX_REQUIRE_DIGEST=1` the runner **refuses to boot** on anything that isn't `@sha256:`-pinned,
+so this fails closed. (Same posture as the squid proxy, already pinned
+`ubuntu/squid:6.6-24.04_beta@sha256:6a09…` in the prod overlay.)
+
+Those images are **content-addressed**, not release-tagged:
+`naary-<tool>-sandbox:sha-<12 hex of EPOCH + tool + that tool's Dockerfile>`. CI skips the build
+when the tag already exists, so ~1.7GiB of coding CLIs is not rebuilt on every app release. To force
+a rebuild without a Dockerfile change — a `node:24-bookworm-slim` security refresh, or a new drop of
+cursor's unpinned installer — bump `EPOCH` in [`IMAGE_EPOCH`](./IMAGE_EPOCH). A CLI version bump
+inside a Dockerfile needs no epoch bump; it already changes the hash.
+
+### Building them locally (dev, or a host without GHCR access)
 
 ```bash
 docker build -t naary-claude-sandbox:latest  deploy/sandbox
@@ -62,9 +82,10 @@ docker build -t naary-copilot-sandbox:latest -f deploy/sandbox/copilot.Dockerfil
 docker build -t naary-gemini-sandbox:latest  -f deploy/sandbox/gemini.Dockerfile  deploy/sandbox
 ```
 
-Build only the tools you actually offer — and trim `squid-allowlist.conf` to match, since every
-host listed there is somewhere a hijacked run could post a key. Override any image with
-`SANDBOX_IMAGE_{CLAUDE,CURSOR,COPILOT,GEMINI}` (pin by digest in production).
+`:latest` is the default in the base/prod compose precisely so this keeps working; the GHCR overlay
+(layered only by CD) is what swaps in the digest refs, so local convenience never weakens prod.
+Build only the tools you actually offer — and trim `squid-allowlist.conf` to match, since every host
+listed there is somewhere a hijacked run could post a key.
 
 Each is Node + that CLI + git, non-root, read-only root at run time. Launched only by the runner
 (`@naary/sandbox-runner`), which **pins the image** and constructs a hardened `docker run`
@@ -74,8 +95,13 @@ forwarded by name — never inline). The git token never enters the sandbox.
 ### Smoke-test them
 
 ```bash
-deploy/sandbox/smoke-test.sh            # all four, or name the ones you built
+deploy/sandbox/smoke-test.sh                          # all four :latest, or name the ones you built
+deploy/sandbox/smoke-test.sh "$SANDBOX_IMAGE_CLAUDE"  # …or the exact digest refs a deploy pinned
 ```
+
+An argument containing `/` or `@` is treated as an image **ref** rather than a tool name, so on the
+box you can smoke the bytes that are actually deployed instead of a `:latest` that may not exist
+there at all.
 
 `egress-test.sh` proves the network containment; this proves each image can actually *start* under
 those isolation flags with an empty workdir. Worth running after any CLI version bump — all four
@@ -91,18 +117,27 @@ host `deploy/sandbox/` is shipped to `/opt/naary/deploy/sandbox` (the prod overl
 bind-mounts the squid allowlist from there), and enabling the runner is three steps:
 
 ```bash
-cd /opt/naary                                                # 1. the tool images you offer
-docker build -t naary-claude-sandbox:latest deploy/sandbox
-#   …plus cursor/copilot/gemini with -f, as above
-/opt/naary/deploy/sandbox/egress-test.sh                     # 2. the egress gate
-/opt/naary/deploy/sandbox/smoke-test.sh                      # 3. each image starts
-# 4. add SANDBOX_RUNNER_TOKEN=<random> + COMPOSE_PROFILES=sandbox to /opt/naary/.env
+# 1. add SANDBOX_RUNNER_TOKEN=<random> + COMPOSE_PROFILES=sandbox to /opt/naary/.env
 #    (the api reads the same two vars — it dispatches "Build with AI" runs here too)
+# 2. re-run Deploy. It detects the now-active profile, pulls the four sandbox images BY DIGEST,
+#    and starts the runner with SANDBOX_REQUIRE_DIGEST=1. Nothing is built on the box.
+cd /opt/naary
+/opt/naary/deploy/sandbox/egress-test.sh                     # 3. the egress gate
+docker inspect naary-sandbox-runner --format '{{range .Config.Env}}{{println .}}{{end}}' | grep SANDBOX_IMAGE_
+/opt/naary/deploy/sandbox/smoke-test.sh <those four refs>    # 4. each deployed image starts
 ```
 
-The runner image itself is built + pushed by CI (`naary-sandbox-runner`, per release tag),
-so the box only pulls it. The runner publishes **no port**: the worker reaches it in-network
-at `SANDBOX_RUNNER_URL` with `SANDBOX_RUNNER_TOKEN` (see `deploy/.env.prod.example`).
+Both the runner image (`naary-sandbox-runner`, per release tag) and the four sandbox images
+(`naary-<tool>-sandbox`, per content hash) are built + pushed by CI, so the box only ever pulls.
+The runner publishes **no port**: the worker reaches it in-network at `SANDBOX_RUNNER_URL` with
+`SANDBOX_RUNNER_TOKEN` (see `deploy/.env.prod.example`).
+
+Disk: the four images are ~1.7GiB together on the host (they share the 231MB
+`node:24-bookworm-slim` base, which overlay2 stores once — summing `docker images` overstates it by
+~700MB). `deploy.yml` raises its pre-pull free-space guard from 12GiB to 14GiB when the sandbox
+profile is active, keeps them out of its general `docker image prune -af` (they carry
+`com.naary.sandbox=1`, and nothing references them between `--rm` runs), and sweeps superseded ones
+after a successful rollout.
 
 Running the profile and enabling `CODE_AGENT_WRITE_ENABLED` are separate decisions — the
 first only makes the infrastructure available.
