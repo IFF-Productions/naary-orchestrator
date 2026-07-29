@@ -3,7 +3,11 @@
  * provider credentials, MCP/app/database connections (incl. OAuth + GitHub App
  * flows), webhooks, hosted forms, and hosted chats.
  */
-import type { GraphQLSchemaSummary, OpenApiSummary } from "@naary/dsl";
+import type {
+  GraphQLSchemaSummary,
+  McpToolSummary,
+  OpenApiSummary,
+} from "@naary/dsl";
 import { BASE, http, introspectFetch } from "./http";
 import type {
   ChatDefinition,
@@ -138,6 +142,18 @@ export const integrationsApi = {
     return http(
       `/tenants/${encodeURIComponent(tenantId)}/connections/${encodeURIComponent(connectionId)}/test`,
       { method: "POST", body: JSON.stringify({ provider }) },
+    );
+  },
+  // What tools this MCP connection's server offers (`tools/list`), so the canvas can OFFER a tool
+  // name + that tool's argument names instead of asking the author to retype them. The API opens
+  // ONE MCP session with the connection's stored credential (never returned) and sanitizes every
+  // field — a tool name/description/schema is written by whoever runs that server.
+  listMcpTools(
+    tenantId: string,
+    connectionId: string,
+  ): Promise<McpToolSummary[]> {
+    return http(
+      `/tenants/${encodeURIComponent(tenantId)}/connections/${encodeURIComponent(connectionId)}/mcp/tools`,
     );
   },
   // Disconnect (delete) a connection. Also removes its stored secret server-side.

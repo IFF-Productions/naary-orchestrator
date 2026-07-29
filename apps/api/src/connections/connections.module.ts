@@ -5,6 +5,7 @@ import { AtlassianOAuthController } from "./atlassian-oauth.controller";
 import { ConnectionTestService } from "./connection-test.service";
 import { ConnectionsController } from "./connections.controller";
 import { GithubAppController } from "./github-app.controller";
+import { McpToolsService } from "./mcp-tools.service";
 import { OAuthController } from "./oauth.controller";
 
 @Module({
@@ -19,6 +20,7 @@ import { OAuthController } from "./oauth.controller";
   providers: [
     { provide: ConnectionService, useFactory: () => new ConnectionService() },
     ConnectionTestService,
+    McpToolsService,
   ],
   // ConnectionTestService is exported for the DRY RUN (#832): checking a flow's credentials is the
   // same non-destructive probe as the Integrations "Test" button, and must not become a second

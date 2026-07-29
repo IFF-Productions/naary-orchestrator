@@ -3,6 +3,7 @@ import type { ConfigSectionCtx } from "./ConfigPanel";
 import type { ConnectionRow } from "../../lib/api";
 import { bindingNamesSource, getIntegrationProvider } from "@naary/dsl";
 import { integrationBindingOptions } from "./binding-name-model";
+import { AgentMcpToolFields, McpToolSection } from "./McpToolFields";
 import { ExpressionField } from "../../components/ExpressionField";
 import type { JsonSchemaObject } from "../../lib/schema-fields";
 import { SchemaEditor } from "./SchemaFieldEditor";
@@ -168,41 +169,16 @@ function AgentToolsEditor({
               onChange={(id) => update(i, { connectionId: id })}
             />
           </Labeled>
-          <Labeled label="Tool name">
-            <input
-              value={t.tool ?? ""}
-              onChange={(e) => update(i, { tool: e.target.value })}
-              style={inputStyle}
-              placeholder="search_issues"
-            />
-          </Labeled>
-          <Labeled label="Exposed name (optional)">
-            <input
-              value={t.name ?? ""}
-              onChange={(e) => update(i, { name: e.target.value || undefined })}
-              style={inputStyle}
-              placeholder="defaults to the tool name"
-            />
-          </Labeled>
-          <Labeled label="Description">
-            <input
-              value={t.description ?? ""}
-              onChange={(e) =>
-                update(i, { description: e.target.value || undefined })
-              }
-              style={inputStyle}
-              placeholder="what the model uses to decide when to call it"
-            />
-          </Labeled>
-          <JsonField
-            label="Input schema (JSON)"
-            value={t.inputSchema}
-            placeholder={'{\n  "type": "object",\n  "properties": {}\n}'}
-            onChange={(v) =>
-              update(i, {
-                inputSchema: v as Record<string, unknown> | undefined,
-              })
-            }
+          {/* Tool name / exposed name / description / input schema all hang off WHICH tool this
+              is, and the server can answer all four — so they live together in a component that
+              can hold the `useMcpTools` hook. */}
+          <AgentMcpToolFields
+            connectionId={t.connectionId ?? ""}
+            tool={t.tool ?? ""}
+            name={t.name ?? ""}
+            description={t.description ?? ""}
+            inputSchema={t.inputSchema}
+            onChange={(patch) => update(i, patch)}
           />
           <Labeled label="Cost (USD per call)">
             <input
@@ -861,56 +837,21 @@ export function renderAgentSections(c: ConfigSectionCtx) {
         </>
       )}
 
+      {/* Its own component because it owns a hook (the server's tool list): a hook inside this
+          `kind ===` branch would appear and disappear as the selected node changes kind. */}
       {kind === "mcpTool" && (
-        <>
-          <Labeled label="Connection">
-            <ConnectionSelect
-              connections={connections}
-              types={CONNECTION_TYPES[kind] ?? []}
-              value={str("connectionId")}
-              onChange={(id) => onChange({ connectionId: id })}
-            />
-          </Labeled>
-          <Labeled label="Tool">
-            <input
-              value={str("tool")}
-              onChange={(e) => onChange({ tool: e.target.value })}
-              style={inputStyle}
-              placeholder="add_pull_request_comment"
-            />
-          </Labeled>
-
-          <BindingsEditor
-            bindings={
-              obj("argumentBindings") as Record<string, BindingRow> | undefined
-            }
-            upstreamIds={upstreamIds}
-            onChange={(v) => onChange({ argumentBindings: v })}
-          />
-
-          <JsonField
-            label="Static arguments (JSON)"
-            value={obj("arguments")}
-            placeholder={'{\n  "state": "open"\n}'}
-            onChange={(v) => onChange({ arguments: v })}
-          />
-
-          <Labeled label="Cost (USD per call)">
-            <input
-              type="number"
-              min={0}
-              step={0.001}
-              value={num("costUsd") ?? ""}
-              onChange={(e) =>
-                onChange({
-                  costUsd: e.target.value ? Number(e.target.value) : undefined,
-                })
-              }
-              style={inputStyle}
-              placeholder="0.00"
-            />
-          </Labeled>
-        </>
+        <McpToolSection
+          connections={connections}
+          connectionId={str("connectionId")}
+          tool={str("tool")}
+          argumentBindings={
+            obj("argumentBindings") as Record<string, BindingRow> | undefined
+          }
+          staticArguments={obj("arguments")}
+          costUsd={num("costUsd")}
+          upstreamIds={upstreamIds}
+          onChange={onChange}
+        />
       )}
 
       {kind === "integration" &&

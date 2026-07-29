@@ -89,7 +89,12 @@ export const UnlistedName: Story = {
   },
 };
 
-/** No catalog knowledge (an arbitrary MCP tool) — free text, exactly as before. */
+/**
+ * Nothing to offer — free text, exactly as before. This is what every caller without a known name
+ * set still gets (`set`/`forEach`/sqlQuery bindings are arbitrary by design), and what an mcpTool
+ * falls back to when its server is unreachable or its tool ships no `inputSchema`. An MCP tool WITH
+ * a schema now has options too — see `Canvas/McpToolSection`.
+ */
 export const NoOptions: Story = {
   args: { initial: { owner: { from: "analyze" } }, options: [] },
 };

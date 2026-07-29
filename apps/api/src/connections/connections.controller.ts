@@ -16,11 +16,13 @@ import { ApiEndpoint } from "../swagger/api-decorators";
 import {
   ConnectionResponse,
   ConnectionTestResponse,
+  McpToolResponse,
 } from "./connection.response";
 import {
   type ConnectionTestResult,
   ConnectionTestService,
 } from "./connection-test.service";
+import { McpToolsService } from "./mcp-tools.service";
 import { CreateConnectionDto } from "./create-connection.dto";
 import { TestConnectionDto } from "./test-connection.dto";
 
@@ -32,6 +34,7 @@ export class ConnectionsController {
     private readonly environments: EnvironmentsService,
     private readonly graphs: GraphsService,
     private readonly connectionTest: ConnectionTestService,
+    private readonly mcpTools: McpToolsService,
   ) {}
 
   @ApiEndpoint({
@@ -119,6 +122,35 @@ export class ConnectionsController {
     // secret is read from the connection row's OWN environmentId inside resolveAuthHeader — so the
     // probe always uses the env the connection actually lives in, not the caller's active env.
     return this.connectionTest.test(tenantId, connectionId, body.provider);
+  }
+
+  /**
+   * The tools this MCP connection's server advertises — an authoring-time read so the canvas can
+   * OFFER a tool name and its argument names instead of asking the author to retype them.
+   *
+   * A GET because it is a discovery read with no request body and no side effect: `tools/list`
+   * invokes nothing. RBAC follows the sibling routes on this controller (tenant scoping via the
+   * auth guard) for the same reason `POST :connectionId/test` does — the RBAC matrix's verbs are
+   * per-WORKFLOW, and someone who can save a connection must be able to see what it offers.
+   */
+  @ApiEndpoint({
+    summary: "List an MCP connection's tools",
+    description:
+      "Opens one MCP session to the connection's server with its stored credential and returns " +
+      "`tools/list`. The credential is used in-memory and never returned. Names, descriptions and " +
+      "schemas are sanitized and capped — they are authored by whoever runs that server. 400 if " +
+      "the connection is not an MCP kind, has no Server URL, or needs (re)authorization.",
+    ok: [McpToolResponse],
+    notFound: true,
+  })
+  @Get(":connectionId/mcp/tools")
+  listMcpTools(
+    @Param("id") tenantId: string,
+    @Param("connectionId") connectionId: string,
+  ): Promise<McpToolResponse[]> {
+    // No env resolution: like the test route, the connection is looked up by its own id and its
+    // secret is read from the connection row's OWN environmentId inside resolveAuthHeader.
+    return this.mcpTools.list(tenantId, connectionId);
   }
 
   @ApiEndpoint({

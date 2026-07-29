@@ -9,6 +9,7 @@ import { GraphsService } from "../src/graphs/graphs.service";
 import { ConnectionTestService } from "../src/connections/connection-test.service";
 import { ConnectionsController } from "../src/connections/connections.controller";
 import { ConnectionsModule } from "../src/connections/connections.module";
+import { McpToolsService } from "../src/connections/mcp-tools.service";
 
 /**
  * #701 added ConnectionTestService as a FOURTH constructor dependency of ConnectionsController. If
@@ -29,8 +30,10 @@ describe("Connections DI wiring (#701)", () => {
       // biome-ignore lint/suspicious/noExplicitAny: reflect metadata is untyped by nature
     ) ?? []) as any[];
     // Metadata emitted at all — if swc dropped it, Nest resolves nothing (see di-wiring.spec.ts).
-    expect(params.length).toBe(4);
+    // Five since the MCP tools listing joined it.
+    expect(params.length).toBe(5);
     expect(params).toContain(ConnectionTestService);
+    expect(params).toContain(McpToolsService);
 
     const providers = (Reflect.getMetadata("providers", ConnectionsModule) ??
       // biome-ignore lint/suspicious/noExplicitAny: reflect metadata is untyped by nature
@@ -41,6 +44,7 @@ describe("Connections DI wiring (#701)", () => {
       ),
     );
     expect(providedTokens.has(ConnectionTestService)).toBe(true);
+    expect(providedTokens.has(McpToolsService)).toBe(true);
     expect(providedTokens.has(ConnectionService)).toBe(true);
 
     // The two that legitimately come from elsewhere: EnvironmentsService via the explicitly
@@ -53,6 +57,15 @@ describe("Connections DI wiring (#701)", () => {
       const external = dep === EnvironmentsService || dep === GraphsService;
       expect(providedTokens.has(dep) || external).toBe(true);
     }
+  });
+
+  it("McpToolsService takes exactly the ConnectionService it is given", () => {
+    const params = (Reflect.getMetadata(
+      "design:paramtypes",
+      McpToolsService,
+      // biome-ignore lint/suspicious/noExplicitAny: reflect metadata is untyped by nature
+    ) ?? []) as any[];
+    expect(params).toEqual([ConnectionService]);
   });
 
   it("ConnectionTestService takes exactly the ConnectionService it is given", () => {

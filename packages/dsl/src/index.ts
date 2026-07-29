@@ -97,6 +97,7 @@ export {
   type GraphQLField,
   type GraphQLTypeSummary,
   type GraphQLSchemaSummary,
+  type McpToolSummary,
 } from "./introspection";
 export {
   resolveSqlQuery,

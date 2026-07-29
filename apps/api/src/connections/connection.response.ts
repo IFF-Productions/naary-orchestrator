@@ -121,6 +121,41 @@ export class ConnectionTestResponse {
   message!: string;
 }
 
+/**
+ * One tool an MCP connection's server advertises (`tools/list`).
+ *
+ * Every field is authored by whoever runs that server, so the API sanitizes it before it gets
+ * here: control characters stripped, lengths capped, an over-large `inputSchema` dropped. The UI
+ * must still render `description` as TEXT, never HTML.
+ */
+export class McpToolResponse {
+  @ApiProperty({
+    example: "create_issue",
+    description:
+      "The tool's id — what goes in the mcpTool node's `tool` field.",
+  })
+  name!: string;
+  @ApiProperty({
+    example: "Create a new issue in a repository.",
+    description:
+      "Plain-text description, or empty when the server sent none. Never HTML.",
+  })
+  description!: string;
+  @ApiProperty({
+    type: Object,
+    required: false,
+    example: {
+      type: "object",
+      properties: { owner: { type: "string" }, repo: { type: "string" } },
+      required: ["owner", "repo"],
+    },
+    description:
+      "JSON Schema for the tool's arguments — the canvas offers its `properties` as binding " +
+      "names. Absent when the server sent none, or when the schema was too large to relay.",
+  })
+  inputSchema?: Record<string, unknown>;
+}
+
 /** Result of starting interactive OAuth consent — the authorize URL for the browser. */
 export class OAuthStartResponse {
   @ApiProperty({

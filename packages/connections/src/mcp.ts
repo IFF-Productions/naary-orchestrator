@@ -17,21 +17,40 @@ export interface McpCallResult {
   isError: boolean;
 }
 
+/** One tool a server advertises, as `tools/list` returns it (raw — the API sanitizes). */
+export interface McpToolDescriptor {
+  name: string;
+  description?: string;
+  /** JSON Schema for the tool's arguments. Servers are supposed to send an object schema. */
+  inputSchema?: Record<string, unknown>;
+}
+
+/** Hard ceilings on a `tools/list` walk. A remote server controls both the page count and the page
+ *  size, so an unbounded cursor loop is a remote-controlled loop in our own process. */
+const MAX_TOOL_PAGES = 10;
+const MAX_TOOLS = 500;
+
 /**
- * Open an MCP client over Streamable HTTP to `serverUrl`, invoke one tool, and
- * close. Auth rides in the transport's requestInit headers (never logged). The
- * client is always closed (finally) to avoid leaking the connection.
+ * Open an MCP client over Streamable HTTP to `serverUrl`, run `fn`, and close.
+ *
+ * Every MCP session in this repo goes through here so the egress hardening cannot drift between
+ * the calls that use it: the SSRF pre-check runs before the tenant's bearer token is sent
+ * anywhere, the transport's fetch is pinned, and the client is always closed.
  */
-export async function callMcpTool(input: McpCallInput): Promise<McpCallResult> {
+async function withMcpSession<T>(
+  serverUrl: string,
+  headers: Record<string, string>,
+  fn: (client: Client) => Promise<T>,
+): Promise<T> {
   // SSRF guard at the egress point (defeats DNS rebinding): https + public host
   // only, before the tenant's bearer token is sent anywhere.
-  const url = await assertEgressAllowed(input.serverUrl);
+  const url = await assertEgressAllowed(serverUrl);
   const client = new Client(
     { name: "naary-orchestrator", version: "0.1.0" },
     { capabilities: {} },
   );
   const transport = new StreamableHTTPClientTransport(url, {
-    requestInit: { headers: input.headers },
+    requestInit: { headers },
     // #592: the pre-check above validates only the FIRST hop; the SDK otherwise uses
     // global fetch, which re-resolves DNS (rebinding TOCTOU) and follows redirects
     // unchecked. Route every transport request through the pinning safeFetch dispatcher
@@ -41,14 +60,58 @@ export async function callMcpTool(input: McpCallInput): Promise<McpCallResult> {
   });
   try {
     await client.connect(transport);
+    return await fn(client);
+  } finally {
+    await client.close();
+  }
+}
+
+/** Invoke one tool over a fresh MCP session. Auth rides in the transport headers (never logged). */
+export async function callMcpTool(input: McpCallInput): Promise<McpCallResult> {
+  return withMcpSession(input.serverUrl, input.headers, async (client) => {
     const result = await client.callTool({
       name: input.tool,
       arguments: input.arguments,
     });
     return { content: result.content, isError: result.isError === true };
-  } finally {
-    await client.close();
-  }
+  });
+}
+
+/**
+ * Ask a server which tools it offers (`tools/list`), so the canvas can OFFER an author the real
+ * tool names + argument names instead of asking them to retype something they cannot see. A typo
+ * in either place fails at RUN time, not at save.
+ *
+ * Authoring-time read only — nothing here writes, and the tenant's token never leaves the session.
+ * The walk is bounded (`MAX_TOOL_PAGES` / `MAX_TOOLS`): the cursor and page size are both chosen by
+ * the remote server, so an unbounded loop would be a remote-controlled loop in our process.
+ * Sanitizing the returned strings/schemas is the CALLER's job — this is raw remote data.
+ */
+export async function listMcpTools(input: {
+  serverUrl: string;
+  headers: Record<string, string>;
+}): Promise<McpToolDescriptor[]> {
+  return withMcpSession(input.serverUrl, input.headers, async (client) => {
+    const out: McpToolDescriptor[] = [];
+    let cursor: string | undefined;
+    for (let page = 0; page < MAX_TOOL_PAGES; page++) {
+      const res = await client.listTools(cursor ? { cursor } : undefined);
+      for (const t of res.tools ?? []) {
+        out.push({
+          name: t.name,
+          ...(t.description ? { description: t.description } : {}),
+          ...(t.inputSchema
+            ? { inputSchema: t.inputSchema as Record<string, unknown> }
+            : {}),
+        });
+        if (out.length >= MAX_TOOLS) return out;
+      }
+      const next = (res as { nextCursor?: unknown }).nextCursor;
+      if (typeof next !== "string" || !next) break;
+      cursor = next;
+    }
+    return out;
+  });
 }
 
 /** Resolve a connection to its MCP target (server URL + auth header). */
