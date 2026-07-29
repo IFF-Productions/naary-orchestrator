@@ -147,6 +147,30 @@ const PROBE = `(() => {
   return { clipped, scrollers, small, vw: VW };
 })()`;
 
+/**
+ * Wait for the story to stop changing, rather than for a fixed delay.
+ *
+ * A fixed wait silently measures the wrong thing twice over: MSW-backed screens paint an empty
+ * or loading state first, and a story with a `play` function (the only way to reach a state the
+ * default render doesn't show — an open drawer, a draft row) needs its interactions to finish.
+ * Probe too early and the screen reports clean because there was nothing on it yet. An earlier
+ * sweep here read one async story 6 controls light for exactly this reason.
+ */
+async function settle(page, { quiet = 3, step = 200, cap = 8000 } = {}) {
+  let last = null;
+  let stable = 0;
+  for (let waited = 0; waited < cap; waited += step) {
+    await page.waitForTimeout(step);
+    const sig = await page.evaluate(
+      () =>
+        `${document.body.innerHTML.length}:${document.querySelectorAll("button,a,input,select,textarea").length}`,
+    );
+    stable = sig === last ? stable + 1 : 0;
+    last = sig;
+    if (stable >= quiet) return;
+  }
+}
+
 const results = [];
 for (const id of ids) {
   const page = await ctx.newPage();
@@ -157,7 +181,7 @@ for (const id of ids) {
       waitUntil: "load",
       timeout: 30000,
     });
-    await page.waitForTimeout(900);
+    await settle(page);
     const r = await page.evaluate(PROBE);
     const bodyText = await page.evaluate(() => document.body.innerText.trim().length);
     results.push({ id, ...r, empty: bodyText < 5, errs });
