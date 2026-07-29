@@ -1,6 +1,6 @@
 {
   "name": "@naary/worker",
-  "version": "0.0.46",
+  "version": "0.0.47",
   "private": true,
   "description": "Temporal worker: the generic runGraph interpreter workflow + activities. All side effects live here.",
   "main": "dist/index.js",
