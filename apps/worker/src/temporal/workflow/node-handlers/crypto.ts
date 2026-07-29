@@ -2,7 +2,12 @@
 // zero behavior change). DETERMINISTIC WORKFLOW CODE: binding resolution is pure +
 // in-workflow; the key fetch + signing/hashing happen in the SAME activity proxies
 // (keys never enter workflow history — CLAUDE.md Tier-1 #4).
-import { resolveHmac, resolveHash, resolveJwt, asNodeConfig } from "@naary/dsl";
+import {
+  resolveHmac,
+  resolveHash,
+  resolveJwt,
+  asNodeConfig,
+} from "@naary/dsl/dist/workflow";
 import type { NodeOutputMap } from "@naary/dsl";
 import { callHmac, callHash, callJwt, callTotp } from "../proxies";
 import type { NodeHandler } from "./contract";

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { evaluateCondition, nextNodes, validateGraph } from "../src/branch";
+import { evaluateCondition, nextNodes } from "../src/branch";
+import { validateGraph } from "../src/validate-graph";
 import type { GraphDef } from "../src/types";
 
 const ctx = {

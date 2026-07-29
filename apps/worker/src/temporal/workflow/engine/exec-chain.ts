@@ -22,7 +22,7 @@ import {
   BATCHABLE_REGION_ACTIVITIES,
   type TraceCell,
   type RegionTrace,
-} from "@naary/dsl";
+} from "@naary/dsl/dist/workflow"; // deterministic-safe entry (#910)
 // Type-only: keeps activity code OUT of the deterministic workflow bundle.
 import type * as activities from "../../activities";
 import { expandItems, mapNode, offloadCtxEntry } from "../proxies";

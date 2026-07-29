@@ -30,7 +30,7 @@ import {
   integrationToolRef,
   mcpToolRef,
   type UnresolvedRef,
-} from "@naary/dsl";
+} from "@naary/dsl/dist/workflow"; // deterministic-safe entry (#910)
 import type {
   ApprovalNodeConfig,
   NodeDef,
@@ -196,11 +196,7 @@ async function toolApprovalGate(
   // and `memo[ref] = …` would throw, wedging an otherwise valid run. Reset anything that isn't a
   // plain record. Pure ctx read/write, no Temporal command, so replay-safe without a patch marker.
   const existing = ctx[TOOL_POLICY_CTX_KEY];
-  if (
-    !existing ||
-    typeof existing !== "object" ||
-    Array.isArray(existing)
-  ) {
+  if (!existing || typeof existing !== "object" || Array.isArray(existing)) {
     ctx[TOOL_POLICY_CTX_KEY] = {};
   }
   const memo = ctx[TOOL_POLICY_CTX_KEY] as Record<string, ToolPolicyVerdict>;

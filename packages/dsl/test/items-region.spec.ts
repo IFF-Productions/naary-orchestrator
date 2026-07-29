@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { computeItemsRegions } from "../src/items-region";
-import { validateGraph } from "../src/branch";
+import { validateGraph } from "../src/validate-graph";
 import type { GraphDef, NodeDef } from "../src/types";
 
 /** Build a graph from a node list + edge pairs. */

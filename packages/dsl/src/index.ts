@@ -30,12 +30,14 @@ export {
   escalationGraph,
 } from "./templates-advanced";
 export { bindingNamesSource, getByPath, resolveMcpArguments } from "./mcp-args";
+// `resolveIntegrationFields` names its true home: it is catalog-free and the interpreter calls it
+// on every integration node, so it lives in ./integration-fields (#910). Public surface unchanged.
+export { resolveIntegrationFields } from "./integration-fields";
 export {
   INTEGRATION_CATALOG,
   INTEGRATION_PROVIDERS,
   getIntegrationProvider,
   getIntegrationAction,
-  resolveIntegrationFields,
   buildIntegrationRequest,
   validateIntegrationConfig,
   type IntegrationProvider,
@@ -160,12 +162,17 @@ export {
   type NodeCatalogEntry,
   type NodeGroup,
 } from "./node-catalog";
-export {
-  evaluateCondition,
-  nextNodes,
-  validateGraph,
-  type GraphValidation,
-} from "./branch";
+// `evaluateCondition`/`nextNodes` are interpreter hot path; `validateGraph` is a SAVE GATE and the
+// only one of the three that needs the integration catalog. They were one module until #910, which
+// meant every node transition's `require("./branch")` dragged all 161KB of catalog into the
+// deterministic workflow bundle. Split, but re-exported here identically — no caller changed.
+export { evaluateCondition, nextNodes } from "./branch";
+export { validateGraph, type GraphValidation } from "./validate-graph";
+// `./integration-write` (the interpreter's write/read, i.e. at-most-once vs retryable,
+// classification) is deliberately NOT re-exported here, for the same reason as ./registry and
+// ./n8n-import: the barrel is the authoring-time surface, and this module exists only to keep the
+// catalog out of the deterministic workflow bundle. Workflow code reaches it via ./workflow; the
+// drift test deep-imports it. Barrel surface is therefore unchanged by #910.
 // Agent handoff (#580 Phase 1) — zod-free by design: `validateGraph` imports it, so it
 // lands in the deterministic workflow bundle. The agent ACTIVITY imports
 // `handoffOutputSchema` from here too, so the save-gate and the runtime schema are the

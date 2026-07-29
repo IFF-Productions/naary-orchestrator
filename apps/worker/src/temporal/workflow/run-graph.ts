@@ -16,7 +16,14 @@ import {
   webhookResponseQuery,
 } from "@naary/contracts";
 import type { ExecutionState } from "@naary/contracts";
-import { computeItemsRegions, type ItemsRegion } from "@naary/dsl";
+// The DETERMINISTIC-SAFE entry (#910) — see packages/dsl/src/workflow.ts. Importing the
+// `@naary/dsl` barrel from workflow code compiles all ~50 modules (161KB integration catalog
+// included) into the Temporal workflow bundle, because the package is CJS with no `exports` map
+// and nothing tree-shakes. Type-only imports below are erased, so they may stay on the barrel.
+import {
+  computeItemsRegions,
+  type ItemsRegion,
+} from "@naary/dsl/dist/workflow";
 import type { GraphDef, NodeDef } from "@naary/dsl";
 // Type-only: keeps activity code OUT of the deterministic workflow bundle.
 // Do NOT drop `type` — that would pull I/O code into the sandbox.

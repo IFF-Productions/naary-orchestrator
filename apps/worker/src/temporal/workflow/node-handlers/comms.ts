@@ -7,7 +7,7 @@ import {
   asNodeConfig,
   renderEmailHtml,
   resolveTemplateString,
-} from "@naary/dsl";
+} from "@naary/dsl/dist/workflow";
 import type { NodeOutputMap } from "@naary/dsl";
 import { callSendEmail, callCode, loadTemplate } from "../proxies";
 import type { NodeHandler } from "./contract";
