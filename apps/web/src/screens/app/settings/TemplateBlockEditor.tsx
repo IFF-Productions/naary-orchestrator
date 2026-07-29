@@ -19,7 +19,13 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { renderEmailHtml, type TemplateBlock } from "@naary/dsl";
+// Deep import, same reason as components/TemplateContentBlock.tsx (#928): the renderer is the
+// Settings route's ONLY value-level use of @naary/dsl, so importing it from the barrel colours
+// the integration catalog + zod into Settings' chunk for a 2KB pure function.
+import {
+  renderEmailHtml,
+  type TemplateBlock,
+} from "@naary/dsl/dist/template-blocks";
 import { useMemo, useRef } from "react";
 import { Icon, SafeHtml, TemplateContentBlock } from "../../../components";
 import {

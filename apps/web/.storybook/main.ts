@@ -21,6 +21,17 @@ const config: StorybookConfig = {
           "@naary/dsl/dist/registry": fileURLToPath(
             new URL("../../../packages/dsl/src/registry.ts", import.meta.url),
           ),
+          // Same rule for the block renderer subpath (#928) — TemplateContentBlock and the
+          // template editor deep-import it to keep the integration catalog off the eager
+          // chunk. Storybook renders those components, so it needs the alias too; tsc does
+          // NOT catch a missing one (it resolves via packages/dsl/dist/*.d.ts), only a
+          // Storybook build does.
+          "@naary/dsl/dist/template-blocks": fileURLToPath(
+            new URL(
+              "../../../packages/dsl/src/template-blocks.ts",
+              import.meta.url,
+            ),
+          ),
           "@naary/dsl": fileURLToPath(
             new URL("../../../packages/dsl/src/index.ts", import.meta.url),
           ),

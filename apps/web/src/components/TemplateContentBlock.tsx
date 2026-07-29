@@ -5,7 +5,15 @@
 // sink — so the author's markup can't run in a viewer's browser. `field` blocks are NOT handled here
 // (they carry no display markup): each surface renders its own input — a disabled preview control in
 // the editor, a live `FormField` on the public page — so this returns null for them.
-import { renderEmailHtml, type TemplateBlock } from "@naary/dsl";
+// DEEP IMPORT, deliberately (#928) — NOT `from "@naary/dsl"`. This component is reachable from
+// the eager entry graph (components/index.ts → AppShell), and one barrel import here colours the
+// 161KB integration catalog + zod into the chunk index.html modulepreloads. `template-blocks` is
+// catalog-free and zod-free (#926), so this costs `mcp-args` + `template` and nothing else.
+// The subpath is aliased to TS source in vite.config.ts AND .storybook/main.ts.
+import {
+  renderEmailHtml,
+  type TemplateBlock,
+} from "@naary/dsl/dist/template-blocks";
 import { SafeHtml } from "./SafeHtml";
 
 export function TemplateContentBlock({
