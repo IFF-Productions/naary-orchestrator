@@ -146,7 +146,43 @@ function toPatch(ch: EditableChannel) {
   };
 }
 
-/** The comp's 22px checkmark/dash toggle tile — one matrix cell. */
+/** The comp's 22px checkmark/dash tile — the VISUAL only. Presentational on purpose: on phone
+ *  it is painted inside a full-width button, and a nested interactive element there would both
+ *  break the a11y name and leave a 22px target inside a 44px one. */
+function EventGlyph({ on }: { on: boolean }) {
+  return (
+    <span
+      aria-hidden
+      style={{
+        width: 22,
+        height: 22,
+        flex: "none",
+        borderRadius: 7,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        border: `1px solid ${on ? "var(--state-done)" : "var(--line-2)"}`,
+        background: on
+          ? "color-mix(in srgb, var(--state-done) 14%, transparent)"
+          : "var(--card)",
+        color: on ? "var(--state-done)" : "var(--ink-faint)",
+      }}
+    >
+      <svg width={13} height={13} viewBox="0 0 24 24" fill="none" aria-hidden>
+        <path
+          d={on ? "M5 12.5 10 17.5 19.5 7" : "M6 12h12"}
+          stroke="currentColor"
+          strokeWidth="2.4"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    </span>
+  );
+}
+
+/** DESKTOP matrix cell: the 22px tile IS the control (a mouse can hit 22px; a column of
+ *  labelled full-width rows would destroy the matrix this screen is built around). */
 function EventTile({
   on,
   label,
@@ -177,22 +213,77 @@ function EventTile({
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        border: `1px solid ${on ? "var(--state-done)" : "var(--line-2)"}`,
-        background: on
-          ? "color-mix(in srgb, var(--state-done) 14%, transparent)"
-          : "var(--card)",
-        color: on ? "var(--state-done)" : "var(--ink-faint)",
+        border: "none",
+        background: "transparent",
       }}
     >
-      <svg width={13} height={13} viewBox="0 0 24 24" fill="none" aria-hidden>
-        <path
-          d={on ? "M5 12.5 10 17.5 19.5 7" : "M6 12h12"}
-          stroke="currentColor"
-          strokeWidth="2.4"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
+      <EventGlyph on={on} />
+    </button>
+  );
+}
+
+/** PHONE matrix cell: the whole labelled line is the checkbox.
+ *
+ *  Before this, the line was a 22px tile plus a plain `<span>` label — and the line sits inside
+ *  `.naary-set-row`, which is itself `role="button"` and expands the card. So a tap on the event
+ *  NAME (the obvious target, 128px wide against the tile's 22) did not miss harmlessly: it
+ *  expanded the card instead of toggling the alert. Measured at 390px, tapping "Approval" flipped
+ *  `aria-expanded` false→true and left `aria-checked` unchanged.
+ *
+ *  Making the line the control fixes both halves at once — the target becomes 44px tall and the
+ *  full card width, and the label is no longer a dead zone routed to a different action. The 40px
+ *  indent lives INSIDE the button so the inset is part of the target, not a gutter beside it. */
+function EventRow({
+  on,
+  label,
+  title,
+  decide,
+  onToggle,
+}: {
+  on: boolean;
+  label: string;
+  title: string;
+  decide?: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={on}
+      aria-label={label}
+      onClick={(e) => {
+        e.stopPropagation();
+        onToggle();
+      }}
+      style={{
+        // 44px is the touch minimum the rest of the app already uses (the `.btn-icon` rule in
+        // components.css). Stacked lines are 10px apart, so a 44px hit area cannot reach a
+        // neighbour's — unlike the grant matrix, whose checkboxes are 37px apart.
+        minHeight: 44,
+        width: "100%",
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        padding: "0 8px 0 40px",
+        margin: 0,
+        border: "none",
+        borderRadius: 8,
+        background: "transparent",
+        color: "inherit",
+        textAlign: "left",
+        cursor: "pointer",
+      }}
+    >
+      <EventGlyph on={on} />
+      <span style={{ fontSize: "var(--text-xs)", color: "var(--ink-2)" }}>
+        {title}
+        {decide && (
+          <span style={{ color: "var(--node-approval)", marginLeft: 6 }}>
+            decide-in-place
+          </span>
+        )}
+      </span>
     </button>
   );
 }
@@ -466,48 +557,48 @@ export function NotificationsSection({
             {/* Matrix header — mono uppercase, per the comp. Desktop/tablet only: on phone each
                 toggle is labelled in place, so a column header would name nothing. */}
             {!phone && (
-            <div
-              className="mono"
-              style={{
-                display: "grid",
-                gridTemplateColumns: GRID_COLUMNS,
-                alignItems: "center",
-                gap: 8,
-                padding: "11px 18px",
-                borderBottom: "1px solid var(--line)",
-                background: "var(--card-2, var(--card))",
-                fontSize: 10.5,
-                letterSpacing: ".08em",
-                textTransform: "uppercase",
-                color: "var(--ink-faint)",
-              }}
-            >
-              <span>Channel</span>
-              {EVENT_COLUMNS.map((col) => (
-                <span
-                  key={col.key}
-                  title={col.hint}
-                  style={{ textAlign: "center" }}
-                >
-                  {col.title}
-                  {col.decide && (
-                    <span
-                      title="Carries Approve / Reject decide-in-place actions"
-                      style={{
-                        display: "block",
-                        textTransform: "none",
-                        letterSpacing: 0,
-                        fontSize: 9,
-                        color: "var(--node-approval)",
-                      }}
-                    >
-                      decide-in-place
-                    </span>
-                  )}
-                </span>
-              ))}
-              <span />
-            </div>
+              <div
+                className="mono"
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: GRID_COLUMNS,
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "11px 18px",
+                  borderBottom: "1px solid var(--line)",
+                  background: "var(--card-2, var(--card))",
+                  fontSize: 10.5,
+                  letterSpacing: ".08em",
+                  textTransform: "uppercase",
+                  color: "var(--ink-faint)",
+                }}
+              >
+                <span>Channel</span>
+                {EVENT_COLUMNS.map((col) => (
+                  <span
+                    key={col.key}
+                    title={col.hint}
+                    style={{ textAlign: "center" }}
+                  >
+                    {col.title}
+                    {col.decide && (
+                      <span
+                        title="Carries Approve / Reject decide-in-place actions"
+                        style={{
+                          display: "block",
+                          textTransform: "none",
+                          letterSpacing: 0,
+                          fontSize: 9,
+                          color: "var(--node-approval)",
+                        }}
+                      >
+                        decide-in-place
+                      </span>
+                    )}
+                  </span>
+                ))}
+                <span />
+              </div>
             )}
 
             {!loaded && !error && (
@@ -672,15 +763,9 @@ export function NotificationsSection({
                       </div>
                     </div>
                     {EVENT_COLUMNS.map((col) => {
-                      const tile = (
-                        <EventTile
-                          on={ch[col.key]}
-                          label={`${col.title} — ${
-                            ch.label || meta.title
-                          } (${ch[col.key] ? "on" : "off"})`}
-                          onToggle={() => void toggleFlag(key, col.key)}
-                        />
-                      );
+                      const label = `${col.title} — ${
+                        ch.label || meta.title
+                      } (${ch[col.key] ? "on" : "off"})`;
                       if (!phone)
                         return (
                           <div
@@ -690,42 +775,27 @@ export function NotificationsSection({
                               justifyContent: "center",
                             }}
                           >
-                            {tile}
+                            <EventTile
+                              on={ch[col.key]}
+                              label={label}
+                              onToggle={() => void toggleFlag(key, col.key)}
+                            />
                           </div>
                         );
-                      // Phone: the event NAME travels with its toggle. The column header is gone,
-                      // and an unlabelled checkbox would be a switch for something unnamed —
-                      // worse than a hidden column, since you could enable the wrong alert.
+                      // Phone: the event NAME travels with its toggle, and the whole line IS the
+                      // toggle. The column header is gone, and an unlabelled checkbox would be a
+                      // switch for something unnamed — worse than a hidden column, since you could
+                      // enable the wrong alert. See EventRow for why the label had to become part
+                      // of the control rather than sit beside it.
                       return (
-                        <div
+                        <EventRow
                           key={col.key}
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: 10,
-                            paddingLeft: 40,
-                          }}
-                        >
-                          {tile}
-                          <span
-                            style={{
-                              fontSize: "var(--text-xs)",
-                              color: "var(--ink-2)",
-                            }}
-                          >
-                            {col.title}
-                            {col.decide && (
-                              <span
-                                style={{
-                                  color: "var(--node-approval)",
-                                  marginLeft: 6,
-                                }}
-                              >
-                                decide-in-place
-                              </span>
-                            )}
-                          </span>
-                        </div>
+                          on={ch[col.key]}
+                          label={label}
+                          title={col.title}
+                          decide={col.decide}
+                          onToggle={() => void toggleFlag(key, col.key)}
+                        />
                       );
                     })}
                     {/* Desktop: the trailing 28px column. On phone it would land alone on its own
