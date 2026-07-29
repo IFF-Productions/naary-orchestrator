@@ -1,0 +1,52 @@
+# The codeAgent CURSOR sandbox image (`naary-cursor-sandbox`) — the ephemeral, egress-isolated box
+# the runner launches one-per-run for a `tool: "cursor"` node. Sibling of ./Dockerfile (claude);
+# see that file for the shared rationale. It holds only the Cursor credential (via env) and the
+# working tree; NEVER a git token (the activity does all VCS I/O outside the sandbox, design §2.2).
+#
+# Build:  docker build -t naary-cursor-sandbox:latest -f deploy/sandbox/cursor.Dockerfile deploy/sandbox
+#
+# ONE IMAGE PER TOOL is the point (#680): the runner maps tool → image, and each image's ENTRYPOINT
+# is that tool's binary. Before this, `ALLOWED_SANDBOX_IMAGES` pinned only the claude image, so a
+# cursor argv was handed to the `claude` entrypoint — the latent bug #933 found. That is now
+# impossible by construction rather than by review.
+
+ARG NODE_VERSION=24
+
+FROM node:${NODE_VERSION}-bookworm-slim
+
+# `git` for in-tree diffs (no network — the remote/token never enter here); `ca-certificates` for
+# TLS to the proxy; `curl` is REQUIRED here (unlike the claude image) because Cursor ships an
+# install script rather than an npm package.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends git ca-certificates curl \
+  && rm -rf /var/lib/apt/lists/*
+
+# Cursor Agent CLI. The official installer is an UNPINNED remote script on a third-party host, so
+# unlike the npm-installed CLIs this cannot be version-pinned from here.
+#
+# FATAL on failure, deliberately — the opposite of the shared backend image's best-effort guard.
+# There the installer was soft-failed so a cursor.com outage couldn't break the one image every
+# service depends on; this image exists ONLY to run cursor-agent, so an image without the binary is
+# useless and must not be published as if it worked.
+#
+# Download-then-run, NOT `curl … | bash`: a pipeline's exit status is the LAST command's, so a
+# failed download fed `bash` an empty stdin and `bash` exited 0 — reporting success with no binary
+# present (fixed for the backend image in #933). The `command -v` also catches an installer that
+# exits 0 without placing the binary.
+RUN curl -fsSL https://cursor.com/install -o /tmp/cursor-install.sh \
+  && bash /tmp/cursor-install.sh \
+  && rm -f /tmp/cursor-install.sh \
+  && PATH="/root/.local/bin:$PATH" command -v cursor-agent >/dev/null \
+  # The installer drops the binary in the INSTALLING user's ~/.local/bin (root's). Move it
+  # somewhere the unprivileged runtime user can execute — the sandbox never runs as root.
+  && cp -a /root/.local/bin/cursor-agent /usr/local/bin/cursor-agent \
+  && chmod 0755 /usr/local/bin/cursor-agent
+
+# Non-root: the model's tools run as an unprivileged user (defense in depth alongside the
+# runner's --cap-drop ALL / no-new-privileges / read-only root).
+RUN useradd --create-home --uid 10001 sandbox
+USER sandbox
+WORKDIR /work
+
+# The runner supplies the full `cursor-agent -p …` argv; no default command is baked in.
+ENTRYPOINT ["cursor-agent"]

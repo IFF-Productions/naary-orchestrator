@@ -165,6 +165,34 @@ describe("validateGraphConfigs (save gate — lenient on missing, strict on pres
     ]);
   });
 
+  it("accepts every shipped codeAgent tool, and explains a rejection instead of just failing", () => {
+    // Each has its OWN pinned sandbox image (deploy/sandbox/<tool>.Dockerfile), so all four are
+    // real options — keep in step with the canvas picker and the worker's driver registry.
+    for (const tool of ["claude", "cursor", "copilot", "gemini"]) {
+      expect(
+        validateGraphConfigs(
+          graph([
+            { id: "c", type: "codeAgent", config: { tool, prompt: "review" } },
+          ]),
+        ),
+        tool,
+      ).toEqual([]);
+    }
+    // An API-authored / imported graph naming an unsupported tool must be told WHAT to change —
+    // a bare "invalid enum value" leaves the author guessing. Exactly ONE issue, not two.
+    const errs = validateGraphConfigs(
+      graph([
+        { id: "c", type: "codeAgent", config: { tool: "aider", prompt: "x" } },
+      ]),
+    );
+    expect(errs).toHaveLength(1);
+    expect(errs[0].issues).toHaveLength(1);
+    expect(errs[0].issues[0].path).toBe("tool");
+    expect(errs[0].issues[0].message).toMatch(
+      /claude, cursor, copilot, gemini/,
+    );
+  });
+
   it("requires repo + connectionId when a codeAgent is in WRITE mode (else runtime-only failure)", () => {
     // Write mode with neither → two conditional-required errors at SAVE time.
     const errs = validateGraphConfigs(
@@ -264,7 +292,11 @@ describe("validateGraphConfigs — prototype-pollution binding keys (#591 save g
   ) => ({ nodes });
 
   it("rejects a fieldBindings key with a __proto__ / constructor / prototype segment", () => {
-    for (const key of ["__proto__.polluted", "constructor.prototype.x", "a.__proto__.b"]) {
+    for (const key of [
+      "__proto__.polluted",
+      "constructor.prototype.x",
+      "a.__proto__.b",
+    ]) {
       const errs = validateGraphConfigs(
         graph([
           {
@@ -285,7 +317,9 @@ describe("validateGraphConfigs — prototype-pollution binding keys (#591 save g
         {
           id: "s",
           type: "set",
-          config: { fieldBindings: { "user.profile.name": { from: "n", path: "x" } } },
+          config: {
+            fieldBindings: { "user.profile.name": { from: "n", path: "x" } },
+          },
         },
       ]),
     );

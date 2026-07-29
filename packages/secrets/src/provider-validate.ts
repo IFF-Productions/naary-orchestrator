@@ -120,6 +120,15 @@ export function validateCopilotKey(token: string): Promise<boolean> {
 }
 
 /**
+ * Gemini CLI credential (`GEMINI_API_KEY`), the dedicated `gemini-cli` code-agent slot. It is an
+ * ordinary Gemini API key, so unlike the other CLI slots we CAN verify it for real — reuse the
+ * Google validator rather than a format guess.
+ */
+export function validateGeminiCliKey(apiKey: string): Promise<boolean> {
+  return validateGoogleKey(apiKey);
+}
+
+/**
  * Validate a tenant's Google (Gemini) key with a cheap 1-token call — mirrors the others
  * (4xx bad/exhausted key ⇒ invalid; 5xx/network ⇒ sanitized transient). gemini-2.5-flash is
  * the cheapest model to probe with.

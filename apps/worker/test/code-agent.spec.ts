@@ -1,5 +1,6 @@
 import { ApplicationFailure } from "@temporalio/activity";
 import { MissingCredentialError } from "@naary/secrets";
+import { MODEL_PRICING } from "@naary/usage";
 import {
   __setObjectStore,
   isClaimCheck,
@@ -18,7 +19,9 @@ const CFG = { tool: "claude" as const, prompt: "review the auth module" };
 
 const getDecryptedKey = vi.fn();
 const recordUsage = vi.fn();
-const exec = vi.fn();
+// The sandbox dispatch — #680 removed the in-worker subprocess entirely, so EVERY run (read and
+// write) goes through this seam. There is no `exec` seam left to stub.
+const runWrite = vi.fn();
 
 /** A well-formed final `type:"result"` message — the last line of a `stream-json` stream (and,
  *  when it's the whole stdout, a complete minimal stream on its own). `usage` mirrors the real
@@ -94,11 +97,16 @@ const streamLog = (over: Record<string, unknown> = {}) =>
 beforeEach(() => {
   getDecryptedKey.mockReset().mockResolvedValue("sk-ant-xxx");
   recordUsage.mockReset().mockResolvedValue(undefined);
-  exec.mockReset().mockResolvedValue({ stdout: envelope(), exitCode: 0 });
+  runWrite.mockReset().mockResolvedValue({
+    stdout: envelope(),
+    stderr: "",
+    exitCode: 0,
+    diff: "",
+  });
   __codeAgentDeps.getCredentials = (() => ({ getDecryptedKey })) as never;
   __codeAgentDeps.getDefaultEnvId = (() => Promise.resolve("e1")) as never;
   __codeAgentDeps.recordUsage = recordUsage as never;
-  __codeAgentDeps.exec = exec as never;
+  __codeAgentDeps.runWrite = runWrite as never;
 });
 
 afterEach(() => {
@@ -224,6 +232,7 @@ describe("claude driver (pure)", () => {
     expect(resolveDriver("claude").tool).toBe("claude");
     expect(resolveDriver("cursor").tool).toBe("cursor");
     expect(resolveDriver("copilot").tool).toBe("copilot");
+    expect(resolveDriver("gemini").tool).toBe("gemini");
     expect(resolveDriver(undefined).tool).toBe("claude"); // default
     expect(() => resolveDriver("nope")).toThrow(/unknown coding-CLI tool/);
   });
@@ -350,6 +359,110 @@ describe("copilotDriver (copilot)", () => {
   });
 });
 
+/**
+ * geminiDriver (`gemini`). Every assertion here corresponds to behaviour verified IN-CONTAINER
+ * against the pinned CLI version (deploy/sandbox/gemini.Dockerfile) — this CLI has three habits no
+ * other driver has, and each one is a way to get isolation or diagnosability silently wrong.
+ */
+describe("geminiDriver (gemini)", () => {
+  const d = resolveDriver("gemini");
+
+  it("authenticates via GEMINI_API_KEY (its own slot, not the `google` model key)", () => {
+    expect(d.authEnv(" gk_abc ")).toEqual({ GEMINI_API_KEY: "gk_abc" });
+    expect(d.credentialProvider).toBe("gemini-cli");
+  });
+
+  it("READ mode: --approval-mode plan AND --skip-trust (the clamp FAILS OPEN without it)", () => {
+    const args = d.buildArgs({
+      prompt: "review this",
+      model: "gemini-2.5-pro",
+    });
+    expect(args.slice(0, 4)).toEqual(["-p", "review this", "-o", "json"]);
+    expect(args[args.indexOf("--approval-mode") + 1]).toBe("plan");
+    // THE load-bearing flag. In an untrusted directory — which every fresh sandbox mount is —
+    // the CLI prints "Approval mode overridden to 'default' because the current folder is not
+    // trusted" and aborts (exit 55). The override is the dangerous half: it DOWNGRADES the
+    // read-only clamp. Verified in-container that --skip-trust removes it. Never drop this.
+    expect(args).toContain("--skip-trust");
+    expect(args).toEqual(expect.arrayContaining(["-m", "gemini-2.5-pro"]));
+  });
+
+  it("WRITE mode: auto_edit, never yolo (yolo would auto-approve shell too)", () => {
+    const args = d.buildArgs({ prompt: "fix it", write: true });
+    expect(args[args.indexOf("--approval-mode") + 1]).toBe("auto_edit");
+    expect(args).not.toContain("--yolo");
+    expect(args).not.toContain("-y");
+    expect(args).toContain("--skip-trust");
+  });
+
+  it("folds the system prompt into the prompt (the CLI has no append-system flag)", () => {
+    const args = d.buildArgs({ prompt: "task", systemPrompt: "house rules" });
+    expect(args[1]).toBe("house rules\n\ntask");
+  });
+
+  it("parses the PRETTY-PRINTED success envelope from stdout", () => {
+    // Its JSON spans many lines, so a per-line JSONL parse sees nothing — the whole-buffer
+    // fast path is what catches it.
+    const out = JSON.stringify({ response: "all good", stats: {} }, null, 2);
+    expect(d.parse(out, 0)).toMatchObject({
+      result: "all good",
+      isError: false,
+    });
+  });
+
+  it("reads the failure envelope from STDERR — stdout is empty on a failed run", () => {
+    // Verified: an invalid-key run wrote zero bytes to stdout and the envelope to stderr. Without
+    // reading stderr this is an undiagnosable `no_envelope`, on the run that most needs a reason.
+    const errEnvelope = JSON.stringify({
+      session_id: "s-1",
+      error: { type: "Error", message: "API key not valid", code: 400 },
+    });
+    const env = d.parse("", 144, errEnvelope);
+    expect(env.isError).toBe(true);
+    // The API's own status code drives the Sentry fingerprint (#551), not a bare exit code.
+    expect(env.failureSubtype).toBe("error_400");
+    expect(env.sessionId).toBe("s-1");
+  });
+
+  it("still reports a reason when both streams are empty, and never a false success", () => {
+    expect(d.parse("", 1)).toMatchObject({
+      isError: true,
+      failureSubtype: "no_envelope",
+    });
+    // A zero exit with an error object is STILL a failure (mirrors claude's is_error handling).
+    expect(d.parse(JSON.stringify({ error: { code: 429 } }), 0).isError).toBe(
+      true,
+    );
+  });
+
+  it("prices against a Google model, not a Claude one", () => {
+    // The ledger throws UnknownModelPricingError AFTER the CLI has run and cost money, so a
+    // driver whose default model has no row for its provider is a billing landmine.
+    expect(d.defaultPricingModel).toBe("gemini-2.5-pro");
+    expect(
+      MODEL_PRICING[d.credentialProvider]?.[d.defaultPricingModel],
+    ).toBeDefined();
+  });
+
+  it("cannot enforce an output schema (the activity refuses one rather than guessing)", () => {
+    expect(d.capabilities.structuredOutput).toBe(false);
+  });
+});
+
+/** Every driver must price against a model its own provider actually has a row for. */
+describe("driver pricing defaults", () => {
+  it.each(["claude", "cursor", "copilot", "gemini"])(
+    "%s has a priced default model",
+    (tool) => {
+      const d = resolveDriver(tool);
+      expect(
+        MODEL_PRICING[d.credentialProvider]?.[d.defaultPricingModel],
+        `${tool} → ${d.credentialProvider}/${d.defaultPricingModel}`,
+      ).toBeDefined();
+    },
+  );
+});
+
 /** Collect the value after each occurrence of `flag` in an argv (order preserved). */
 function argPairs(args: string[], flag: string): string[] {
   const out: string[] = [];
@@ -364,11 +477,12 @@ describe("callCodeAgent activity", () => {
     await callCodeAgent(CFG, {}, META);
     // Separate credential slot from the model-provider `anthropic` key.
     expect(getDecryptedKey).toHaveBeenCalledWith("t1", "e1", "claude-code");
-    const [binary, , opts] = exec.mock.calls[0];
-    expect(binary).toBe("claude");
+    const wp = runWrite.mock.calls[0][0];
+    // The runner is told WHICH TOOL to run — never an image name (it holds the Docker socket).
+    expect(wp.tool).toBe("claude");
     // sk-ant-xxx is an API-key-shaped token → ANTHROPIC_API_KEY (not the OAuth var).
-    expect(opts.env.ANTHROPIC_API_KEY).toBe("sk-ant-xxx");
-    expect(opts.env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+    expect(wp.keyEnvVar).toBe("ANTHROPIC_API_KEY");
+    expect(wp.authKey).toBe("sk-ant-xxx");
     // the key is NOT in the returned output
     const out = await callCodeAgent(CFG, {}, META);
     expect(JSON.stringify(out)).not.toContain("sk-ant-xxx");
@@ -378,10 +492,11 @@ describe("callCodeAgent activity", () => {
     const oatToken = "sk-ant-oat-fake"; // obviously-fake; only the sk-ant-oat prefix matters here
     getDecryptedKey.mockResolvedValue(oatToken);
     await callCodeAgent(CFG, {}, META);
-    const [, , opts] = exec.mock.calls[0];
-    expect(opts.env.CLAUDE_CODE_OAUTH_TOKEN).toBe(oatToken);
-    // Exactly one auth var — the API-key var must NOT also be set (avoids CLI precedence ambiguity).
-    expect(opts.env.ANTHROPIC_API_KEY).toBeUndefined();
+    const wp = runWrite.mock.calls[0][0];
+    // Exactly ONE auth var is forwarded, and it's the right one for this token kind — the runner
+    // sets only `keyEnvVar` in the container, so there's no CLI precedence ambiguity.
+    expect(wp.keyEnvVar).toBe("CLAUDE_CODE_OAUTH_TOKEN");
+    expect(wp.authKey).toBe(oatToken);
   });
 
   it("records usage from the CLI envelope + returns its cost (never zero)", async () => {
@@ -395,9 +510,10 @@ describe("callCodeAgent activity", () => {
   });
 
   it("fail-safe usage: estimates tokens (incl. the prompt, never zero) when the CLI omits usage", async () => {
-    exec.mockResolvedValue({
+    runWrite.mockResolvedValue({
       stdout: envelope({ usage: undefined, total_cost_usd: undefined }),
       exitCode: 0,
+      diff: "",
     });
     // A long prompt so the estimate MUST reflect it (regression: prompt was omitted).
     const bigPrompt = "audit the payment flow. ".repeat(40);
@@ -413,9 +529,10 @@ describe("callCodeAgent activity", () => {
   it("a CLI-reported failure carries the reason into the type + message (#551), bills the attempt", async () => {
     // The CLI's `subtype` is threaded into the error type (so Sentry groups by reason, not one
     // undiagnosable CODE_AGENT_FAILED bucket) and the message (so the run detail says why).
-    exec.mockResolvedValue({
+    runWrite.mockResolvedValue({
       stdout: envelope({ is_error: true, subtype: "error_max_turns" }),
       exitCode: 0,
+      diff: "",
     });
     const err = await callCodeAgent(CFG, {}, META).catch((e) => e);
     expect(err.nonRetryable).toBe(true);
@@ -425,7 +542,7 @@ describe("callCodeAgent activity", () => {
   });
 
   it("a failure with no CLI subtype still fails (reason falls back), never reasonless", async () => {
-    exec.mockResolvedValue({ stdout: "not json", exitCode: 1 }); // process died pre-envelope
+    runWrite.mockResolvedValue({ stdout: "not json", exitCode: 1, diff: "" }); // died pre-envelope
     const err = await callCodeAgent(CFG, {}, META).catch((e) => e);
     expect(err.type).toBe("CODE_AGENT_FAILED:no_envelope");
     expect(err.nonRetryable).toBe(true);
@@ -439,11 +556,11 @@ describe("callCodeAgent activity", () => {
       type: "AUTH",
       nonRetryable: true,
     });
-    expect(exec).not.toHaveBeenCalled();
+    expect(runWrite).not.toHaveBeenCalled();
   });
 
   it("throws a GENERIC retryable failure — the raw subprocess error never leaks", async () => {
-    exec.mockRejectedValue(
+    runWrite.mockRejectedValue(
       new Error(`spawn boom key=sk-leak prompt=${CFG.prompt}`),
     );
     const err = await callCodeAgent(CFG, {}, META).catch((e) => e);
@@ -474,9 +591,8 @@ describe("callCodeAgent activity", () => {
       {},
       META,
     );
-    // Dispatched to the runner with the WRITE argv + the resolved credential, NOT the in-worker exec.
+    // Dispatched to the runner with the WRITE argv + the resolved credential.
     expect(runWrite).toHaveBeenCalledOnce();
-    expect(exec).not.toHaveBeenCalled();
     const wp = runWrite.mock.calls[0][0];
     expect(wp.repo).toBe("acme/widgets");
     expect(wp.keyEnvVar).toBe("ANTHROPIC_API_KEY");
@@ -495,71 +611,62 @@ describe("callCodeAgent activity", () => {
     });
   });
 
-  // --- READ mode isolation (#594/#680), gated by CODE_AGENT_SANDBOX_READ ---
-  it("READ mode: by DEFAULT runs in-worker (exec), NOT the sandbox (flag off)", async () => {
-    const runWrite = vi.fn();
-    __codeAgentDeps.runWrite = runWrite as never;
-    // Save/restore rather than a bare delete: a dev shell that exports the flag would
-    // otherwise have it stripped for every later test in this file (order-dependent
-    // failures). Same finally-restore shape as the tests below.
+  // --- READ mode is ALWAYS sandboxed (#594/#680) -------------------------------------------
+  // The CODE_AGENT_SANDBOX_READ opt-in is gone along with the in-worker exec it guarded. These
+  // tests are the regression fence: there must be no config under which a read run happens
+  // anywhere but the sandbox.
+  it("READ mode dispatches to the sandbox with read-only argv and no PR — no flag involved", async () => {
+    const out = await callCodeAgent(
+      { ...CFG, repo: "acme/widgets", connectionId: "conn-gh" },
+      {},
+      META,
+    );
+    expect(runWrite).toHaveBeenCalledOnce();
+    const wp = runWrite.mock.calls[0][0];
+    expect(wp.mode).toBe("read");
+    expect(wp.openPr).toBe(false); // read never opens a PR
+    expect(wp.agentArgs).toContain("plan"); // read-only argv
+    expect(out.output.diff).toBeUndefined(); // a read run makes no edits
+  });
+
+  it("READ mode with NO repo still goes to the sandbox (the runner's ephemeral workspace)", async () => {
+    // This is the case that used to be the un-isolated in-worker exec — a plain "ask the agent"
+    // node. It must NOT have become a config error, and it must NOT run locally.
+    const out = await callCodeAgent(CFG, {}, META); // CFG has no mode/repo → read, no repo
+    expect(runWrite).toHaveBeenCalledOnce();
+    const wp = runWrite.mock.calls[0][0];
+    expect(wp.mode).toBe("read");
+    expect(wp.repo).toBeUndefined();
+    expect(wp.connectionId).toBeUndefined();
+    expect(out.output.result).toContain("no issues");
+  });
+
+  it("even with the removed flag set to 'true', behaviour is identical (it is not read any more)", async () => {
     const prev = process.env.CODE_AGENT_SANDBOX_READ;
-    delete process.env.CODE_AGENT_SANDBOX_READ;
+    process.env.CODE_AGENT_SANDBOX_READ = "true";
     try {
-      await callCodeAgent(CFG, {}, META); // CFG has no mode → read
-      expect(exec).toHaveBeenCalledOnce();
-      expect(runWrite).not.toHaveBeenCalled();
+      await callCodeAgent(CFG, {}, META);
+      expect(runWrite).toHaveBeenCalledOnce();
     } finally {
+      // Restore, don't blanket-delete: a dev shell exporting the flag would otherwise have it
+      // stripped for every later test in this file (order-dependent failures).
       if (prev === undefined) delete process.env.CODE_AGENT_SANDBOX_READ;
       else process.env.CODE_AGENT_SANDBOX_READ = prev;
     }
   });
 
-  it("READ mode: with CODE_AGENT_SANDBOX_READ=true dispatches to the sandbox (runWrite, mode:read), NOT in-worker exec", async () => {
-    const runWrite = vi.fn().mockResolvedValue({
-      exitCode: 0,
-      stdout: envelope(),
-      diff: "",
+  it("a read node WITH a repo but no connection is a non-retryable config failure", async () => {
+    await expect(
+      callCodeAgent({ ...CFG, repo: "acme/widgets" }, {}, META),
+    ).rejects.toMatchObject({
+      type: "CODE_AGENT_READ_CONFIG",
+      nonRetryable: true,
     });
-    __codeAgentDeps.runWrite = runWrite as never;
-    const prevFlag = process.env.CODE_AGENT_SANDBOX_READ;
-    process.env.CODE_AGENT_SANDBOX_READ = "true";
-    try {
-      const out = await callCodeAgent(
-        { ...CFG, repo: "acme/widgets", connectionId: "conn-gh" },
-        {},
-        META,
-      );
-      expect(runWrite).toHaveBeenCalledOnce();
-      expect(exec).not.toHaveBeenCalled();
-      const wp = runWrite.mock.calls[0][0];
-      expect(wp.mode).toBe("read");
-      expect(wp.openPr).toBe(false); // read never opens a PR
-      expect(wp.agentArgs).toContain("plan"); // read-only argv
-      expect(out.output.diff).toBeUndefined(); // a read run makes no edits
-    } finally {
-      // Restore, don't blanket-delete — see the save/restore note above.
-      if (prevFlag === undefined) delete process.env.CODE_AGENT_SANDBOX_READ;
-      else process.env.CODE_AGENT_SANDBOX_READ = prevFlag;
-    }
-  });
-
-  it("READ mode: sandboxed read without repo/connectionId is a non-retryable config failure", async () => {
-    const prevFlag = process.env.CODE_AGENT_SANDBOX_READ;
-    process.env.CODE_AGENT_SANDBOX_READ = "true";
-    try {
-      await expect(callCodeAgent(CFG, {}, META)).rejects.toMatchObject({
-        type: "CODE_AGENT_READ_CONFIG",
-        nonRetryable: true,
-      });
-    } finally {
-      // Restore, don't blanket-delete — see the save/restore note above.
-      if (prevFlag === undefined) delete process.env.CODE_AGENT_SANDBOX_READ;
-      else process.env.CODE_AGENT_SANDBOX_READ = prevFlag;
-    }
+    expect(runWrite).not.toHaveBeenCalled();
   });
 
   it("surfaces a small trace INLINE on the node output", async () => {
-    exec.mockResolvedValue({ stdout: streamLog(), exitCode: 0 });
+    runWrite.mockResolvedValue({ stdout: streamLog(), exitCode: 0, diff: "" });
     const out = await callCodeAgent(CFG, {}, META);
     expect(Array.isArray(out.output.trace)).toBe(true);
     const tools = (
@@ -582,7 +689,7 @@ describe("callCodeAgent activity", () => {
       ),
       envelope(),
     ].join("\n");
-    exec.mockResolvedValue({ stdout: lines, exitCode: 0 });
+    runWrite.mockResolvedValue({ stdout: lines, exitCode: 0, diff: "" });
     const out = await callCodeAgent(CFG, {}, META);
     // The trace became a claim-check REFERENCE, not an inline blob.
     expect(isClaimCheck(out.output.trace)).toBe(true);
@@ -610,12 +717,13 @@ describe("callCodeAgent — structured output", () => {
   };
 
   it("passes the schema to the CLI and returns the parsed object", async () => {
-    exec.mockResolvedValue({
+    runWrite.mockResolvedValue({
       stdout: envelope({
         result: '{"severity":"high"}',
         structured_output: { severity: "high" },
       }),
       exitCode: 0,
+      diff: "",
     });
 
     const res = await callCodeAgent(
@@ -624,7 +732,7 @@ describe("callCodeAgent — structured output", () => {
       META,
     );
 
-    const args = exec.mock.calls[0][1] as string[];
+    const args = runWrite.mock.calls[0][0].agentArgs as string[];
     const i = args.indexOf("--json-schema");
     expect(i).toBeGreaterThan(-1);
     expect(JSON.parse(args[i + 1])).toEqual(SCHEMA);
@@ -634,11 +742,15 @@ describe("callCodeAgent — structured output", () => {
   });
 
   it("sends no --json-schema when the node declares none", async () => {
-    exec.mockResolvedValue({ stdout: envelope({ result: "a plan" }), exitCode: 0 });
+    runWrite.mockResolvedValue({
+      stdout: envelope({ result: "a plan" }),
+      exitCode: 0,
+      diff: "",
+    });
 
     const res = await callCodeAgent(CFG, undefined, META);
 
-    expect(exec.mock.calls[0][1]).not.toContain("--json-schema");
+    expect(runWrite.mock.calls[0][0].agentArgs).not.toContain("--json-schema");
     expect(res.output.structured).toBeUndefined();
   });
 
@@ -670,8 +782,8 @@ describe("callCodeAgent — structured output", () => {
         META,
       ),
     ).rejects.toMatchObject({ nonRetryable: true });
-    // Never spawned — the refusal is BEFORE the CLI runs, so no tokens are spent.
-    expect(exec).not.toHaveBeenCalled();
+    // Never dispatched — the refusal is BEFORE the CLI runs, so no tokens are spent.
+    expect(runWrite).not.toHaveBeenCalled();
   });
 
   it("names the fix in the refusal", async () => {
@@ -690,9 +802,10 @@ describe("callCodeAgent — structured output", () => {
   /** A CLI that returned the wrong SHAPE must not reach ctx as structured data. */
   it("ignores a non-object structured_output", async () => {
     for (const bad of ["a string", 42, ["a"], null]) {
-      exec.mockResolvedValue({
+      runWrite.mockResolvedValue({
         stdout: envelope({ result: "x", structured_output: bad }),
         exitCode: 0,
+        diff: "",
       });
       const res = await callCodeAgent(
         { ...CFG, outputSchema: SCHEMA },

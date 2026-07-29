@@ -23,7 +23,14 @@ describe("loadConfig", () => {
   it("uses safe defaults when optional vars are absent", () => {
     const cfg = loadConfig({ SANDBOX_RUNNER_TOKEN: "t" });
     expect(cfg.network).toBe("naary-sandbox-internal");
-    expect(cfg.image).toBe("naary-claude-sandbox:latest");
+    // One image PER TOOL since #680, each with its own DISTINCT default — a missing override
+    // must never fall back to another tool's image (that was #933's cursor-argv-to-claude bug).
+    expect(cfg.images).toEqual({
+      claude: "naary-claude-sandbox:latest",
+      cursor: "naary-cursor-sandbox:latest",
+      copilot: "naary-copilot-sandbox:latest",
+      gemini: "naary-gemini-sandbox:latest",
+    });
     expect(cfg.limits.memoryMb).toBe(2048);
   });
 });

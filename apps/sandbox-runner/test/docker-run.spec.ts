@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  ALLOWED_KEY_ENV_VARS_BY_TOOL,
   ALLOWED_SANDBOX_IMAGES,
+  assertKeyEnvVarForTool,
+  assertPinnedImage,
   buildSandboxDockerArgs,
+  DEFAULT_SANDBOX_IMAGES,
+  isSandboxTool,
+  SANDBOX_TOOLS,
   type SandboxRunSpec,
 } from "../src/docker-run";
 
@@ -93,6 +99,109 @@ describe("buildSandboxDockerArgs", () => {
       expect(() => buildSandboxDockerArgs({ ...SPEC, workdir })).toThrow(
         /workdir must be an absolute path/,
       );
+    }
+  });
+
+  it("does NOT attach stdin (-i): the CLI must see EOF, not an open empty pipe", () => {
+    // The api's old in-process `execFile` left the child's stdin an OPEN pipe, so `claude -p`
+    // blocked ~3s waiting for EOF and could exit 1 — that had its own regression suite before
+    // #680 moved the run here. `docker run` without `-i` gives the container no stdin at all, so
+    // the CLI sees EOF immediately. Adding `-i`/`-t` would silently resurrect that bug.
+    expect(args).not.toContain("-i");
+    expect(args).not.toContain("-t");
+    expect(args).not.toContain("--interactive");
+  });
+});
+
+/**
+ * ONE IMAGE PER TOOL (#680). Before this, `ALLOWED_SANDBOX_IMAGES` pinned only the claude image,
+ * so a cursor/copilot argv was dispatched to a `claude` ENTRYPOINT — the latent bug #933 found.
+ * These tests pin the two properties that make that impossible now: every tool has a DISTINCT
+ * pinned image, and each tool's credential vars are separately allowlisted.
+ */
+describe("per-tool images + key vars", () => {
+  it("every tool has its own DISTINCT pinned image (never a fallback to another tool's)", () => {
+    const images = Object.values(DEFAULT_SANDBOX_IMAGES);
+    expect(images).toHaveLength(SANDBOX_TOOLS.length);
+    expect(new Set(images).size).toBe(images.length); // all distinct
+    for (const image of images) expect(ALLOWED_SANDBOX_IMAGES).toContain(image);
+  });
+
+  it("assertPinnedImage accepts every tool's image and nothing else", () => {
+    for (const tool of SANDBOX_TOOLS) {
+      expect(() =>
+        assertPinnedImage(DEFAULT_SANDBOX_IMAGES[tool]),
+      ).not.toThrow();
+    }
+    expect(() => assertPinnedImage("naary-claude-sandbox")).toThrow(
+      /un-pinned image/,
+    ); // untagged ≠ pinned
+    expect(() => assertPinnedImage("evil/pwn:latest")).toThrow(
+      /un-pinned image/,
+    );
+  });
+
+  it("isSandboxTool is a CLOSED set — a request can name a tool, never an image", () => {
+    for (const tool of SANDBOX_TOOLS) expect(isSandboxTool(tool)).toBe(true);
+    for (const bad of [
+      "bash",
+      "naary-claude-sandbox:latest",
+      "",
+      null,
+      42,
+      { tool: "claude" },
+    ]) {
+      expect(isSandboxTool(bad)).toBe(false);
+    }
+  });
+
+  it("a tool may forward only ITS OWN credential var, not merely some tool's", () => {
+    expect(() =>
+      assertKeyEnvVarForTool("ANTHROPIC_API_KEY", "claude"),
+    ).not.toThrow();
+    expect(() =>
+      assertKeyEnvVarForTool("CLAUDE_CODE_OAUTH_TOKEN", "claude"),
+    ).not.toThrow();
+    expect(() =>
+      assertKeyEnvVarForTool("CURSOR_API_KEY", "cursor"),
+    ).not.toThrow();
+    expect(() =>
+      assertKeyEnvVarForTool("COPILOT_GITHUB_TOKEN", "copilot"),
+    ).not.toThrow();
+    expect(() =>
+      assertKeyEnvVarForTool("GEMINI_API_KEY", "gemini"),
+    ).not.toThrow();
+    // Cross-tool forwarding is refused — a copilot GitHub token must not reach the claude box.
+    expect(() =>
+      assertKeyEnvVarForTool("COPILOT_GITHUB_TOKEN", "claude"),
+    ).toThrow(/not valid for the "claude" sandbox/);
+    expect(() => assertKeyEnvVarForTool("ANTHROPIC_API_KEY", "gemini")).toThrow(
+      /not valid for the "gemini" sandbox/,
+    );
+    // …and an arbitrary var is still refused everywhere.
+    expect(() =>
+      assertKeyEnvVarForTool("AWS_SECRET_ACCESS_KEY", "cursor"),
+    ).toThrow(/not valid/);
+  });
+
+  it("the isolation argv is IDENTICAL across tools apart from the image + key var name", () => {
+    const normalize = (tool: (typeof SANDBOX_TOOLS)[number]) =>
+      buildSandboxDockerArgs({
+        ...SPEC,
+        image: DEFAULT_SANDBOX_IMAGES[tool],
+        keyEnvVar: ALLOWED_KEY_ENV_VARS_BY_TOOL[tool][0],
+      }).map((a) =>
+        a === DEFAULT_SANDBOX_IMAGES[tool]
+          ? "<IMAGE>"
+          : a === ALLOWED_KEY_ENV_VARS_BY_TOOL[tool][0]
+            ? "<KEY_VAR>"
+            : a,
+      );
+    const claude = normalize("claude");
+    for (const tool of SANDBOX_TOOLS) {
+      // Same --network, --read-only, --tmpfs, no-new-privileges, --cap-drop ALL, cpu/memory/pids
+      // caps and proxy vars for every tool: adding a CLI never buys it a weaker sandbox.
+      expect(normalize(tool), tool).toEqual(claude);
     }
   });
 });

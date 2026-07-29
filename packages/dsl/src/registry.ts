@@ -342,7 +342,18 @@ const CONFIG_SCHEMAS = {
     cacheSystemPrompt: z.boolean().optional(),
   }),
   codeAgent: z.object({
-    tool: z.enum(["claude", "cursor", "copilot"]).optional(),
+    /**
+     * The coding CLI to run. Each has its OWN pinned sandbox image (deploy/sandbox/<tool>.Dockerfile)
+     * that the runner selects — a node never names an image. The custom `error` matters because an
+     * API-authored or imported graph naming a tool we don't have must fail the save gate with a
+     * sentence that says what to change, not a bare enum complaint.
+     */
+    tool: z
+      .enum(["claude", "cursor", "copilot", "gemini"], {
+        error:
+          "codeAgent `tool` must be one of: claude, cursor, copilot, gemini. Each runs in its own isolated sandbox image; add that tool's credential in Integrations → Code Agent first.",
+      })
+      .optional(),
     prompt: z.string(),
     /**
      * JSON Schema for STRUCTURED output — same shape as the agent node's `outputSchema`. When set,

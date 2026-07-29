@@ -7,6 +7,7 @@ import {
   validateAnthropicKey,
   validateClaudeCodeKey,
   validateCopilotKey,
+  validateGeminiCliKey,
   validateCursorKey,
   validateGoogleKey,
   validateOpenAiKey,
@@ -46,6 +47,9 @@ const defaultValidator: ProviderValidator = (provider, apiKey) => {
   // claude-code — a live run is the real check. See code-agent-drivers.ts (cursor/copilot).
   if (provider === "cursor") return validateCursorKey(apiKey);
   if (provider === "copilot") return validateCopilotKey(apiKey);
+  // The Gemini CLI slot is a real Gemini API key, so it gets a LIVE check (unlike the other CLI
+  // slots, whose credentials have no cheap probe). Distinct slot from the `google` model key.
+  if (provider === "gemini-cli") return validateGeminiCliKey(apiKey);
   throw new Error(`Unsupported provider: ${provider}`);
 };
 

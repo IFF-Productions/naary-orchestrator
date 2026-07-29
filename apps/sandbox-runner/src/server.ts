@@ -6,7 +6,9 @@ import {
   type Exec,
   type RunResult,
   runSandbox,
+  type Workspace,
 } from "./run-sandbox";
+import type { SandboxTool } from "./docker-run";
 
 /** Constant-time bearer check (the token gates Docker/host-root access). */
 function authorized(req: IncomingMessage, token: string): boolean {
@@ -79,6 +81,8 @@ export function createRunnerServer(cfg: RunnerConfig, exec?: Exec): Server {
         const raw = await readBody(req, 8 * 1024 * 1024);
         let parsed: {
           runId?: string;
+          workspace?: Workspace;
+          tool?: SandboxTool;
           agentArgs?: string[];
           authKey?: string;
           keyEnvVar?: string;
@@ -91,7 +95,11 @@ export function createRunnerServer(cfg: RunnerConfig, exec?: Exec): Server {
         }
         const result: RunResult = await runSandbox(
           {
+            // Absent ⇒ "" ⇒ the runId guard rejects it in repo mode; ephemeral ignores it.
             runId: parsed.runId ?? "",
+            workspace: parsed.workspace,
+            // Validated against the closed SANDBOX_TOOLS set inside runSandbox.
+            tool: parsed.tool,
             agentArgs: parsed.agentArgs ?? [],
             authKey: parsed.authKey ?? "",
             keyEnvVar: parsed.keyEnvVar,
