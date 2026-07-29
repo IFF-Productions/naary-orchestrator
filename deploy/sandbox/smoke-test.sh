@@ -17,7 +17,19 @@
 # FAIL = it died before that (ENOENT / EACCES / "executable file not found" / "failed to map
 #        segment from shared object").
 #
-# Usage:  deploy/sandbox/smoke-test.sh [tool …]     (default: all four)
+# Usage:  deploy/sandbox/smoke-test.sh [tool …]            (default: all four)
+#         PROXIED=1 deploy/sandbox/smoke-test.sh [tool …]
+#
+# PROXIED=1 is the stronger check and the one that validates squid-allowlist.conf: it puts the CLI
+# on the internal (no-gateway) network behind the allowlist proxy, exactly as the runner does. A
+# bogus key still discriminates — "invalid API key" means the host is allowlisted AND reachable,
+# while a proxy/connect failure means the allowlist is wrong. This is how the `.cursor.sh` entry
+# was found: with only api.cursor.com the CLI could not reach its API, even though curl to
+# api.cursor.com through the same proxy returned 200.
+#
+# Bring the proxy up first for PROXIED=1:
+#   SANDBOX_RUNNER_TOKEN=x docker compose -f deploy/sandbox/docker-compose.sandbox.yml up -d sandbox-proxy
+#
 # Build the images first — see README.md.
 set -u
 
@@ -25,8 +37,7 @@ WORKDIR="$(mktemp -d)"
 chmod 0777 "$WORKDIR"
 trap 'rm -rf "$WORKDIR"' EXIT
 
-# Keep in lockstep with buildSandboxDockerArgs (apps/sandbox-runner/src/docker-run.ts). The network
-# and proxy are deliberately omitted: this checks STARTUP, and egress-test.sh covers containment.
+# Keep in lockstep with buildSandboxDockerArgs (apps/sandbox-runner/src/docker-run.ts).
 ISO=(
   --rm --read-only
   --tmpfs /tmp:size=256m
@@ -36,8 +47,17 @@ ISO=(
   --cap-drop ALL
   --pids-limit 256 --memory 2048m --cpus 1.0
 )
+# Default: host network — checks STARTUP only. PROXIED=1 adds the real egress boundary.
+if [ "${PROXIED:-0}" = "1" ]; then
+  ISO+=(--network "${SANDBOX_NETWORK:-naary-sandbox-internal}"
+        -e "HTTPS_PROXY=${SANDBOX_PROXY_URL:-http://naary-sandbox-proxy:3128}"
+        -e "HTTP_PROXY=${SANDBOX_PROXY_URL:-http://naary-sandbox-proxy:3128}")
+  echo "mode: PROXIED — internal network + allowlist proxy (validates squid-allowlist.conf)"
+else
+  echo "mode: startup only — re-run with PROXIED=1 to validate the egress allowlist"
+fi
 
-BAD_START='ENOENT|EACCES|executable file not found|failed to map segment|Cannot find module|not found for linux'
+BAD_START='ENOENT|EACCES|executable file not found|failed to map segment|Cannot find module|not found for linux|Failed to reach|proxy'
 AUTH_OK='invalid api key|api key not valid|API key is invalid|authenticated with GitHub|API_KEY_INVALID'
 fail=0
 
