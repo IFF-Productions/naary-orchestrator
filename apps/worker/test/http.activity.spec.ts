@@ -96,6 +96,33 @@ describe("callHttpRequest activity", () => {
     ).rejects.toMatchObject({ nonRetryable: true, type: "HTTP_ERROR_STATUS" });
   });
 
+  it("that failure carries the redacted request/response in its details (#916)", async () => {
+    // Throwing writes nothing to ctx, so without this the step card has only a message.
+    authMock.mockResolvedValue({ Authorization: "Bearer tok-abc-123" });
+    fetchMock.mockResolvedValue(res(503, { message: "upstream down" }));
+
+    const err = await callHttpRequest(
+      {
+        ...CFG,
+        method: "POST",
+        body: { hello: "world" },
+        connectionId: "conn-1",
+        failOnErrorStatus: true,
+      },
+      {},
+      META,
+    ).catch((e) => e);
+
+    const http = err.details[0].http;
+    expect(http.request.method).toBe("POST");
+    expect(http.request.url).toBe("https://api.example.com/v1/things");
+    expect(http.request.headers.authorization).toBe("[REDACTED]");
+    expect(http.request.body.text).toBe('{"hello":"world"}');
+    expect(http.response.status).toBe(503);
+    expect(http.response.body.text).toBe('{"message":"upstream down"}');
+    expect(JSON.stringify(err.details)).not.toContain("tok-abc-123");
+  });
+
   it("attaches the connection's auth header, resolved in-activity (never in config)", async () => {
     authMock.mockResolvedValue({ Authorization: "Bearer tok" });
     fetchMock.mockResolvedValue(res(200, {}));
@@ -498,6 +525,31 @@ describe("callHttpRequest — $secrets (in-activity resolution, Tier-1 §4)", ()
     // …but never rides back in the result (which enters Temporal history).
     expect(JSON.stringify(result)).not.toContain(SECRET);
     expect(JSON.stringify(result)).not.toContain("$secrets");
+  });
+
+  it("WITHHOLDS a secret-bearing body from the failure capture (#916), and says why", async () => {
+    // A resolved $secret is an OPAQUE string — no key-name or shape scrubber can find it — so
+    // the capture must not record the body at all. Tier-1 §4: no secret in Temporal history.
+    secretMock.mockResolvedValue(SECRET);
+    fetchMock.mockResolvedValue(res(400, { message: "Bad Request" }));
+
+    const err = await callHttpRequest(
+      {
+        method: "POST",
+        url: "https://api.example.com/v1/things",
+        body: { auth: { token: "{{ $secrets.API_KEY }}" }, keep: "plain" },
+        failOnErrorStatus: true,
+      },
+      {},
+      { ...META, environmentId: "env-prod" },
+    ).catch((e) => e);
+
+    const http = err.details[0].http;
+    expect(http.request.body).toBeUndefined();
+    expect(http.request.bodyWithheld).toContain("resolved $secret");
+    // The response is still captured — it's the half that explains the 400.
+    expect(http.response.body.text).toBe('{"message":"Bad Request"}');
+    expect(JSON.stringify(err.details)).not.toContain(SECRET);
   });
 
   it("DROPS a secret-bearing body on a CROSS-origin next page (no body leak off-host)", async () => {

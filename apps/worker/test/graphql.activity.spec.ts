@@ -182,4 +182,46 @@ describe("callGraphQL activity", () => {
       type: "GRAPHQL_BAD_RESPONSE",
     });
   });
+
+  it("both GraphQL failures carry the redacted request/response (#916)", async () => {
+    // The HTML page IS the diagnosis for a non-JSON response — it names the proxy that
+    // answered instead of the GraphQL endpoint.
+    fetchMock.mockResolvedValue(res(502, "<html>proxy error</html>"));
+    const bad = await callGraphQL(CFG, {}, META).catch((e) => e);
+    expect(bad.details[0].http.request.method).toBe("POST");
+    expect(bad.details[0].http.request.url).toBe(CFG.url);
+    expect(bad.details[0].http.response.body.text).toContain("proxy error");
+    // The GraphQL query rides in the request body — that's what you want to see.
+    expect(bad.details[0].http.request.body.text).toContain("user(id:$id)");
+
+    fetchMock.mockResolvedValue(res(200, { errors: [{ message: "boom" }] }));
+    const errs = await callGraphQL(
+      { ...CFG, failOnErrors: true },
+      {},
+      META,
+    ).catch((e) => e);
+    expect(errs.details[0].http.response.body.text).toContain("boom");
+  });
+
+  it("WITHHOLDS the body when a $secret was resolved into the variables (#916)", async () => {
+    const SECRET = "gql-secret-value";
+    secretMock.mockResolvedValue(SECRET);
+    fetchMock.mockResolvedValue(res(200, { errors: [{ message: "denied" }] }));
+
+    const err = await callGraphQL(
+      {
+        ...CFG,
+        variables: { token: "{{ $secrets.GQL }}" },
+        failOnErrors: true,
+      },
+      {},
+      { ...META, environmentId: "env-prod" },
+    ).catch((e) => e);
+
+    expect(err.details[0].http.request.body).toBeUndefined();
+    expect(err.details[0].http.request.bodyWithheld).toContain(
+      "resolved $secret",
+    );
+    expect(JSON.stringify(err.details)).not.toContain(SECRET);
+  });
 });

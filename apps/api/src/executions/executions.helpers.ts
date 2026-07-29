@@ -1,4 +1,5 @@
 import { BadRequestException } from "@nestjs/common";
+import { defaultPayloadConverter } from "@temporalio/client";
 import {
   APPROVAL_CTX_KEY,
   NODE_TIMES_CTX_KEY,
@@ -9,6 +10,9 @@ import {
 import type { GraphSnapshot } from "../graphs/graphs.service";
 import {
   type ApproverSummary,
+  type HttpFailureBodyView,
+  type HttpFailureView,
+  type RawFailure,
   type RawHistoryEvent,
   type RunEvent,
   TERMINAL_STATUSES,
@@ -31,6 +35,128 @@ export function costUsdFrom(ctx: Record<string, unknown>): number | null {
   return typeof c === "number" && Number.isFinite(c) ? c : null;
 }
 
+// --- The failing node's redacted request/response (#916) -------------------------------------
+//
+// `queryHistory` otherwise reads PLAIN history fields only, on the stated grounds that no payload
+// decoding means nothing secret can leak. The decode below is a DELIBERATE exception, and narrow:
+// the only thing read is the `http` key the worker's `captureHttpFailure` writes, which is already
+// failures-only, header-allowlisted, secret-scrubbed and truncated AT THE SOURCE — before it ever
+// reached history. Nothing else in `details` is looked at, and the decoded value is rebuilt field
+// by field rather than spread, so an unexpected shape can't ride into the response.
+//
+// Total by construction: this runs while rendering an already-FAILED run, so a throw here would
+// replace a diagnosable error with a 500.
+
+/** Hard caps applied to the DECODED value. The worker's caps are the real ones; these exist so a
+ *  payload written by an older/other worker still can't bloat the run-detail response. */
+const MAX_URL_CHARS = 1000;
+const MAX_HEADERS = 60;
+const MAX_HEADER_CHARS = 300;
+const MAX_BODY_CHARS = 4096;
+const MAX_CAPTURE_BYTES = 16_384;
+/** Matches `failureChain`'s bound — a cyclic or absurdly deep chain can't spin here. */
+const MAX_CAUSE_DEPTH = 12;
+
+function isObj(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+function str(v: unknown, max: number): string | undefined {
+  return typeof v === "string" && v.length > 0 ? v.slice(0, max) : undefined;
+}
+
+/** Flat string→string only. A nested/array value is dropped, never stringified. */
+function headerMap(v: unknown): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!isObj(v)) return out;
+  for (const [k, val] of Object.entries(v).slice(0, MAX_HEADERS)) {
+    if (typeof val === "string")
+      out[k.slice(0, MAX_HEADER_CHARS)] = val.slice(0, MAX_HEADER_CHARS);
+  }
+  return out;
+}
+
+function bodyView(v: unknown): HttpFailureBodyView | undefined {
+  if (!isObj(v)) return undefined;
+  const text = str(v.text, MAX_BODY_CHARS);
+  if (text === undefined) return undefined;
+  return {
+    text,
+    // The WORKER is the authority on whether it cut anything. Re-deriving this from
+    // `text.length < bytes` reads as truncated on every body that merely had a credential
+    // scrubbed out of it — redaction shrinks the text while `bytes` stays the wire length.
+    truncated: v.truncated === true,
+    bytes: typeof v.bytes === "number" && v.bytes >= 0 ? v.bytes : text.length,
+  };
+}
+
+/** Rebuild the capture field by field, dropping anything that isn't the shape we expect. */
+export function sanitizeHttpFailure(v: unknown): HttpFailureView | undefined {
+  if (!isObj(v) || !isObj(v.request)) return undefined;
+  const r = v.request;
+  const method = str(r.method, 16);
+  const url = str(r.url, MAX_URL_CHARS);
+  if (!method || !url) return undefined;
+
+  const out: HttpFailureView = {
+    request: { method, url, headers: headerMap(r.headers) },
+  };
+  const nodeId = str(v.nodeId, 200);
+  if (nodeId) out.nodeId = nodeId;
+  const reqBody = bodyView(r.body);
+  if (reqBody) out.request.body = reqBody;
+  const withheld = str(r.bodyWithheld, 200);
+  if (withheld) out.request.bodyWithheld = withheld;
+
+  const res = v.response;
+  if (isObj(res) && typeof res.status === "number") {
+    const response: NonNullable<HttpFailureView["response"]> = {
+      status: res.status,
+      headers: headerMap(res.headers),
+    };
+    const statusText = str(res.statusText, 200);
+    if (statusText) response.statusText = statusText;
+    const resBody = bodyView(res.body);
+    if (resBody) response.body = resBody;
+    out.response = response;
+  }
+
+  // Last guard: a capture that somehow got large is dropped WHOLE rather than half-shown —
+  // a run's execution log must stay a small response.
+  return JSON.stringify(out).length > MAX_CAPTURE_BYTES ? undefined : out;
+}
+
+/**
+ * Walk a Temporal failure's cause chain for the first `ApplicationFailure` whose details carry an
+ * `http` capture.
+ *
+ * The chain rather than a fixed level, because Temporal wraps: `WorkflowExecutionFailed` →
+ * `ActivityTaskFailed` → the `ApplicationFailure` the activity actually threw. And the FIRST node
+ * with details is not necessarily the right one — `toSanitizedRetryable` attaches `{statusCode}` —
+ * so the walk stops on the presence of `http`, not on the presence of details.
+ */
+export function httpFailureFrom(
+  failure: RawFailure | undefined,
+): HttpFailureView | undefined {
+  let node = failure;
+  for (let depth = 0; node && depth < MAX_CAUSE_DEPTH; depth++) {
+    const payload = node.applicationFailureInfo?.details?.payloads?.[0];
+    if (payload) {
+      try {
+        const decoded = defaultPayloadConverter.fromPayload(payload as never);
+        if (isObj(decoded) && decoded.http !== undefined) {
+          const view = sanitizeHttpFailure(decoded.http);
+          if (view) return view;
+        }
+      } catch {
+        // A payload we can't decode is not a reason to fail the history read.
+      }
+    }
+    node = node.cause;
+  }
+  return undefined;
+}
+
 export function mapHistoryEvent(e: RawHistoryEvent): RunEvent | null {
   const id = Number(e.eventId ?? 0);
   const at = e.eventTime?.seconds
@@ -49,13 +175,19 @@ export function mapHistoryEvent(e: RawHistoryEvent): RunEvent | null {
     };
   if (e.activityTaskCompletedEventAttributes)
     return { ...base, kind: "activity", label: "Activity completed" };
-  if (e.activityTaskFailedEventAttributes)
+  if (e.activityTaskFailedEventAttributes) {
+    const failure = e.activityTaskFailedEventAttributes.failure;
+    const http = httpFailureFrom(failure);
     return {
       ...base,
       kind: "error",
       label: "Activity failed",
-      detail: e.activityTaskFailedEventAttributes.failure?.message,
+      detail: failure?.message,
+      // The message alone left the step card saying "No output was recorded for this step"
+      // (#916) — attach the redacted request/response the activity captured, when it did.
+      ...(http ? { http } : {}),
     };
+  }
   if (e.workflowExecutionSignaledEventAttributes)
     return {
       ...base,
@@ -72,13 +204,17 @@ export function mapHistoryEvent(e: RawHistoryEvent): RunEvent | null {
     return { ...base, kind: "timer", label: "Timer fired" };
   if (e.workflowExecutionCompletedEventAttributes)
     return { ...base, kind: "completed", label: "Run completed" };
-  if (e.workflowExecutionFailedEventAttributes)
+  if (e.workflowExecutionFailedEventAttributes) {
+    const failure = e.workflowExecutionFailedEventAttributes.failure;
+    const http = httpFailureFrom(failure);
     return {
       ...base,
       kind: "error",
       label: "Run failed",
-      detail: e.workflowExecutionFailedEventAttributes.failure?.message,
+      detail: failure?.message,
+      ...(http ? { http } : {}),
     };
+  }
   if (e.workflowExecutionContinuedAsNewEventAttributes)
     return { ...base, kind: "continued", label: "Continued as new" };
   return null; // workflow-task / marker / version noise — skip

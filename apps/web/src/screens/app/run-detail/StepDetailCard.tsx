@@ -8,6 +8,8 @@
  * SEPARATE run-level panel (RunDetail's "Execution log"), not repeated per step.
  */
 import { Icon, type IconName } from "../../../components";
+import type { HttpFailure } from "../../../lib/api";
+import { HttpFailureDetail } from "./HttpFailureDetail";
 import { NodeOutputBody } from "./NodeOutputBody";
 import { STEP_FG, STEP_WORD, type StepState } from "./run-view-model";
 
@@ -48,6 +50,12 @@ export interface StepDetail {
   isTriggerInput: boolean;
   /** The failure message when the run died on THIS node (#525); null otherwise. */
   error?: string | null;
+  /**
+   * The redacted request/response the failing node captured (#916), when it was an HTTP-ish node
+   * (integration / httpRequest / graphQL). Null for every other failure — a node that made no HTTP
+   * call has nothing to show, and we render nothing rather than an empty shell.
+   */
+  http?: HttpFailure | null;
 }
 
 /** `runId` is optional so a caller without one (stories/fixtures) still renders; it's only used
@@ -214,6 +222,9 @@ export function StepDetailCard({
           >
             {step.error}
           </div>
+          {/* The call itself, when this node made one (#916). Sits under the error because it
+              EXPLAINS the error — what we sent and what came back — rather than repeating it. */}
+          {step.http && <HttpFailureDetail http={step.http} />}
         </div>
       )}
 
@@ -231,7 +242,9 @@ export function StepDetailCard({
                 : step.state === "waiting"
                   ? "No output yet — the run resumes here once a decision arrives."
                   : step.state === "error"
-                    ? "This step failed before producing an output — see the error above and the run's Execution log."
+                    ? step.http
+                      ? "This step failed before producing an output — the error and the request/response it made are above."
+                      : "This step failed before producing an output — see the error above and the run's Execution log."
                     : "No output was recorded for this step."}
           </div>
         ) : (

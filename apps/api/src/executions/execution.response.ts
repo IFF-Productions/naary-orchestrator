@@ -302,6 +302,87 @@ export class RunGraphResponse {
   workflowKey!: string | null;
 }
 
+/** A captured body — redacted and truncated by the WORKER, at the moment of failure. */
+export class RunHttpBodyResponse {
+  @ApiProperty({
+    example: '{"message":"Not Found"}',
+    description:
+      "The body, secret-scrubbed and capped at ~2KB. When truncated it ends with an explicit marker.",
+  })
+  text!: string;
+  @ApiProperty({ example: false }) truncated!: boolean;
+  @ApiProperty({
+    example: 23,
+    description:
+      "Size of the ORIGINAL body on the wire — not the length of `text`, which redaction can shrink.",
+  })
+  bytes!: number;
+}
+
+/** The request the failing node actually sent — resolved, not as configured. */
+export class RunHttpRequestResponse {
+  @ApiProperty({ example: "POST" }) method!: string;
+  @ApiProperty({
+    example: "https://api.github.com/repos/acme/app/issues",
+    description:
+      "Absolute URL including query string, with credentials redacted.",
+  })
+  url!: string;
+  @ApiProperty({
+    type: "object",
+    additionalProperties: { type: "string" },
+    example: {
+      authorization: "[REDACTED]",
+      "content-type": "application/json",
+    },
+    description:
+      "Lowercase header names. Values survive ONLY for a small allowlist of provably non-credential headers (content-type, retry-after, x-ratelimit-*, …); everything else reads [REDACTED].",
+  })
+  headers!: Record<string, string>;
+  @ApiProperty({ required: false, type: RunHttpBodyResponse })
+  body?: RunHttpBodyResponse;
+  @ApiProperty({
+    required: false,
+    example: "withheld — this request body carried a resolved $secret",
+    description:
+      "Why the body was not captured. Set when a `{{ $secrets.NAME }}` was resolved into it: the substituted value is opaque, so no scrubber can find it and Tier-1 §4 forbids it entering history.",
+  })
+  bodyWithheld?: string;
+}
+
+/** What came back. Absent when the call failed before any response (DNS, timeout, egress block). */
+export class RunHttpResponseResponse {
+  @ApiProperty({ example: 404 }) status!: number;
+  @ApiProperty({ required: false, example: "Not Found" }) statusText?: string;
+  @ApiProperty({
+    type: "object",
+    additionalProperties: { type: "string" },
+    description: "Same allowlist treatment as the request headers.",
+  })
+  headers!: Record<string, string>;
+  @ApiProperty({ required: false, type: RunHttpBodyResponse })
+  body?: RunHttpBodyResponse;
+}
+
+/**
+ * The redacted request/response an `integration` / `httpRequest` / `graphQL` node captured when it
+ * FAILED (#916). Only ever present on a failure — a successful call captures nothing, because a
+ * response body is customer data and a run's happy path must not accumulate copies of it.
+ */
+export class RunHttpFailureResponse {
+  @ApiProperty({
+    required: false,
+    example: "integration-1",
+    description:
+      "The graph node that made this call. A run's history can hold several failures (a node with onError:'continue' records one and the run carries on), so the reader must not assume the first failure belongs to the node the run died on. Absent on captures written before this field existed.",
+  })
+  nodeId?: string;
+  @ApiProperty({ type: RunHttpRequestResponse })
+  request!: RunHttpRequestResponse;
+  @ApiProperty({ required: false, type: RunHttpResponseResponse })
+  response?: RunHttpResponseResponse;
+}
+
 /** One entry in a run's execution log (derived from Temporal history). */
 export class RunEventResponse {
   @ApiProperty({ example: 12 }) id!: number;
@@ -329,6 +410,13 @@ export class RunEventResponse {
   at!: string | null;
   @ApiProperty({ required: false, example: "Provider returned 429" })
   detail?: string;
+  @ApiProperty({
+    required: false,
+    type: RunHttpFailureResponse,
+    description:
+      "On an error event from an HTTP-ish node: the redacted, truncated request/response it captured. Absent for every other event, and for a failure that made no HTTP call.",
+  })
+  http?: RunHttpFailureResponse;
 }
 
 /**
