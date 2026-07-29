@@ -27,6 +27,13 @@ function ago(iso: string): string {
  * a picker to re-run at a SPECIFIC saved version (newer or older) of THIS run's workflow.
  * Versions are loaded lazily on first open. When the run has no known workflowKey (very old
  * runs) the picker is unavailable and only latest re-run is offered.
+ *
+ * The caret menu also carries "Re-run with debug" — the ONLY place in the app (with the
+ * canvas's "Save & run with debug") that sets the API's `debug` flag, which turns on the
+ * per-node rows the run detail's Execution log already knows how to render. A failed run you
+ * want to understand is exactly the moment for it, hence its home here. It is deliberately a
+ * one-shot action rather than a sticky preference: debug also raises the worker's log volume
+ * for the run, and a toggle left on for weeks does that invisibly.
  */
 export function RerunMenu({
   runId,
@@ -85,12 +92,20 @@ export function RerunMenu({
     }
   }
 
-  async function run(version: number | undefined, e: ReactMouseEvent) {
+  async function run(
+    version: number | undefined,
+    e: ReactMouseEvent,
+    debug = false,
+  ) {
     e.stopPropagation();
     setBusy(true);
     setOpen(false);
     try {
-      const { workflowId } = await api.rerun(runId, version);
+      const { workflowId } = await api.rerun(
+        runId,
+        version,
+        debug ? { debug: true } : undefined,
+      );
       onRerun(workflowId);
     } catch {
       onError?.(
@@ -120,15 +135,15 @@ export function RerunMenu({
       >
         {label}
       </Button>
-      {/* Caret: pick a specific version to re-run at. */}
+      {/* Caret: re-run with debug, or at a specific version. */}
       {workflowKey && (
         <Button
           size={size}
           variant="secondary"
           icon="chevron-down"
           iconOnly
-          title="Re-run at a specific version…"
-          aria-label="Re-run at a specific version"
+          title="Re-run with debug, or at a specific version…"
+          aria-label="More re-run options"
           aria-haspopup="menu"
           aria-expanded={open}
           disabled={busy}
@@ -146,8 +161,10 @@ export function RerunMenu({
             top: "calc(100% + 4px)",
             right: 0,
             zIndex: 30,
-            minWidth: 210,
-            maxHeight: 280,
+            // Wide enough that the debug item's explanation reads as a sentence rather than a
+            // column of two-word lines (the version rows never needed the room).
+            minWidth: 272,
+            maxHeight: 320,
             overflowY: "auto",
             background: "var(--surface)",
             border: "1px solid var(--line)",
@@ -156,6 +173,59 @@ export function RerunMenu({
             padding: 6,
           }}
         >
+          {/* Diagnostics first: the reason someone opens this menu on a run that went wrong.
+              The sub-line is the honest description of what the flag costs — a debug run
+              executes the flow for real AND logs more, so neither is a surprise after the click. */}
+          <button
+            type="button"
+            role="menuitem"
+            onClick={(e) => void run(undefined, e, true)}
+            style={{
+              display: "block",
+              width: "100%",
+              padding: "7px 8px",
+              border: "none",
+              borderRadius: 7,
+              background: "transparent",
+              color: "var(--ink-1)",
+              cursor: "pointer",
+              textAlign: "left",
+              font: "inherit",
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = "var(--brand-soft)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = "transparent";
+            }}
+          >
+            <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <Icon name="activity" size={12} strokeWidth={2} />
+              <span style={{ fontSize: "var(--text-xs)" }}>
+                Re-run with debug
+              </span>
+            </span>
+            <span
+              style={{
+                display: "block",
+                fontSize: 10,
+                lineHeight: 1.4,
+                color: "var(--ink-3)",
+                marginTop: 2,
+              }}
+            >
+              Adds a per-step row (timing, model, tokens, cost, HTTP status) to
+              the new run's Execution log and logs it verbosely in the worker. A
+              real run at the latest version — it repeats the flow's actions and
+              bills its model calls again.
+            </span>
+          </button>
+          <div
+            style={{
+              borderTop: "1px solid var(--line)",
+              margin: "6px 0",
+            }}
+          />
           <div
             style={{
               fontSize: "var(--text-xs)",

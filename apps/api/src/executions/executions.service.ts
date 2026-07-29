@@ -1195,7 +1195,10 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     if (verdict.warnings.includes("at_most_once_node") && graph) {
       const type =
         graph.nodes.find((n) => n.id === verdict.failedNodeId)?.type ?? "";
-      return { ...verdict, warningText: resumeWarningText("at_most_once_node", type) };
+      return {
+        ...verdict,
+        warningText: resumeWarningText("at_most_once_node", type),
+      };
     }
     return verdict;
   }
@@ -1266,7 +1269,11 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
         row.resumeSnapshot,
         getObjectStore(),
       );
-      if (!resolved || typeof resolved !== "object" || Array.isArray(resolved)) {
+      if (
+        !resolved ||
+        typeof resolved !== "object" ||
+        Array.isArray(resolved)
+      ) {
         throw new Error("snapshot did not resolve to an object");
       }
       ctx = resolved as Record<string, unknown>;
@@ -1298,7 +1305,10 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
           stepCount: row.resumeStepCount ?? 0,
           ...(row.resumeMergeArrivals
             ? {
-                mergeArrivals: row.resumeMergeArrivals as Record<string, number>,
+                mergeArrivals: row.resumeMergeArrivals as Record<
+                  string,
+                  number
+                >,
               }
             : {}),
           // The snapshot's ctx may predate the failure, so $vars must be re-read — the interpreter
@@ -1324,6 +1334,10 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     tenantId: string,
     graphVersion?: number,
     actor?: Principal,
+    /** Opt the NEW run into per-run diagnostics (verbose worker logs + the Run Detail's
+     *  per-node debug rows). Never inherited from the original run — "re-run with debug"
+     *  is a deliberate choice made when you want to understand a run that already failed. */
+    debug = false,
   ): Promise<{ workflowId: string }> {
     await this.assertOwner(id, tenantId);
     const row = await getPrisma().execution.findUnique({
@@ -1344,7 +1358,15 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     // workflowKey is the run's OWN key; graphVersion (if given) is resolved against
     // that key inside start() — the caller can't target another workflow's version.
     // No actor forwarded: the gate already ran just above (same key + env).
-    return this.start(tenantId, envId, input, row.workflowKey, graphVersion);
+    return this.start(
+      tenantId,
+      envId,
+      input,
+      row.workflowKey,
+      graphVersion,
+      undefined,
+      debug,
+    );
   }
 
   /** 404 if the execution is unknown, 403 if it belongs to another tenant. See

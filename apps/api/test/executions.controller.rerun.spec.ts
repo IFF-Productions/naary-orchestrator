@@ -31,13 +31,34 @@ describe("ExecutionsController.rerun (body optional)", () => {
       "t1",
       "wf-old",
     );
-    // Trailing undefineds = the optional graphVersion + G1 actor params.
-    expect(rerun).toHaveBeenCalledWith("wf-old", "t1", undefined, undefined);
+    // Trailing undefineds = the optional graphVersion + G1 actor params; debug defaults OFF,
+    // so a bodyless legacy re-run is byte-identical to before the flag was exposed.
+    expect(rerun).toHaveBeenCalledWith(
+      "wf-old",
+      "t1",
+      undefined,
+      undefined,
+      false,
+    );
   });
 
   it("passes an explicit graphVersion through to the service", async () => {
     const { controller, rerun } = makeController();
     await controller.rerun("t1", "wf-old", { graphVersion: 2 });
-    expect(rerun).toHaveBeenCalledWith("wf-old", "t1", 2, undefined);
+    expect(rerun).toHaveBeenCalledWith("wf-old", "t1", 2, undefined, false);
+  });
+
+  // "Re-run with debug" in the run-detail menu POSTs {debug:true} with no version — the run
+  // detail's per-node debug rows exist only for runs started with it.
+  it("passes debug:true through to the service", async () => {
+    const { controller, rerun } = makeController();
+    await controller.rerun("t1", "wf-old", { debug: true });
+    expect(rerun).toHaveBeenCalledWith(
+      "wf-old",
+      "t1",
+      undefined,
+      undefined,
+      true,
+    );
   });
 });

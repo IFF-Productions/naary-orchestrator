@@ -190,7 +190,11 @@ export function useWorkflowActions({
     return key;
   }
 
-  async function run() {
+  /** Save, then start a run. `debug: true` (the "Save & run with debug" entry) opts THAT run
+   *  into diagnostics: the worker logs its activities at DEBUG level and the interpreter marks
+   *  the run so the Run Detail's Execution log shows a per-node row. Per-run and never sticky —
+   *  the plain "Save & run" path is unchanged. */
+  async function run(opts?: { debug?: boolean }) {
     // Parse the optional run input BEFORE any save, so a malformed payload doesn't
     // mutate state. Blank ⇒ undefined (server uses the Start node's sampleInput).
     let input: Record<string, unknown> | undefined;
@@ -216,7 +220,11 @@ export function useWorkflowActions({
     try {
       const key = await save();
       if (!key) return;
-      const { workflowId } = await api.startExecution(key, input);
+      const { workflowId } = await api.startExecution(
+        key,
+        input,
+        opts?.debug ? { debug: true } : undefined,
+      );
       navigate(`/app/runs/${encodeURIComponent(workflowId)}`);
     } catch (e) {
       if (e instanceof UnauthorizedError) {

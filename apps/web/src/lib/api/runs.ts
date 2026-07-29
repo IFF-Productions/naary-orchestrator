@@ -40,13 +40,22 @@ export const runsApi = {
   // optional run input + which stored graph (workflowKey) to run (default "default").
   // `input` overrides the Start node's sampleInput for this run; omit it to use the
   // sample (server-side precedence: body.input → Start sampleInput → fallback).
+  // `debug` opts THIS run into diagnostics: verbose worker logs plus the per-node rows the
+  // Run Detail's Execution log renders (the interpreter seeds ctx.__debug). Only sent when
+  // true, so an ordinary run's body is byte-identical to before.
   async startExecution(
     workflowKey?: string,
     input?: Record<string, unknown>,
+    opts?: { debug?: boolean },
   ): Promise<StartExecutionResponse> {
-    const body: { workflowKey?: string; input?: Record<string, unknown> } = {};
+    const body: {
+      workflowKey?: string;
+      input?: Record<string, unknown>;
+      debug?: boolean;
+    } = {};
     if (workflowKey) body.workflowKey = workflowKey;
     if (input !== undefined) body.input = input;
+    if (opts?.debug) body.debug = true;
     return unwrap(await client.POST("/executions", { body }));
   },
   // Start a minimal read-only Code Agent (Claude Code) run to verify the CLI + key work.
@@ -129,14 +138,20 @@ export const runsApi = {
   },
   // Re-run a past run with its original trigger input. Against the current graph by
   // default; pass `graphVersion` to re-run at a specific saved version (newer or older).
+  // `opts.debug` re-runs with diagnostics on — the reason to re-run a run you're trying to
+  // understand. Only sent when true, so an ordinary re-run's body is unchanged.
   async rerun(
     id: string,
     graphVersion?: number,
+    opts?: { debug?: boolean },
   ): Promise<StartExecutionResponse> {
     return unwrap(
       await client.POST("/executions/{id}/rerun", {
         params: { path: { id } },
-        body: graphVersion !== undefined ? { graphVersion } : {},
+        body: {
+          ...(graphVersion !== undefined ? { graphVersion } : {}),
+          ...(opts?.debug ? { debug: true } : {}),
+        },
       }),
     );
   },

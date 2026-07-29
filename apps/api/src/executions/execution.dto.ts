@@ -37,7 +37,7 @@ export class StartExecutionDto {
   @ApiPropertyOptional({
     example: true,
     description:
-      "Verbose per-run logging: the worker logs this run's activities at DEBUG level (others stay at LOG_LEVEL). Filter the logs by the returned workflowId. Off by default.",
+      "Diagnostics for THIS run only (off by default). Two effects: (1) the worker logs this run's activities at DEBUG level (others stay at LOG_LEVEL) — filter the logs by the returned workflowId; (2) the run's Execution log in the app gains one row per executed node with its timing and non-content metadata (model, tokens, cost, HTTP status). Never records prompts, outputs or values.",
   })
   @IsOptional()
   @IsBoolean()
@@ -56,6 +56,15 @@ export class RerunDto {
   @IsInt()
   @Min(1)
   graphVersion?: number;
+
+  @ApiPropertyOptional({
+    example: true,
+    description:
+      "Re-run with diagnostics on (off by default) — same meaning as `debug` on POST /executions, applied to the NEW run. The original run's flag is not inherited: a run you now want to understand is re-run with this set.",
+  })
+  @IsOptional()
+  @IsBoolean()
+  debug?: boolean;
 }
 
 /** Body for POST :id/resume — resume a failed run at the node that failed. */
