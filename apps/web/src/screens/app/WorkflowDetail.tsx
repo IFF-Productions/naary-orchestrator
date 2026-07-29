@@ -19,7 +19,7 @@ import {
   Position,
   ReactFlow,
 } from "@xyflow/react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useCanvasLink } from "../../lib/useCanvasLink";
 import type { GraphDef, NodeType } from "@naary/dsl";
@@ -206,7 +206,17 @@ export function WorkflowDetail() {
     await api.setErrorHandler(key, value).catch(() => undefined);
   }
 
-  const flow = g ? toFlow(g.graph) : null;
+  // Memoized on the graph alone — recomputing it per render is not just wasted layout work, it
+  // makes the diagram FLICKER. React Flow re-adopts the nodes array on every render; for a node
+  // object it hasn't seen before, `adoptUserNodes` resets `measured` to undefined (@xyflow/system),
+  // and NodeWrapper renders `visibility: hasDimensions ? 'visible' : 'hidden'` — so every node
+  // blinks out until the ResizeObserver re-measures it a frame later. This screen fires six
+  // independent fetches (graph, versions, runs, webhooks, workflows, error handler) plus the env
+  // overview, and each one that lands re-renders and re-blinks the whole diagram. On a slow CI box
+  // that window is wide enough to fail an e2e that only asks whether a node is VISIBLE
+  // (workflow-diagram.spec.ts). RunDiagram/RunGraph/TemplateDiagram already memoize for the same
+  // reason; this was the one read-only canvas that didn't.
+  const flow = useMemo(() => (g ? toFlow(g.graph) : null), [g]);
   const entry = g?.graph.nodes.find((n) => n.id === g.graph.startNodeId);
   const isWebhook = entry?.type === "webhookTrigger";
   const hookUrls = webhooks
