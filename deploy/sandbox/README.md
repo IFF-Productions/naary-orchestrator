@@ -132,6 +132,15 @@ Both the runner image (`naary-sandbox-runner`, per release tag) and the four san
 The runner publishes **no port**: the worker reaches it in-network at `SANDBOX_RUNNER_URL` with
 `SANDBOX_RUNNER_TOKEN` (see `deploy/.env.prod.example`).
 
+> **On the box, re-run *Deploy* — don't `docker compose up -d` by hand.** The digest refs reach the
+> runner through the deploy's shell environment (compose gives that precedence over `.env`), so a
+> manual `up` renders `SANDBOX_IMAGE_*` empty and the runner falls back to `:latest`. That is
+> deliberately made to fail LOUDLY rather than quietly: each deploy removes any local
+> `naary-<tool>-sandbox:latest`, so the fallback resolves to nothing and `docker run` errors,
+> instead of silently launching a stale hand-built image with the Docker socket in reach. If you
+> genuinely need a manual bring-up, export the four refs (and `SANDBOX_REQUIRE_DIGEST=1`) first —
+> `docker inspect naary-sandbox-runner` shows what the last deploy pinned.
+
 Disk: the four images are ~1.7GiB together on the host (they share the 231MB
 `node:24-bookworm-slim` base, which overlay2 stores once — summing `docker images` overstates it by
 ~700MB). `deploy.yml` raises its pre-pull free-space guard from 12GiB to 14GiB when the sandbox

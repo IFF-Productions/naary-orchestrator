@@ -335,7 +335,18 @@ jobs:
           echo "sandbox profile active: $SANDBOX_ON"
 
           SANDBOX_IMAGE_REFS=""
-          if [ "$SANDBOX_ON" = "1" ]; then
+          # ALL FOUR empty ⇒ a ROLLBACK to a ref that predates CI-built sandbox images: the
+          # sandbox-images job says so deliberately (see its legacy guard). Deploy that ref exactly
+          # as its own code expects — no pull, no SANDBOX_REQUIRE_DIGEST — rather than failing.
+          # SOME empty is a different thing entirely: a real CI bug. That still aborts below.
+          SANDBOX_LEGACY_REF=0
+          if [ -z "${SANDBOX_IMAGE_CLAUDE:-}${SANDBOX_IMAGE_CURSOR:-}${SANDBOX_IMAGE_COPILOT:-}${SANDBOX_IMAGE_GEMINI:-}" ]; then
+            SANDBOX_LEGACY_REF=1
+          fi
+          if [ "$SANDBOX_ON" = "1" ] && [ "$SANDBOX_LEGACY_REF" = "1" ]; then
+            echo "::warning::No sandbox image refs for this ref — deploying it as a pre-CI-images release. codeAgent will use whatever this box has locally, unpinned. Roll FORWARD to restore digest pinning."
+          fi
+          if [ "$SANDBOX_ON" = "1" ] && [ "$SANDBOX_LEGACY_REF" = "0" ]; then
             # The runner holds the Docker socket, so what it launches must be immutable BYTES, not
             # a re-pushable tag. Refuse the deploy if any ref isn't digest-pinned rather than
             # letting the box fall back to `naary-*-sandbox:latest` — the runner would refuse to
@@ -412,7 +423,7 @@ jobs:
           # last command of an && list is a nonzero status and would abort the deploy on every box
           # WITHOUT the sandbox profile.
           SANDBOX_DISK_GIB=0
-          if [ "$SANDBOX_ON" = "1" ]; then SANDBOX_DISK_GIB=2; fi
+          if [ -n "$SANDBOX_IMAGE_REFS" ]; then SANDBOX_DISK_GIB=2; fi
           MIN_AVAIL_GIB=$((12 + SANDBOX_DISK_GIB))
           AVAIL_KB=$(df --output=avail / | tail -1 | tr -d ' ')
           MIN_AVAIL_KB=$((MIN_AVAIL_GIB * 1024 * 1024))
@@ -482,7 +493,17 @@ jobs:
           # referenced by a container), so do it by IDENTITY: keep exactly the four this deploy
           # pulled, drop every other image carrying the sandbox label. Runs only after a successful
           # rollout, and never fails the deploy.
-          if [ "$SANDBOX_ON" = "1" ]; then
+          if [ -n "$SANDBOX_IMAGE_REFS" ]; then
+            # Also drop any local `naary-<tool>-sandbox:latest`. Those are hand-built leftovers from
+            # before this change, and they are exactly what makes an un-pinned fallback DANGEROUS
+            # rather than merely broken: if an operator brings the stack up without CD's env (a
+            # manual `compose up`), the runner falls back to `:latest` — and if that tag resolves
+            # locally, it silently runs unreviewed bytes with the Docker socket in reach. With the
+            # tag absent, the same mistake fails loudly at `docker run`. Untagging can't remove the
+            # bytes if they ARE one of the four we just pulled (same image id); that's fine.
+            for t in claude cursor copilot gemini; do
+              docker rmi "naary-$t-sandbox:latest" >/dev/null 2>&1 || true
+            done
             # Both sides must be the SAME id form: `docker images -q` truncates to 12 chars while
             # inspect returns `sha256:<64 hex>`, so --no-trunc is load-bearing — without it nothing
             # would match `keep` and the sweep would delete the images this deploy just pulled.

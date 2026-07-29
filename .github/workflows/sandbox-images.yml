@@ -112,8 +112,30 @@ jobs:
         id: resolve
         env:
           FORCE: ${{ inputs.force == true }}
+          # Through env, not `${{ }}` inline in the script: an expression interpolated straight into
+          # a shell body is the classic Actions script-injection shape, and it also makes the block
+          # impossible to run/test outside Actions. Used for logging only.
+          BUILD_REF: ${{ inputs.ref || github.ref }}
         run: |
           set -euo pipefail
+
+          # ROLLBACKS. deploy.yml's documented escape hatch is "workflow_dispatch with an older
+          # tag", and this job runs on that path too — against a checkout of THAT tag. Every tag up
+          # to and including v0.0.27 predates both this file and #938's per-tool Dockerfiles
+          # (v0.0.27's deploy/sandbox/ holds only Dockerfile + runner.Dockerfile + the scripts), so
+          # reading IMAGE_EPOCH or cursor.Dockerfile would fail under `set -e` and take the whole
+          # deploy with it — breaking the first thing an operator reaches for after this lands.
+          # Emit EMPTY refs instead: the box treats all-four-empty as "this ref predates CI-built
+          # sandbox images" and deploys exactly as that ref's own code expects.
+          missing=""
+          for f in IMAGE_EPOCH Dockerfile cursor.Dockerfile copilot.Dockerfile gemini.Dockerfile; do
+            [ -f "deploy/sandbox/$f" ] || missing="$missing $f"
+          done
+          if [ -n "$missing" ]; then
+            echo "::notice::ref '$BUILD_REF' predates CI-built sandbox images (missing:$missing) — emitting empty refs so a rollback still deploys."
+            for tool in claude cursor copilot gemini; do echo "$tool=" >> "$GITHUB_OUTPUT"; done
+            exit 0
+          fi
 
           # Only the `EPOCH=` VALUE feeds the hash, not the whole file — editing the long comment
           # block in IMAGE_EPOCH must not trigger four ~1.7GiB rebuilds.
