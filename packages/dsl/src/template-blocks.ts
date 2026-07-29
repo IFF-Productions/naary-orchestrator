@@ -11,9 +11,16 @@
  * does NOT reuse `resolveTemplates` (raw string replacement) for the HTML path — it interpolates
  * with context-aware escaping: HTML-escape in text/rich positions, and scheme-check +
  * attribute-escape for `href`/`src`.
+ *
+ * DETERMINISTIC-BUNDLE MODULE — KEEP IT DEPENDENCY-FREE (#926). `renderEmailHtml` is re-exported by
+ * `./workflow`, the entry `apps/worker/src/temporal/workflow/**` deep-imports, so this file's
+ * transitive `require` graph is compiled into the Temporal workflow bundle. `@naary/dsl` is CJS with
+ * no `"exports"` map, so nothing tree-shakes: the `import { z } from "zod"` that used to sit here for
+ * `templateBlockSchema` cost the bundle ALL of zod. The schemas now live in
+ * `./template-blocks-schema`, which imports FROM this file — never add the reverse edge, and never
+ * add a runtime import here that the interpreter doesn't need.
  */
-import { z } from "zod";
-import { getByPath, isPollutingKey } from "./mcp-args";
+import { getByPath } from "./mcp-args";
 import { embedRe, isSecretRef } from "./template";
 
 /** One block in a template body. Content blocks render to email + form layout; `field` is FORM-only
@@ -36,52 +43,9 @@ export type TemplateBlock =
       options?: string[];
     };
 
-/** Runtime validator for a block — the API validates `Template.blocks` on save against this, so a
- *  stored template can never carry a malformed block the renderer would choke on. */
-export const templateBlockSchema = z.discriminatedUnion("type", [
-  z.object({
-    id: z.string(),
-    type: z.literal("heading"),
-    level: z.union([z.literal(1), z.literal(2), z.literal(3)]),
-    text: z.string(),
-  }),
-  z.object({ id: z.string(), type: z.literal("text"), html: z.string() }),
-  z.object({
-    id: z.string(),
-    type: z.literal("image"),
-    src: z.string(),
-    alt: z.string().optional(),
-  }),
-  z.object({
-    id: z.string(),
-    type: z.literal("button"),
-    label: z.string(),
-    href: z.string(),
-  }),
-  z.object({ id: z.string(), type: z.literal("divider") }),
-  z.object({ id: z.string(), type: z.literal("spacer"), size: z.number() }),
-  z.object({
-    id: z.string(),
-    type: z.literal("field"),
-    /**
-     * #761: same guard as a formTrigger's inline field key, and for the same reason — a form template's
-     * `field` blocks BECOME the submitted field set (`fieldsFromBlocks` in apps/api), so a key here
-     * reaches exactly the code path where writing to `__proto__` silently discards the value. Guarding
-     * only the inline `fields` would have left the template route open.
-     */
-    key: z.string().refine((k) => !isPollutingKey(k), {
-      message:
-        "key must not be __proto__, constructor or prototype — a value written to one of those names is silently discarded and never reaches the workflow",
-    }),
-    label: z.string(),
-    fieldType: z.enum(["text", "textarea", "number", "email", "select"]),
-    required: z.boolean(),
-    options: z.array(z.string()).optional(),
-  }),
-]);
-
-/** `Template.blocks` — an ordered array of validated blocks. */
-export const templateBlocksSchema = z.array(templateBlockSchema);
+// The save-gate validators for this union (`templateBlockSchema` / `templateBlocksSchema`) live in
+// `./template-blocks-schema` — they carry zod, which must not reach the workflow bundle. The barrel
+// still exports both, so nothing outside this package changed.
 
 // The `{{ … }}` matcher now comes from ./template — literally the same pattern the runtime
 // resolves with, so a template can't render differently than it authors. It was a byte-identical

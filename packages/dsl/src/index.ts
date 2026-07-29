@@ -137,9 +137,13 @@ export {
   type TemplateBlock,
   renderEmailHtml,
   escapeHtml,
+} from "./template-blocks";
+// The zod save-gate half, split off so the renderer above stays out of zod's require graph (#926).
+// Barrel consumers see no difference; only the module boundary moved.
+export {
   templateBlockSchema,
   templateBlocksSchema,
-} from "./template-blocks";
+} from "./template-blocks-schema";
 export { resolveRss, type ResolvedRss } from "./rss";
 export {
   resolveWebhookResponse,

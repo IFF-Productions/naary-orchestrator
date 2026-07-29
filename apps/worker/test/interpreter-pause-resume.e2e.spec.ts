@@ -5,7 +5,11 @@ import { TestWorkflowEnvironment } from "@temporalio/testing";
 import { Worker } from "@temporalio/worker";
 import { createLocalTestEnv } from "./local-test-env";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { approvalSignal, budgetResumeSignal, stateQuery } from "@naary/contracts";
+import {
+  approvalSignal,
+  budgetResumeSignal,
+  stateQuery,
+} from "@naary/contracts";
 import { sampleGraph } from "@naary/dsl";
 import type { GraphDef } from "@naary/dsl";
 import { runGraph } from "../src/temporal/workflows";
@@ -397,13 +401,19 @@ describe("runGraph interpreter — budget pause-not-fail (Slice 3)", () => {
           (await handle.query(stateQuery)).status === "awaiting_budget",
       );
       // The pause reached the Runs read-model (where PUT-resume enumerates from).
-      expect(
+      // AWAITED, not asserted inline: `pauseOnBudget` sets `state.status` and only THEN
+      // awaits `syncStatus()`, which is an ACTIVITY — so the state query above goes true
+      // strictly before the push lands. Asserting it immediately was a race the test only
+      // ever won because the workflow bundle was big enough to slow the worker down; #926
+      // halved the bundle and it started failing ~2 runs in 3.
+      const parked1 = () =>
         statusPushes.some(
           (p) =>
             p.workflowId === "e2e-budget-pause" &&
             p.status === "awaiting_budget",
-        ),
-      ).toBe(true);
+        );
+      await waitFor(async () => parked1());
+      expect(parked1()).toBe(true);
       // Live spend rides the state query while parked (Slice 3 item 4).
       const parked = await handle.query(stateQuery);
       expect(parked.spentUsd).toBe(0); // the refused call never billed
@@ -510,6 +520,9 @@ describe("runGraph interpreter — budget pause-not-fail (Slice 3)", () => {
             p.workflowId === "e2e-budget-repark" &&
             p.status === "awaiting_budget",
         ).length;
+      // Same await-then-assert as above: the query flips on `state.status`, the push is an
+      // activity that lands after it. `>= 1` to wait, `=== 1` to assert it parked exactly once.
+      await waitFor(async () => parks() >= 1);
       expect(parks()).toBe(1);
       await handle.signal(budgetResumeSignal, { tenantId: "t-pause-repark" });
       await waitFor(async () => parks() >= 2);
