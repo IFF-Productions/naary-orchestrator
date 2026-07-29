@@ -6,7 +6,7 @@
  * author needed.
  */
 import { describe, expect, it } from "vitest";
-import { getByPath } from "@naary/dsl";
+import { getByPath, resolveTemplateString } from "@naary/dsl";
 import { flattenOutput, leafPaths } from "../src/screens/canvas/output-fields";
 
 describe("leafPaths — arrays", () => {
@@ -114,5 +114,51 @@ describe("flattenOutput ↔ leafPaths agree", () => {
     // The dock's rows are a display of the value; only the copy-paste-able chips
     // (rootKey: null) must refuse to invent a segment.
     expect(flattenOutput("hello").map((r) => r.path)).toEqual(["output"]);
+  });
+
+  it("the dock's real cap (8) still reaches a key after two scalar arrays", () => {
+    // Arrays of scalars now spend TWO rows (`tags` + `tags.0`) where they used to spend
+    // one, and the dock walks at cap 8 — so the budget is the thing that could regress
+    // it. A trailing top-level key must still be displayed.
+    const rows = flattenOutput(
+      { tags: ["a", "b"], labels: ["x"], id: 7, after: "still-here" },
+      "",
+      0,
+      [],
+      8,
+    ).map((r) => r.path);
+    expect(rows).toEqual([
+      "tags",
+      "tags.0",
+      "labels",
+      "labels.0",
+      "id",
+      "after",
+    ]);
+  });
+});
+
+describe("an offered path resolves the way a config field resolves it", () => {
+  // The chip's promise is literally "put {{ node.path }} in any field", so assert against
+  // the RUNTIME string-template resolver, not just `getByPath` underneath it.
+  const ctx = {
+    pagerduty: { body: { incidents: [{ id: "PABC123", urgency: "high" }] } },
+  };
+
+  it("resolves every chip the References block offers", () => {
+    for (const path of leafPaths(ctx.pagerduty)) {
+      expect(
+        resolveTemplateString(`{{ pagerduty.${path} }}`, ctx),
+      ).toBeDefined();
+    }
+  });
+
+  it("resolves the reported indexed path, whole and embedded", () => {
+    expect(
+      resolveTemplateString("{{ pagerduty.body.incidents.0.id }}", ctx),
+    ).toBe("PABC123");
+    expect(
+      resolveTemplateString("ack {{ pagerduty.body.incidents.0.id }} now", ctx),
+    ).toBe("ack PABC123 now");
   });
 });
