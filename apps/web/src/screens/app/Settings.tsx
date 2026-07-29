@@ -66,6 +66,17 @@ const LOCAL_CSS = `
 .naary-var-cell::placeholder{color:var(--ink-faint);}
 .naary-var-cell:hover{border-color:var(--line-2);}
 .naary-var-cell:focus{outline:none;border-color:var(--brand);background:var(--surface);color:var(--ink);}
+/* PHONE (#511). Measured at 390px: each variable cell was a 258x30 box — 30px is under the 44px
+   touch minimum the rest of the app already holds to (the .btn-icon rule in components.css), and
+   these are the screen's ONLY editable controls. On phone VariablesSection already stacks each
+   cell onto its own labelled line, so the height simply grows the card; nothing can overlap.
+   The type goes to 16px because iOS Safari zooms the page in when you focus an input under 16px,
+   and that zoom is exactly what global.css's layout-viewport clamp exists to prevent. The resting
+   border comes back for the same reason the label did: stacked in a card these read as text, not
+   fields, and hover — the only thing that revealed the box — does not exist on a touch screen. */
+@media (max-width: 640px){
+  .naary-var-cell{height:44px;font-size:16px;border-color:var(--line);}
+}
 `;
 
 export function Settings() {

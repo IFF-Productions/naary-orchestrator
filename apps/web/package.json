@@ -13,7 +13,8 @@
     "test:e2e": "playwright test",
     "gen:api-types": "openapi-typescript ../api/openapi.json -o src/lib/api/schema.d.ts",
     "storybook": "storybook dev -p 6006",
-    "build-storybook": "storybook build"
+    "build-storybook": "storybook build",
+    "audit:responsive": "storybook build -o storybook-static --quiet && node scripts/responsive-audit.mjs --sb storybook-static"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.3",
