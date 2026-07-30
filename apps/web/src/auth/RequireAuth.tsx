@@ -16,12 +16,18 @@ import {
   WorkspaceProvider,
   useWorkspace,
 } from "../workspace/WorkspaceProvider";
-import { useAuth } from "./AuthProvider";
+import { useAuthSession } from "./AuthProvider";
 
 export function RequireAuth() {
-  const { ready, authenticated } = useAuth();
+  // useAuthSession, not useAuth: this is the component that DECLARES the app needs Firebase, so
+  // it activates the async auth boundary (lib/firebase-lazy) on mount. The route also carries a
+  // loader that warms it in parallel with the lazy chunk — this is the belt to that braces, and
+  // what makes the guard work outside the router (Storybook, tests).
+  const { ready, authenticated } = useAuthSession();
 
-  // Don't flash the sign-in screen (or the app) before init resolves.
+  // Don't flash the sign-in screen (or the app) before init resolves. `ready` now also covers the
+  // SDK chunk's own fetch, so this window is a round trip longer than it was — deliberately, and
+  // still a blank gate rather than a flash of the wrong UI.
   if (!ready) return null;
 
   if (!authenticated && !hasToken()) {

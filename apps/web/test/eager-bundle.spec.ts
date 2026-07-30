@@ -1,6 +1,7 @@
 /**
- * The EAGER browser-bundle regression test for #928 — measured against a REAL `vite build` of
- * `apps/web`, not inferred from imports.
+ * The EAGER browser-bundle regression test for #928 (catalog + zod) and its follow-up (the
+ * Firebase auth SDK) — measured against a REAL `vite build` of `apps/web`, not inferred from
+ * imports.
  *
  * WHAT WENT WRONG. `components/TemplateContentBlock.tsx` imported `renderEmailHtml` from the
  * `@naary/dsl` BARREL. It is re-exported by `components/index.ts`, which `AppShell` pulls, so it
@@ -28,7 +29,19 @@
  * present somewhere in the build. A one-sided absence check would silently go vacuous the moment
  * a minifier renames the thing (`INTEGRATION_PROVIDERS` is a top-level const and survives
  * nowhere, which is precisely why it is not probed here); the paired form can only pass while the
- * probe still has something to find.
+ * probe still has something to find. `signInWithPopup` is deliberately NOT probed for the same
+ * reason: it is minified away entirely (`inBuild=false`), so asserting its absence proves nothing.
+ *
+ * THE SECOND SUBJECT: FIREBASE. `firebase` was 138 KB raw / 41.5 KB gzip of the eager set,
+ * because `auth/AuthProvider` (mounted above the router, so on every page) and `lib/api/*`
+ * (`getBearerToken`) both imported `lib/firebase` statically. `lib/firebase-lazy.ts` is now the
+ * async boundary: nothing eager may have a STATIC edge to `lib/firebase`. Same colouring
+ * mechanism, same failure mode — one `import { getBearerToken } from "./firebase"` in an eagerly
+ * reachable file puts all of it back with no error and no failing build.
+ *
+ * Those tests probe rollup's MODULE IDS as well as chunk text. Module ids are the direct
+ * statement of the invariant ("no eager chunk contains a module from @firebase") and, unlike
+ * minified text, they cannot go vacuous by renaming.
  */
 import path from "node:path";
 import { INTEGRATION_CATALOG } from "@naary/dsl";
@@ -38,13 +51,14 @@ import { beforeAll, describe, expect, it } from "vitest";
 const WEB_ROOT = path.join(__dirname, "..");
 
 /**
- * Ceiling for the eager set, in KB (raw, pre-gzip). Measured 762 before this change, 590 after.
- * Set with headroom so ordinary feature work doesn't trip it, but far below the old number so a
- * re-introduced barrel import is caught. This is the only assertion that catches a DIFFERENT
- * heavy import sneaking onto the critical path — the probes below only know about the catalog.
- * Moves down with each win; either direction is a deliberate change with a measurement in the PR.
+ * Ceiling for the eager set, in KB (raw, pre-gzip). Measured 765 before #928, 590 after it, and
+ * 455 after the Firebase boundary. Set with headroom so ordinary feature work doesn't trip it,
+ * but far below the previous number so a re-introduced static import is caught. This is the only
+ * assertion that catches a DIFFERENT heavy import sneaking onto the critical path — the probes
+ * below only know about the catalog and Firebase. Moves down with each win; either direction is a
+ * deliberate change with a measurement in the PR.
  */
-const MAX_EAGER_KB = 660;
+const MAX_EAGER_KB = 500;
 
 /** Chunks the browser must download before the first paint: the entry plus its transitive STATIC
  *  imports — the exact set vite emits `<link rel="modulepreload">` for. Dynamic imports (the lazy
@@ -53,14 +67,42 @@ type Chunk = {
   fileName: string;
   code: string;
   imports: string[];
+  dynamicImports: string[];
+  /** Rollup's per-chunk source-module map, keyed by absolute module id. */
+  modules?: Record<string, unknown>;
   isEntry: boolean;
 };
 
 let eager: Chunk[] = [];
 let all: Chunk[] = [];
+/**
+ * Per public route: eager + that route chunk's own static deps — what an anonymous visitor
+ * actually loads. All three anonymous surfaces, not just the form: each is a separate chunk graph,
+ * so a static firebase import added to ChatPage alone would slip past a FormPage-only check.
+ */
+let publicSets: { route: string; chunks: Chunk[] }[] = [];
 
 const inEager = (s: string) => eager.some((c) => c.code.includes(s));
 const inBuild = (s: string) => all.some((c) => c.code.includes(s));
+
+/** Module ids (absolute source paths) held by a set of chunks. */
+const moduleIds = (chunks: Chunk[]): string[] =>
+  chunks.flatMap((c) => Object.keys(c.modules ?? {}));
+
+/** Walk a chunk's transitive STATIC imports, seeding from `from`. */
+function staticClosure(seed: Chunk[], from: Chunk): Chunk[] {
+  const seen = new Map(seed.map((c) => [c.fileName, c]));
+  const walk = (c: Chunk) => {
+    if (seen.has(c.fileName)) return;
+    seen.set(c.fileName, c);
+    for (const f of c.imports) {
+      const dep = all.find((x) => x.fileName === f);
+      if (dep) walk(dep);
+    }
+  };
+  walk(from);
+  return [...seen.values()];
+}
 
 /** Absent from the critical path, still present in the build. Both halves matter — see header. */
 function expectMovedOffCriticalPath(marker: string) {
@@ -113,6 +155,16 @@ describe("eager web bundle (#928)", () => {
     };
     walk(entry);
     eager = [...seen.values()];
+
+    // The public hosted pages (/f/:formId, /c/:chatId, /approve/:workflowId) are the visitors
+    // #928's follow-up is about: anonymous, never sign in. What they download is the eager set
+    // plus their route chunk's own static deps — the bot gate's Firebase import is DYNAMIC and
+    // deliberately excluded here.
+    publicSets = ["FormPage", "ChatPage", "ApprovePage"].map((route) => {
+      const chunk = all.find((c) => c.fileName.includes(route));
+      if (!chunk) throw new Error(`no ${route} chunk in the vite build output`);
+      return { route, chunks: staticClosure(eager, chunk) };
+    });
   }, 180_000);
 
   it("built something worth asserting on", () => {
@@ -120,6 +172,11 @@ describe("eager web bundle (#928)", () => {
     // somehow lost the app, would make absence checks trivially true.
     expect(all.length).toBeGreaterThan(20);
     expect(eager.length).toBeGreaterThan(3);
+    // ONE entry, so `all.find(c => c.isEntry)` above is unambiguous. A second html/js entry
+    // (an embed bundle, say) would make the walk measure whichever came first.
+    expect(all.filter((c) => c.isEntry).map((c) => c.fileName)).toHaveLength(1);
+    // The module-id probes below are only meaningful if rollup reported module ids at all.
+    expect(moduleIds(eager).length).toBeGreaterThan(50);
     // And it is the PRODUCTION build, not vitest's NODE_ENV=test one — React's dev jsx runtime
     // gets its own chunk, which is the visible symptom if the env override above ever stops
     // working. Measuring the dev build would inflate the ceiling by ~200 KB.
@@ -197,6 +254,88 @@ describe("eager web bundle (#928)", () => {
     expect(`${kb} KB <= ${MAX_EAGER_KB} KB`).toBe(
       `${kb <= MAX_EAGER_KB ? kb : MAX_EAGER_KB} KB <= ${MAX_EAGER_KB} KB`,
     );
+  });
+
+  it("keeps the Firebase SDK off the critical path", () => {
+    // Text markers that survive minification because they are string literals or wire constants
+    // inside the SDK. Each asserted absent-eager AND present-in-build, so the probe cannot go
+    // vacuous. `identitytoolkit` is the auth REST host; `recaptcha`/`_getAppCheckToken` are the
+    // App Check half; `FirebaseError` is the shared core.
+    for (const marker of [
+      "identitytoolkit",
+      "@firebase/auth",
+      "recaptcha",
+      "_getAppCheckToken",
+      "firebase-app-check",
+      "FirebaseError",
+    ]) {
+      expectMovedOffCriticalPath(marker);
+    }
+  });
+
+  it("has no eager module from the Firebase SDK or the modules behind the boundary", () => {
+    // The invariant stated directly, in module ids rather than minified text: nothing the entry
+    // can reach STATICALLY may be a @firebase package, `lib/firebase.ts` (auth), `firebase-app.ts`
+    // (initializeApp + App Check) or `lib/app-check.ts`. `lib/firebase-lazy.ts` and
+    // `lib/firebase-env.ts` are the boundary itself and are SUPPOSED to be eager — hence matching
+    // on the exact suffixes, not on the word "firebase".
+    const behindBoundary = (id: string) =>
+      /[\\/]@firebase[\\/]/.test(id) ||
+      /[\\/]node_modules[\\/](\.pnpm[\\/])?firebase(@|[\\/])/.test(id) ||
+      /[\\/]src[\\/]lib[\\/](firebase|firebase-app|app-check)\.ts$/.test(id);
+
+    // Non-vacuity: those modules must exist somewhere, or "none are eager" proves nothing.
+    expect(moduleIds(all).filter(behindBoundary).length).toBeGreaterThan(10);
+    expect(moduleIds(eager).filter(behindBoundary)).toEqual([]);
+  });
+
+  it("serves every public hosted page without any Firebase module", () => {
+    // The headline claim, as a test: an anonymous visitor of /f/:formId, /c/:chatId or
+    // /approve/:workflowId downloads the eager set plus that route chunk's static deps — and no
+    // part of that may be Firebase. (An `app_check` bot gate still mints an attestation token, but
+    // reaches firebase-app through a DYNAMIC import, so it is not in this set and costs
+    // firebase/app + firebase/app-check only, never the auth SDK.)
+    //
+    // Each route separately, because each is its own chunk graph: a static firebase import added
+    // to ChatPage alone would pass a FormPage-only check.
+    const offenders: string[] = [];
+    for (const { route, chunks } of publicSets) {
+      for (const id of moduleIds(chunks)) {
+        if (
+          /[\\/]@firebase[\\/]/.test(id) ||
+          /[\\/]src[\\/]lib[\\/](firebase|firebase-app|app-check)\.ts$/.test(id)
+        )
+          offenders.push(`${route}: ${id}`);
+      }
+      // Non-vacuity: it really is that page's chunk set, not an empty one.
+      expect(chunks.length).toBeGreaterThan(eager.length);
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it("still wires sign-in up — the boundary, not a deletion", () => {
+    // The counterweight. Every assertion above is satisfiable by ripping Firebase out of the app
+    // altogether; these three say the auth path is intact and merely moved:
+    //   1. the boundary module itself is on the critical path (it is what defers the load);
+    //   2. something in the build DYNAMICALLY imports the auth chunk (i.e. the seam is connected);
+    //   3. the auth SDK is still shipped.
+    const boundary = moduleIds(eager).filter((id) =>
+      /[\\/]src[\\/]lib[\\/]firebase-lazy\.ts$/.test(id),
+    );
+    expect(boundary).toHaveLength(1);
+
+    const authChunks = all.filter((c) =>
+      Object.keys(c.modules ?? {}).some((id) =>
+        /[\\/]src[\\/]lib[\\/]firebase\.ts$/.test(id),
+      ),
+    );
+    expect(authChunks).toHaveLength(1);
+    const authChunkName = authChunks[0].fileName;
+    expect(all.some((c) => c.dynamicImports.includes(authChunkName))).toBe(
+      true,
+    );
+
+    expect(inBuild("identitytoolkit")).toBe(true);
   });
 
   it("still ships the template renderer eagerly", () => {

@@ -9,7 +9,7 @@
  * into the `api` barrel yet — import { builderApi } directly.
  */
 import type { GraphDef } from "@naary/dsl";
-import { getBearerToken } from "../firebase";
+import { getBearerToken } from "../firebase-lazy";
 import { createSseParser } from "../sse";
 import {
   AccessNotAllowedError,

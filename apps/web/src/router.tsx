@@ -5,6 +5,7 @@ import { RouteError } from "./app/RouteError";
 import { RequireBuilder } from "./app/RequireBuilder";
 import { RequireAuth } from "./auth/RequireAuth";
 import { LoadingBlock } from "./components";
+import { warmFirebaseAuth } from "./lib/firebase-lazy";
 
 // Wrap the data-router factory so Sentry names navigation transactions by route
 // pattern (not raw URL). No-op unless Sentry initialized (see instrument.ts).
@@ -30,6 +31,25 @@ const lazy = (
   },
 });
 
+/**
+ * Start fetching the Firebase auth SDK the moment a route that needs it MATCHES — before its
+ * component chunk has loaded, let alone rendered.
+ *
+ * The SDK is behind an async boundary (lib/firebase-lazy) so public pages never download it. The
+ * cost of that is a serialized round trip for everyone else: entry chunk → route chunk → mount →
+ * effect → SDK chunk → onAuthStateChanged, and `ready` (hence the first paint of anything under
+ * RequireAuth) waits on the whole chain. A data-router `loader` runs in PARALLEL with the route's
+ * `lazy` import, which collapses the last three links back into one round trip.
+ *
+ * Returns null synchronously — the fetch is deliberately NOT awaited here. Awaiting it would put
+ * the SDK back in front of the first paint for every navigation, which is the thing we are
+ * removing; the component's own `ready` gate is where waiting belongs.
+ */
+const warmAuth = () => {
+  warmFirebaseAuth();
+  return null;
+};
+
 export const router = createRouter([
   {
     // Pathless root layout — its sole purpose is to host HydrateFallback (only
@@ -48,6 +68,7 @@ export const router = createRouter([
       },
       {
         path: "/auth",
+        loader: warmAuth,
         ...lazy(() => import("./screens/AuthPage"), "AuthPage"),
       },
       // Public hosted form (formTrigger) — anonymous, OUTSIDE RequireAuth (like /auth, /design).
@@ -65,9 +86,12 @@ export const router = createRouter([
         path: "/approve/:workflowId",
         ...lazy(() => import("./screens/ApprovePage"), "ApprovePage"),
       },
-      // Everything under here requires a Keycloak session or a pasted nry_ token.
+      // Everything under here requires a Firebase session or a pasted nry_ token.
       {
         element: <RequireAuth />,
+        // Matching ANY route in this subtree is the signal that this visitor needs auth — start
+        // the SDK fetch here, alongside the child route's lazy chunk. See warmAuth.
+        loader: warmAuth,
         children: [
           {
             // Full canvas — Builder-only. Sibling of /app, so AppShell's mode gating

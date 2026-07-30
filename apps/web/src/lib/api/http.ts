@@ -10,7 +10,7 @@
  * user is signed in, else the pasted `nry_` API token (see getBearerToken). The
  * server resolves tenantId from the token, so the client never sends it.
  */
-import { getBearerToken } from "../firebase";
+import { getBearerToken } from "../firebase-lazy";
 
 /** Thrown on a 401 so screens can prompt the user to set their API token. */
 export class UnauthorizedError extends Error {
