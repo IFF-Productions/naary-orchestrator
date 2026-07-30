@@ -10,7 +10,7 @@
  */
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { useState } from "react";
-import { AiPromptPanel } from "./AiPromptPanel";
+import { AiPromptPanel, type FixNotice } from "./AiPromptPanel";
 import type { AiMode } from "./useAiBuilder";
 
 /** Stateful wrapper — the mode + prompt are controlled, so a story needs an owner for them. */
@@ -18,15 +18,17 @@ function Harness({
   initialMode,
   canEdit,
   generating = false,
+  fixNotice = null,
+  initialPrompt = "Handle the case where there are no open incidents — just end with no issues.",
 }: {
   initialMode: AiMode;
   canEdit: boolean;
   generating?: boolean;
+  fixNotice?: FixNotice | null;
+  initialPrompt?: string;
 }) {
   const [mode, setMode] = useState<AiMode>(initialMode);
-  const [prompt, setPrompt] = useState(
-    "Handle the case where there are no open incidents — just end with no issues.",
-  );
+  const [prompt, setPrompt] = useState(initialPrompt);
   const [provider, setProvider] = useState("");
   return (
     <div style={{ width: 720 }}>
@@ -40,10 +42,25 @@ function Harness({
         canEdit={canEdit}
         generating={generating}
         onGenerate={() => {}}
+        fixNotice={fixNotice}
       />
     </div>
   );
 }
+
+/** What arriving from a failed run puts in the box (see buildFixInstruction). */
+const FIX_INSTRUCTION = `A run of this workflow FAILED. Change the workflow so this failure does not happen again.
+
+Failed at node: "pagerduty" (type: integration)
+Failure kind: provider_error
+Error: Missing required header 'From'
+
+That node's current configuration:
+{"provider":"pagerduty","action":"createIncident"}
+
+The call that node made (secrets already redacted at capture):
+  request: POST https://api.pagerduty.com/incidents
+  response: 400 Bad Request`;
 
 const meta: Meta<typeof Harness> = {
   title: "Canvas/AiPromptPanel",
@@ -68,4 +85,54 @@ export const NewCanvas: Story = {
 /** Mid-run wording — "Applying…", not "Generating…", because it isn't generating. */
 export const Applying: Story = {
   args: { initialMode: "edit", canEdit: true, generating: true },
+};
+
+/**
+ * Arrived from a FAILED run (`?fix=<runId>`): the failure is already written up, and the header
+ * NAMES the steps whose output goes with it. A count ("output from 2 steps") is not something a
+ * user can check; a list is, and the prompt itself is right there to read in full.
+ */
+export const FromFailedRun: Story = {
+  args: {
+    initialMode: "edit",
+    canEdit: true,
+    initialPrompt: FIX_INSTRUCTION,
+    fixNotice: {
+      runId: "exec-t-demo-ce20c38b",
+      drift: null,
+      includedNodeIds: ["schedule", "lookup"],
+      error: null,
+    },
+  },
+};
+
+/** The run executed an OLDER version than the canvas now holds — said plainly, not hidden. */
+export const VersionDrift: Story = {
+  args: {
+    initialMode: "edit",
+    canEdit: true,
+    initialPrompt: FIX_INSTRUCTION,
+    fixNotice: {
+      runId: "exec-t-demo-ce20c38b",
+      drift: { runVersion: 3, currentVersion: 7 },
+      includedNodeIds: ["schedule"],
+      error: null,
+    },
+  },
+};
+
+/** The run couldn't be read: the panel still works, it just has nothing to describe. */
+export const FixCouldNotRead: Story = {
+  args: {
+    initialMode: "edit",
+    canEdit: true,
+    initialPrompt: "",
+    fixNotice: {
+      runId: "exec-t-demo-ce20c38b",
+      drift: null,
+      includedNodeIds: [],
+      error:
+        "Couldn't read that run, so the failure isn't described below — say what you'd like changed.",
+    },
+  },
 };

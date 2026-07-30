@@ -23,7 +23,7 @@ import {
 import { api, type ExecutionState, UnauthorizedError } from "../../lib/api";
 import { ACCENT, nodeDisplayLabel, nodeSubtitle } from "../../lib/graph-model";
 import { canDo } from "../../lib/permissions-logic";
-import { isTerminal, runStatusUi } from "../../lib/run-status";
+import { isSystemFailure, isTerminal, runStatusUi } from "../../lib/run-status";
 import { useActiveEnvironment } from "../../lib/useActiveEnvironment";
 import {
   BELOW_DRAWER_QUERY,
@@ -242,6 +242,10 @@ function RunView({ id }: { id: string }) {
   // (older runs) → keep the affordance; the server still enforces on the request.
   const perms = usePermissions();
   const mayRerun = !runWorkflowKey || canDo(perms, "run", runWorkflowKey);
+  // "Fix with AI" leads somewhere the user will WRITE the workflow, so it needs `edit` — not the
+  // `run` that gates re-run. Someone allowed to re-run a flow they can't change would otherwise be
+  // walked to a canvas whose Save is refused.
+  const mayEdit = !runWorkflowKey || canDo(perms, "edit", runWorkflowKey);
   const env = useActiveEnvironment();
 
   // Curated Temporal history — feeds the log panel AND the real timestamps
@@ -753,6 +757,42 @@ function RunView({ id }: { id: string }) {
                 Cancel run
               </Button>
             )}
+            {/* "Fix with AI" — carry this failure into the canvas's AI panel as a change request,
+                instead of leaving the user to re-describe in prose a failure they are looking at.
+                The canvas builds the instruction from the run (see buildFixInstruction) and
+                PREFILLS it; nothing is sent until they press Generate, and nothing is saved until
+                they press Save.
+
+                Needs a failed node to talk about: `currentNodeId` is the read model's
+                `failedNodeId` on a failed run (#525), and without it there is nothing to diagnose. */}
+            {status &&
+              // isSystemFailure, NOT isFailure. `isFailure` is the aggregate "didn't succeed"
+              // bucket and includes `rejected` — a human declining at an approval gate, where the
+              // system did exactly what it was asked. Offering to fix a workflow because someone
+              // said no is nonsense, and the prefill would read "(no error message was recorded)".
+              isSystemFailure(status) &&
+              runWorkflowKey &&
+              state?.currentNodeId &&
+              mayEdit && (
+                <Button
+                  variant="secondary"
+                  title="Open this workflow in the canvas with the failure described for the AI"
+                  onClick={() =>
+                    navigate(
+                      canvasLink(
+                        `/app/canvas?key=${encodeURIComponent(
+                          runWorkflowKey,
+                        )}&fix=${encodeURIComponent(id)}`,
+                      ),
+                    )
+                  }
+                  style={stacked ? { minHeight: 44 } : undefined}
+                >
+                  {/* ✨ rather than an icon, matching "✨ Build with AI" in the canvas top bar —
+                      the app's established marker for an AI affordance. */}
+                  ✨ Fix with AI
+                </Button>
+              )}
             {/* Resume is only meaningful for a FAILED run — it restarts at the node that died
                 instead of replaying the trigger (which would repeat earlier side effects). It
                 self-disables with a reason when the run isn't resumable. */}

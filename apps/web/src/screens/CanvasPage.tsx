@@ -74,6 +74,7 @@ import { UNTITLED_WORKFLOW } from "./canvas/canvas-dirty";
 import { CanvasInspectorDock } from "./canvas/CanvasInspectorDock";
 import { CanvasIssuesPanel } from "./canvas/CanvasIssuesPanel";
 import { ReviewChangesPanel } from "./canvas/ReviewChangesPanel";
+import { useFixFromRun } from "./canvas/useFixFromRun";
 import { CanvasStage } from "./canvas/CanvasStage";
 import { nextNodePosition } from "./canvas/node-placement";
 import { CanvasToasts } from "./canvas/CanvasToasts";
@@ -191,6 +192,10 @@ export function CanvasPage() {
   // drag/connect are disabled while watching so the overlay isn't fought by edits.
   const runId = searchParams.get("runId");
   const watching = Boolean(runId);
+  // "Fix with AI" from a failed run: describe that failure into the AI panel (see useFixFromRun).
+  // Distinct from `runId`, which puts the canvas in read-only watch mode — this one is here to
+  // EDIT, so it must not.
+  const fixRunId = searchParams.get("fix");
 
   // The live-compiled canvas. Compiled HERE, above both consumers: the AI panel sends it as
   // the graph to change, and the derivations layer lints and overlays it.
@@ -247,6 +252,18 @@ export function CanvasPage() {
     // — so the review opens itself rather than waiting to be found. A CREATE does not: there is
     // no prior version to compare against, so the panel would have nothing to say.
     onEditApplied: () => setShowReview(true),
+  });
+
+  // Turn `?fix=<runId>` into a prefilled change request in the AI panel. Prefills only — the user
+  // reads what the model will be told about their run and presses Generate themselves.
+  const fixFromRun = useFixFromRun({
+    fixRunId,
+    // The graph the fix will CHANGE — the live canvas, not the snapshot the run executed.
+    currentGraph: graph,
+    currentVersion: version,
+    setAiPrompt,
+    setAiMode,
+    setShowAi,
   });
 
   const [watchState, setWatchState] = useState<ExecutionState | null>(null);
@@ -1247,6 +1264,19 @@ export function CanvasPage() {
           canEdit={canEdit}
           generating={generating}
           onGenerate={() => void generateFromPrompt()}
+          // Present only when the user arrived from a failed run (?fix=). Says which run this
+          // describes, whose outputs are about to be sent, and — when the run executed an older
+          // version — that the fix is being applied to a graph that has since moved on.
+          fixNotice={
+            fixRunId
+              ? {
+                  runId: fixRunId,
+                  drift: fixFromRun.drift,
+                  includedNodeIds: fixFromRun.includedNodeIds,
+                  error: fixFromRun.error,
+                }
+              : null
+          }
         />
       )}
 

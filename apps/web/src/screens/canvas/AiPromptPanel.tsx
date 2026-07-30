@@ -4,6 +4,73 @@ import { Button } from "../../components";
 import { PROVIDERS } from "./fields";
 import type { AiMode } from "./useAiBuilder";
 
+/** What the panel says when the prompt below was written FROM a failed run (`?fix=<runId>`). */
+export interface FixNotice {
+  runId: string;
+  /** The run executed an older version than the one on the canvas — see useFixFromRun. */
+  drift: { runVersion: number; currentVersion: number } | null;
+  /** Whose step outputs are included in the prompt. Named, not summarised as a count. */
+  includedNodeIds: string[];
+  /** Why the description couldn't be built, when it couldn't. */
+  error: string | null;
+}
+
+/**
+ * The "this came from a failed run" header.
+ *
+ * It names what is about to leave the tenant. The prompt below is going to a model and it carries
+ * the failing step's configuration and the outputs of the steps it read — so the steps are LISTED
+ * rather than counted. "Includes output from 2 steps" is not something a user can check; "includes
+ * output from pagerduty, lookup" is, and the prompt is right there to read in full.
+ */
+function FixNoticeBanner({ notice }: { notice: FixNotice }) {
+  return (
+    <div
+      style={{
+        marginBottom: 10,
+        padding: "9px 11px",
+        borderRadius: "var(--radius-md)",
+        border: "1px solid var(--line-2)",
+        background: "var(--card)",
+        fontSize: "var(--text-xs)",
+        color: "var(--ink-3)",
+        lineHeight: 1.55,
+      }}
+    >
+      <div style={{ color: "var(--ink-2)" }}>
+        Describing the failure from run{" "}
+        <span className="mono">{notice.runId}</span>. Read it below and edit
+        anything before generating.
+      </div>
+
+      {notice.error && (
+        <div style={{ color: "var(--state-paused)", marginTop: 5 }}>
+          {notice.error}
+        </div>
+      )}
+
+      {/* Decision 1: the fix targets the CURRENT version. When the run used an older one, say so
+          — the description may name a step that has since changed, and a diff against a version
+          nobody runs would be worse than an honest warning. */}
+      {notice.drift && (
+        <div style={{ color: "var(--state-paused)", marginTop: 5 }}>
+          That run used v{notice.drift.runVersion}; this workflow is now v
+          {notice.drift.currentVersion}. The fix applies to v
+          {notice.drift.currentVersion}, so check it still matches what failed.
+        </div>
+      )}
+
+      {notice.includedNodeIds.length > 0 && (
+        <div style={{ marginTop: 5 }}>
+          Sends this workflow, the failing step and its error, plus output from{" "}
+          <span className="mono">{notice.includedNodeIds.join(", ")}</span> —
+          the steps it reads from. No other step output, variables or secrets.
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function AiPromptPanel({
   aiPrompt,
   onPromptChange,
@@ -14,6 +81,7 @@ export function AiPromptPanel({
   canEdit,
   generating,
   onGenerate,
+  fixNotice,
 }: {
   aiPrompt: string;
   onPromptChange: (v: string) => void;
@@ -26,6 +94,8 @@ export function AiPromptPanel({
   canEdit: boolean;
   generating: boolean;
   onGenerate: () => void;
+  /** Set when the user arrived from a failed run (`?fix=`); null otherwise. */
+  fixNotice?: FixNotice | null;
 }) {
   const editing = aiMode === "edit";
   return (
@@ -36,6 +106,7 @@ export function AiPromptPanel({
         background: "var(--surface)",
       }}
     >
+      {fixNotice && <FixNoticeBanner notice={fixNotice} />}
       {canEdit && (
         <div
           role="radiogroup"
@@ -95,7 +166,11 @@ export function AiPromptPanel({
               ? "e.g. If there are no open incidents, end the run instead of failing."
               : "e.g. When a webhook comes in, have an agent summarize it, wait for my approval, then email the summary to my team."
           }
-          rows={2}
+          // 2 rows suits a sentence someone types. A prefilled fix description is ~15 lines, and
+          // the banner above it says "read it below and edit anything before generating" — which
+          // is not an instruction you can follow through a 2-row window. Taller only when there IS
+          // a prefilled description, so the ordinary panel keeps its compact shape.
+          rows={fixNotice && aiPrompt ? 12 : 2}
           disabled={generating}
           onKeyDown={(e) => {
             if ((e.metaKey || e.ctrlKey) && e.key === "Enter") onGenerate();
