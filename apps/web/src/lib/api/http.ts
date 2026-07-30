@@ -170,10 +170,25 @@ export async function http<T>(path: string, init?: RequestInit): Promise<T> {
     const serverMessage = Array.isArray(body?.message)
       ? body?.message[0]
       : body?.message;
+    // Put the SERVER'S REASON in `message`, not only in `serverMessage`.
+    //
+    // Reported as `POST /graphs/x/nodes/hasincidents/test → 404` with no reason — while the API
+    // had answered "No node 'hasincidents' in this graph", which is the entire diagnosis. The
+    // explanation was reachable at `e.serverMessage`, and exactly six call sites in the app
+    // unwrap it; everywhere else renders `e.message` and shows a bare status. That is the wrong
+    // default: a caller has to opt IN to being told what happened.
+    //
+    // The request context stays appended because it is what makes an error reportable (which
+    // route, which id, which status), and the six existing `serverMessage` readers are unaffected.
+    const context = `${init?.method ?? "GET"} ${path} → ${res.status}`;
+    const detail =
+      typeof serverMessage === "string" && serverMessage.trim()
+        ? serverMessage.trim()
+        : undefined;
     throw new HttpError(
-      `${init?.method ?? "GET"} ${path} → ${res.status}`,
+      detail ? `${detail} (${context})` : context,
       res.status,
-      typeof serverMessage === "string" ? serverMessage : undefined,
+      detail,
     );
   }
   // 204 / empty body (e.g. DELETE) — nothing to parse.
