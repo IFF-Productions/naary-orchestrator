@@ -39,6 +39,9 @@ import {
  *      field and declared as a path parameter upstream
  *   3. everything upstream marks REQUIRED — query, header, body, nested — exists somewhere in
  *      our `fields[]`
+ *   3b. a static header the catalog PINS carries a value the spec still lists (#944) — the check
+ *      that catches a stale API-version pin, where every path can still match while the document
+ *      describes a different API from the one we are asking for
  *   5. every `in:"body"` field lands on a property the spec DECLARES (#813) — the check that
  *      catches a wrong `bodyPath`: a missing envelope key, a doubled one, or a `const`
  *      discriminator at the wrong depth. Tri-stated, and only WRONG is hard: see below.
@@ -353,6 +356,31 @@ function resolveBodyPath(schema: unknown, dotted: string): BodyVerdict {
   return { state: "confirmed" };
 }
 
+/**
+ * Declared value sets for an operation's HEADER parameters, read straight from the fixture and
+ * keyed lower-case (header names are case-insensitive). `parseOpenApi` serves httpRequest
+ * autocomplete and keeps only name/in/required, so this is the same deliberate gap the required-body
+ * walk works around — not a second parser.
+ */
+function headerEnums(
+  fixture: Fixture,
+  path: string,
+  method: string,
+): Map<string, string[]> {
+  const paths = (fixture.raw.paths ?? {}) as Record<string, unknown>;
+  const item = (paths[path] ?? {}) as Record<string, unknown>;
+  const op = (item[method.toLowerCase()] ?? {}) as Record<string, unknown>;
+  const params = Array.isArray(op.parameters) ? op.parameters : [];
+  const out = new Map<string, string[]>();
+  for (const raw of params) {
+    const p = raw as { name?: unknown; in?: unknown; enum?: unknown };
+    if (p.in !== "header" || typeof p.name !== "string") continue;
+    if (!Array.isArray(p.enum) || p.enum.length === 0) continue;
+    out.set(p.name.toLowerCase(), p.enum.map(String));
+  }
+  return out;
+}
+
 /** The media type `planIntegrationCall` will actually send for this action. */
 const sentMediaType = (action: IntegrationAction): string =>
   action.bodyEncoding === "form"
@@ -382,6 +410,8 @@ interface ActionCheck {
   /** HARD failures, one message each. Empty = the check passed. */
   pathProblems: string[];
   paramProblems: string[];
+  /** A static header we send whose value the pinned spec does not list (#944). Hard. */
+  headerValueProblems: string[];
   bodyProblems: string[];
   /** WRONG body paths (#813) — hard, unless ACKNOWLEDGED_BODY excuses one. */
   bodyPathProblems: string[];
@@ -408,6 +438,7 @@ function checkAction(
     lookup,
     pathProblems: [],
     paramProblems: [],
+    headerValueProblems: [],
     bodyProblems: [],
     bodyPathProblems: [],
     bodyPathVerdicts: [],
@@ -492,6 +523,30 @@ function checkAction(
       check.advisories.push(
         `${key}: ${param.in} "${param.name}" is required upstream, catalog says required:false`,
       );
+  }
+
+  // (3b) a PINNED header VALUE must be one the spec accepts (#944) --------------------------------
+  // #944's whole lesson, turned into a check. A version header is not decoration: Notion cuts a
+  // version only for a backwards-INCOMPATIBLE change, so `Notion-Version` decides which request
+  // shapes are legal — and we sent `2022-06-28` while the published document described a different
+  // API, for a year, with a spec-diff test already in the repo. It could say nothing because it only
+  // ever asked whether SOME field existed for a required header, never what value we put in it.
+  //
+  // Hard, and safe to be hard: fixtures are pinned, so this can only turn red when a human refreshes
+  // one — at which point stale-pin and stale-fixture are the only two possibilities and both want a
+  // person. Silent for every provider whose spec declares no value set, which is most of them.
+  const enums = headerEnums(fixture, op.path, op.method);
+  for (const [name, value] of Object.entries({
+    ...(provider.headers ?? {}),
+    ...(action.headers ?? {}),
+  })) {
+    const allowed = enums.get(name.toLowerCase());
+    if (!allowed || allowed.includes(value)) continue;
+    check.headerValueProblems.push(
+      `we send ${name}: "${value}", the pinned spec declares only {${allowed.join(", ")}} — ` +
+        "either the pin is stale (bump it, then re-read EVERY action against that version) or the " +
+        "fixture is (`pnpm refresh:openapi-fixtures`)",
+    );
   }
 
   // (3) required body fields, nested included ------------------------------------------------------
@@ -665,6 +720,86 @@ describe("resolveBodyPath — every exit", () => {
   });
 });
 
+/**
+ * The header-value pin (#944), on a hand-built fixture — for the same reason the classifier above
+ * is: with the catalog now correct, this check produces NOTHING against all 14 pinned providers, and
+ * a check that has never been seen to fire is a comment, not a test. These pin both directions and
+ * the silence, so "0 problems" means "compared, and they agree".
+ */
+describe("the pinned-header-value check (#944)", () => {
+  const withEnum = (values?: string[]): Fixture => ({
+    provider: "notion",
+    pathPrefix: "",
+    source: "(hand-built)",
+    fetchedAt: "(hand-built)",
+    raw: {
+      paths: {
+        "/thing": {
+          get: {
+            parameters: [
+              {
+                name: "Notion-Version",
+                in: "header",
+                required: true,
+                ...(values ? { enum: values } : {}),
+              },
+            ],
+          },
+        },
+      },
+    },
+  });
+  const action: IntegrationAction = {
+    key: "get_thing",
+    label: "Get thing",
+    description: "…",
+    method: "GET",
+    pathTemplate: "/thing",
+    write: false,
+    fields: [],
+  };
+  const provider = (pinned: string): IntegrationProvider => ({
+    key: "notion",
+    label: "Notion",
+    headers: { "Notion-Version": pinned },
+    description: "…",
+    auth: "…",
+    actions: [action],
+  });
+  const operations = new Map<string, ApiOperation>([
+    [
+      "GET /thing",
+      {
+        method: "GET",
+        path: "/thing",
+        parameters: [{ name: "Notion-Version", in: "header", required: true }],
+        hasBody: false,
+      },
+    ],
+  ]);
+  const problems = (pinned: string, values?: string[]): string[] =>
+    checkAction(withEnum(values), provider(pinned), action, operations)
+      .headerValueProblems;
+
+  it("fails a stale pin, and names what the spec does accept", () => {
+    // Exactly the #944 shape: the path matches, the required header has a value, and the value is
+    // for an API version the pinned document no longer describes.
+    const found = problems("2022-06-28", ["2026-03-11"]);
+    expect(found).toHaveLength(1);
+    expect(found[0]).toContain('we send Notion-Version: "2022-06-28"');
+    expect(found[0]).toContain("{2026-03-11}");
+  });
+
+  it("passes the value the spec declares", () => {
+    expect(problems("2026-03-11", ["2026-03-11"])).toEqual([]);
+  });
+
+  it("says nothing when the spec declares no value set", () => {
+    // Most specs don't — silence must read as "cannot say", never as "agrees".
+    expect(problems("2022-06-28", undefined)).toEqual([]);
+  });
+});
+
 describe("vendored spec fixtures", () => {
   it("exist, and each names a provider still in the catalog", () => {
     // Guards everything below: a lost fixture directory or a renamed provider would otherwise make
@@ -730,6 +865,10 @@ for (const check of checks) {
 
     it("has a field for every required query/header parameter", () => {
       expect(check.paramProblems, check.key).toEqual([]);
+    });
+
+    it("pins a header value the spec still accepts", () => {
+      expect(check.headerValueProblems, check.key).toEqual([]);
     });
 
     it("has a field for every required body property", () => {

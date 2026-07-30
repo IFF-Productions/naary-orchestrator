@@ -1,11 +1,11 @@
 ---
-title: 'Read, query and create Notion pages and database rows — a common knowledge-base source for RAG, and an output sink for AI workflows.'
+title: 'Read, query and create Notion pages and data-source rows — a common knowledge-base source for RAG, and an output sink for AI workflows.'
 provider: notion
 label: 'Notion'
 category: 'Productivity'
 authType: bearer
 serverUrlRequired: false
-actionCount: 5
+actionCount: 6
 writeActionCount: 2
 oneClickTestable: true
 probeAction: get_me
@@ -19,7 +19,7 @@ liveVerified: false
 
 # Notion
 
-Read, query and create Notion pages and database rows — a common knowledge-base source for RAG, and an output sink for AI workflows.
+Read, query and create Notion pages and data-source rows — a common knowledge-base source for RAG, and an output sink for AI workflows.
 
 ## Before you start
 
@@ -59,7 +59,8 @@ A concrete first run:
 | Action | Method | Endpoint | Required fields | Optional fields |
 | --- | --- | --- | --- | --- |
 | Get page | `GET` | `/pages/{pageId}` | `pageId` | — |
-| Query database | `POST` | `/databases/{databaseId}/query` | `databaseId` | `filter`, `pageSize` |
+| Get database (and its data source ids) | `GET` | `/databases/{databaseId}` | `databaseId` | — |
+| Query data source | `POST` | `/data_sources/{dataSourceId}/query` | `dataSourceId` | `filter`, `pageSize` |
 | **Create page** (write) | `POST` | `/pages` | `parent`, `properties` | — |
 | **Append blocks** (write) | `PATCH` | `/blocks/{blockId}/children` | `blockId`, `children` | — |
 | Get current bot user | `GET` | `/users/me` | — | — |
@@ -72,7 +73,7 @@ The 2 write actions run **at-most-once**: a transient failure fails the node ins
 
 You fill in flat fields; the node assembles the nested body the API expects.
 
-- **Query database**: `pageSize` → `page_size`
+- **Query data source**: `pageSize` → `page_size`
 
 ## Output
 
@@ -81,8 +82,10 @@ You fill in flat fields; the node assembles the nested body the API expects.
 ## Gotchas
 
 - **Sharing is the step everyone misses.** A valid token returns **404 `object_not_found`** for a page the integration has not been added to — Notion's own docs say that error "can also indicate that the resource has not been shared with owner of the bearer token". A 404 here usually means unshared, not a wrong id.
-- Ids are the UUIDs in the page/database URL (with or without dashes).
-- Creating a page requires a `parent` and `properties` matching the target database's schema exactly.
+- Page and database ids are the UUIDs in the Notion URL (with or without dashes). **A data source id is not** — it appears in no URL, and *Query data source* needs one.
+- **Querying takes a data source id, not a database id.** Since Notion's 2025-09-03 API a database's rows live behind one or more *data sources*, so a query is two nodes: **Get database (and its data source ids)** with the database id from the URL, then **Query data source** bound to that node's `body.data_sources.0.id`. There is no way to convert one id into the other locally — a database can hold several data sources, so only Notion can tell you which.
+- Creating a page requires a `parent` and `properties` matching the target data source's schema exactly. `parent` still accepts `{ "database_id": … }` as well as `{ "data_source_id": … }` and `{ "page_id": … }`.
+- Naary pins `Notion-Version: 2026-03-11`. If a hand-authored `children` blob uses pre-2026 shapes it will be rejected — that version renamed the `transcription` block type to `meeting_notes`, replaced `archived` with `in_trash`, and replaced the flat `after` on Append blocks with a `position` object.
 
 ## Troubleshooting
 

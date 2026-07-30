@@ -116,11 +116,56 @@ describe("integration catalog — request construction", () => {
 
   it("omits an OPTIONAL json field explicitly set to {} (empty = not sent)", () => {
     const req = buildIntegrationRequest("notion", "query_database", {
-      databaseId: "db-1",
+      dataSourceId: "ds-1",
       filter: {}, // empty optional filter — must not land in the body
     });
-    expect(req.path).toBe("/databases/db-1/query");
+    expect(req.path).toBe("/data_sources/ds-1/query");
+    // `{}`, not `undefined` — and the difference is the point. This action carries
+    // `alwaysSendBody` because Notion marks the query's `requestBody` required, so the ENVELOPE
+    // is sent while the empty `filter` is still omitted. The old `toBeUndefined()` conflated
+    // "no field was written" with "no body exists"; asserting an EMPTY object keeps this test on
+    // its own subject (field omission) and would still fail if `filter: {}` ever leaked through.
+    expect(req.body).toEqual({});
+    expect(req.body).not.toHaveProperty("filter");
+  });
+
+  it("Notion query_database targets a DATA SOURCE, not a database (#944)", () => {
+    // The 2025-09-03 "Data Source Edition" moved a database's rows behind a data source, and
+    // `POST /databases/{id}/query` went with them. Pinned here because the id in the path is a
+    // different RESOURCE, not a renamed parameter: substituting a database id would 404.
+    const req = buildIntegrationRequest("notion", "query_database", {
+      dataSourceId: "ds-1",
+      filter: { property: "Status", select: { equals: "Done" } },
+      pageSize: 25,
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/data_sources/ds-1/query");
+    expect(req.body).toEqual({
+      filter: { property: "Status", select: { equals: "Done" } },
+      page_size: 25,
+    });
+  });
+
+  it("Notion get_database is the documented way to find a data source id (#944)", () => {
+    // A data source id is not derivable from a database id, and it is not in the database's URL
+    // either — `GET /databases/{id}` returning `data_sources[]` is the only route Notion offers,
+    // which is why the migration ships this action rather than just renaming a field.
+    const req = buildIntegrationRequest("notion", "get_database", {
+      databaseId: "db-1",
+    });
+    expect(req.method).toBe("GET");
+    expect(req.path).toBe("/databases/db-1");
     expect(req.body).toBeUndefined();
+  });
+
+  it("pins the Notion-Version header the whole catalog was written against (#944)", () => {
+    // Provider-wide, and a real contract: Notion only cuts a version for a backwards-INCOMPATIBLE
+    // change. Bumping this constant without re-reading every action against that version's document
+    // is the bug #944 records — so the value is asserted here and proven against Notion's own spec
+    // by the pinned fixture in integration-catalog-openapi.drift.spec.ts.
+    expect(INTEGRATION_CATALOG.notion.headers).toEqual({
+      "Notion-Version": "2026-03-11",
+    });
   });
 
   it("Notion append_block → path id + children json body", () => {
@@ -1827,6 +1872,55 @@ describe("integration save-gate validation", () => {
         fields: { title: "Checkout is down" },
       }),
     ).toMatch(/missing required field 'serviceId'/);
+  });
+
+  describe("a RETIRED field key explains itself (#944)", () => {
+    // Renaming a field key breaks every saved node that bound to it. That is allowed — but the
+    // author must not be told "missing required field 'dataSourceId'", a field they have never seen,
+    // while the database id they did fill in goes unmentioned. These pin the message, because the
+    // message is the entire reason the rename is acceptable.
+    const stale = {
+      provider: "notion",
+      action: "query_database",
+      connectionId: "n",
+    };
+
+    it("names the old key, the new key, and what to do", () => {
+      const err = validateIntegrationConfig({
+        ...stale,
+        fields: { databaseId: "abc-123" },
+      });
+      expect(err).toContain("still configures 'databaseId'");
+      expect(err).toContain("it is now 'dataSourceId'");
+      expect(err).toContain("data_sources.0.id");
+    });
+
+    it("catches a BOUND old key too, not just a typed-in one", () => {
+      // `databaseId` bound to an upstream node is the commoner shape — ids are usually bound.
+      expect(
+        validateIntegrationConfig({
+          ...stale,
+          fieldBindings: { databaseId: { from: "n1", path: "body.id" } },
+        }),
+      ).toContain("still configures 'databaseId'");
+    });
+
+    it("goes quiet once the new field is supplied", () => {
+      // A node someone has already migrated must not keep failing over a leftover key the request
+      // builder ignores anyway — otherwise the only fix is hand-editing the graph JSON.
+      expect(
+        validateIntegrationConfig({
+          ...stale,
+          fields: { databaseId: "abc-123", dataSourceId: "ds-1" },
+        }),
+      ).toBeNull();
+    });
+
+    it("still reports a plain missing field when no stale key is present", () => {
+      expect(validateIntegrationConfig({ ...stale, fields: {} })).toMatch(
+        /missing (required|path) field 'dataSourceId'/,
+      );
+    });
   });
 
   it("rejects unknown provider / action", () => {

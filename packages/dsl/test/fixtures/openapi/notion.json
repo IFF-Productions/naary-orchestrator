@@ -1,0 +1,229 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Notion API",
+    "version": "1.0.0"
+  },
+  "x-naary": {
+    "provider": "notion",
+    "pathPrefix": "/v1",
+    "source": "https://developers.notion.com/openapi.json",
+    "fetchedAt": "2026-07-30",
+    "note": "PRUNED snapshot — see packages/dsl/scripts/extract-openapi-fixtures.mjs. Do not hand-edit."
+  },
+  "paths": {
+    "/v1/pages/{page_id}": {
+      "get": {
+        "operationId": "retrieve-a-page",
+        "parameters": [
+          {
+            "name": "page_id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "filter_properties",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "Notion-Version",
+            "in": "header",
+            "required": true,
+            "enum": [
+              "2026-03-11"
+            ]
+          }
+        ]
+      }
+    },
+    "/v1/databases/{database_id}": {
+      "get": {
+        "operationId": "retrieve-database",
+        "parameters": [
+          {
+            "name": "database_id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "Notion-Version",
+            "in": "header",
+            "required": true,
+            "enum": [
+              "2026-03-11"
+            ]
+          }
+        ]
+      }
+    },
+    "/v1/data_sources/{data_source_id}/query": {
+      "post": {
+        "operationId": "post-database-query",
+        "parameters": [
+          {
+            "name": "data_source_id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "filter_properties",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "Notion-Version",
+            "in": "header",
+            "required": true,
+            "enum": [
+              "2026-03-11"
+            ]
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "sorts": {},
+                  "filter": {},
+                  "start_cursor": {},
+                  "page_size": {},
+                  "is_archived": {},
+                  "result_type": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/pages": {
+      "post": {
+        "operationId": "post-page",
+        "parameters": [
+          {
+            "name": "Notion-Version",
+            "in": "header",
+            "required": true,
+            "enum": [
+              "2026-03-11"
+            ]
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "parent": {},
+                  "properties": {},
+                  "icon": {},
+                  "cover": {},
+                  "content": {},
+                  "children": {},
+                  "markdown": {},
+                  "allow_async": {},
+                  "template": {},
+                  "position": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/blocks/{block_id}/children": {
+      "patch": {
+        "operationId": "patch-block-children",
+        "parameters": [
+          {
+            "name": "block_id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "Notion-Version",
+            "in": "header",
+            "required": true,
+            "enum": [
+              "2026-03-11"
+            ]
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "children"
+                ],
+                "properties": {
+                  "children": {
+                    "type": "array",
+                    "items": {
+                      "properties": {
+                        "embed": {},
+                        "type": {},
+                        "object": {},
+                        "bookmark": {},
+                        "image": {},
+                        "video": {},
+                        "pdf": {},
+                        "file": {},
+                        "audio": {},
+                        "code": {},
+                        "equation": {},
+                        "divider": {},
+                        "breadcrumb": {},
+                        "tab": {},
+                        "table_of_contents": {},
+                        "link_to_page": {},
+                        "table_row": {},
+                        "table": {},
+                        "column_list": {},
+                        "column": {},
+                        "heading_1": {},
+                        "heading_2": {},
+                        "heading_3": {},
+                        "heading_4": {},
+                        "paragraph": {},
+                        "bulleted_list_item": {},
+                        "numbered_list_item": {},
+                        "quote": {},
+                        "to_do": {},
+                        "toggle": {},
+                        "template": {},
+                        "callout": {},
+                        "synced_block": {}
+                      }
+                    }
+                  },
+                  "position": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/users/me": {
+      "get": {
+        "operationId": "get-self",
+        "parameters": [
+          {
+            "name": "Notion-Version",
+            "in": "header",
+            "required": true,
+            "enum": [
+              "2026-03-11"
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

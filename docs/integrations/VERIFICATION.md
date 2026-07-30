@@ -132,44 +132,44 @@ catalog's own `write` flag and `fields[].required`). `Needs` = the fields you mu
 
 | Provider | Safest read action | Needs | Read/total actions | Live proof |
 | --- | --- | --- | --- | --- |
-| airtable | `list_records` | baseId, tableId | 2/4 | — |
-| asana | `get_task` | taskGid | 1/4 | — |
-| box | `list_folder_items` | folderId (`0` = root) | 2/4 | — |
+| airtable | `list_records` | baseId, tableId | 3/5 | — |
+| asana | `get_task` | taskGid | 2/5 | — |
+| box | `list_folder_items` | folderId (`0` = root) | 3/5 | — |
 | calendly | `get_me` | — | 3/4 | — |
-| clickup | `get_task` | taskId | 2/5 | — |
+| clickup | `get_task` | taskId | 3/6 | — |
 | cloudflare | `list_zones` | — | 2/4 | — |
 | deepl | `get_usage` | — | 3/3 | — |
 | digitalocean | `list_droplets` | — | 2/4 | — |
-| discord | `get_channel` | channelId | 2/5 | — |
+| discord | `get_channel` | channelId | 3/6 | — |
 | dropbox | `list_folder` | path (`""` = root) | 2/4 | — |
 | front | `list_conversations` | — | 3/4 | — |
-| github | `get_issue` | owner, repo, issueNumber | 2/5 | **yes** — `github-agent.live.spec.ts` |
-| gitlab | `list_issues` | projectId | 2/4 | — |
+| github | `get_issue` | owner, repo, issueNumber | 4/7 | **yes** — `github-agent.live.spec.ts` |
+| gitlab | `list_issues` | projectId | 3/5 | — |
 | googlesheets | `get_spreadsheet` | spreadsheetId | 2/5 | — |
 | hubspot | `get_contact` | contactId | 1/4 | — |
-| intercom | `get_contact` | contactId | 1/4 | — |
-| jira | `get_issue` | issueKey | 1/4 | — |
+| intercom | `get_contact` | contactId | 2/5 | — |
+| jira | `get_issue` | issueKey | 2/5 | — |
 | linear | `list_issues` | query (GraphQL) | 2/5 | — |
-| mailchimp | `list_members` | listId | 2/5 | — |
-| mattermost | `list_channel_posts` | channelId | 3/5 | — |
+| mailchimp | `list_members` | listId | 3/6 | — |
+| mattermost | `list_channel_posts` | channelId | 4/6 | — |
 | monday | `list_items` | query (GraphQL) | 2/5 | — |
 | msgraph | `list_messages` | userId | 2/4 | — |
 | netlify | `list_sites` | — | 4/4 | — |
-| notion | `get_page` | pageId | 2/4 | — |
+| notion | `get_page` | pageId | 4/6 | — |
 | pagerduty | `list_incidents` | — | 2/6 | — |
 | pipedrive | `list_deals` | — | 2/5 | — |
-| posthog | `list_events` | projectId | 3/4 | — |
+| posthog | `list_events` | projectId | 4/5 | — |
 | sendgrid | `list_templates` | — | 1/3 | — |
-| sentry | `get_issue` | issueId | 3/4 | — |
+| sentry | `get_issue` | issueId | 4/5 | — |
 | shopify | `list_products` | — | 2/5 | — |
 | **slack** | **none — all 3 actions write** | — | 0/3 | **yes** — webhook path, `approval-notify.live.spec.ts` |
 | stripe | `list_charges` | — | 2/5 | — |
 | todoist | `list_tasks` | — | 2/4 | — |
-| twilio | `list_messages` | accountSid | 2/4 | — |
+| twilio | `list_messages` | accountSid | 3/5 | — |
 | vercel | `list_deployments` | — | 3/4 | — |
-| webflow | `list_collections` | siteId | 3/4 | — |
+| webflow | `list_collections` | siteId | 4/5 | — |
 | zendesk | `list_tickets` | — | 2/5 | — |
-| zoom | `list_meetings` | userId | 2/4 | — |
+| zoom | `list_meetings` | userId | 3/5 | — |
 
 ### 2.1 Slack has no read-only smoke check
 
@@ -262,7 +262,7 @@ silently rot.
 **Ordering note:** an `unknown` answer comes *before* the missing-Server-URL check — telling someone to
 fill in a Server URL for a provider we can't probe at all would send them to fix the wrong thing.
 
-### 2.5 Which write bodies a SPEC can vouch for — 51 of 76 (#813)
+### 2.5 Which write bodies a SPEC can vouch for — 53 of 76 (#813)
 
 A third evidence tier, between "unit-tested" and "run live": the request body an action builds,
 diffed against the provider's own OpenAPI document. `packages/dsl/test/integration-catalog-openapi.drift.spec.ts`
@@ -276,10 +276,10 @@ This does **not** replace the `Live proof` column. A spec proves the shape is *s
 anyone has ever sent it. It does close the specific hole #707 and #811 came out of: an action whose
 body could never be accepted, shipped looking exactly as trustworthy as one that works.
 
-**Spec-verified — 25 providers, 51 of the 76 body-bearing write actions:** `asana` · `box` ·
+**Spec-verified — 26 providers, 53 of the 76 body-bearing write actions:** `asana` · `box` ·
 `calendly` · `clickup` · `cloudflare` · `digitalocean` · `discord` · `front` · `github` · `gitlab` ·
 `hubspot` · `intercom` · `jira` · `mailchimp` · `mattermost` · `msgraph` · `pagerduty` · `posthog` ·
-`sendgrid` · `slack` · `stripe` · `todoist` · `twilio` · `webflow` · `zoom` — **125 body fields
+`notion` · `sendgrid` · `slack` · `stripe` · `todoist` · `twilio` · `webflow` · `zoom` — **128 body fields
 confirmed, 8 unknowable, 2 wrong (both adjudicated).**
 
 - The **8 unknowable** break down as: **5 are all of `jira.create_issue`**, whose every field lands
@@ -297,10 +297,40 @@ confirmed, 8 unknowable, 2 wrong (both adjudicated).**
   evidence, and each must STILL be produced or the test fails — an acknowledgment that stops
   matching is either a fixed catalog or a changed spec, and both deserve a look.
 
-**Not spec-verified — 10 providers plus one action of an 11th, 25 actions in total.** (`hubspot` is
-in both lists: 2 of its 3 writes are verified, `create_deal` is not — which is why 25 + 10 lands on
-35.) Grouped by why, because "we didn't check", "there is nothing to check against", and "the check
+**Not spec-verified — 9 providers plus one action of a 10th, 23 actions in total.** (`hubspot` is
+in both lists: 2 of its 3 writes are verified, `create_deal` is not — which is why 23 + 10 lands on
+33, against 26 verified providers.) Grouped by why, because "we didn't check", "there is nothing to check against", and "the check
 would lie" are three different claims:
+
+Three catalog providers send a provider-wide header that pins an API version: `notion`
+(`Notion-Version`), `intercom` (`Intercom-Version`) and `github` (`X-GitHub-Api-Version`). That header
+decides which request shapes are legal, so a spec diff that compares only paths and property names can
+be fully green while we are talking to a different API from the one the document describes. Notion is
+the case in point: we sent `Notion-Version: 2022-06-28` while the published spec described 2026-03-11,
+where a database's rows had moved behind a **data source** and `POST /databases/{id}/query` no longer
+exists. Nothing was broken — that pin is exactly what kept the old call working — but nothing could
+tell us either.
+
+Two things now close that gap. `pruneParameters` keeps a pinned header's declared `enum` in the
+fixture, so the fixture records **which API version it describes**; and the drift spec hard-fails when
+the value the catalog pins is not one the pinned document lists. Bumping a version header is therefore
+never a one-line edit: the test goes red until every action has been re-read against the new version's
+document. That is how #944's migration was carried out, and what makes the *next* one show up as a red
+build instead of a year of silence.
+
+**Where it actually bites today**, because a mechanism's reach is not the same as its coverage:
+`notion` (spec declares `enum: ["2026-03-11"]`) and `intercom` (`1.0` … `2.16`, we pin `2.11`) — both
+refreshed here, both compared. `github` is **not** covered and cannot be: its 13MB description never
+mentions `X-GitHub-Api-Version` at all, so there is nothing to compare with. Every other fixture was
+extracted before this existed and carries no `enum`; each gains the check on its next refresh, as a
+reviewable diff. **A fixture with no `enum` means the spec did not say — never that it agrees.**
+
+The reverse still holds, and it is the rule to reach for first: **a spec mismatch on a
+version-pinned API is not evidence that an endpoint is gone.** Check which version we send, and check
+the live status code, before "the spec doesn't have it" becomes "it's broken".
+
+**Not spec-verified (21 providers, 45 actions)** — grouped by why, because "we didn't check" and
+"there is nothing to check against" are different claims:
 
 | Why | Providers |
 | --- | --- |
@@ -309,7 +339,6 @@ would lie" are three different claims:
 | Vendor publishes **no** machine-readable REST document. Shopify's REST Admin API is legacy and only the GraphQL schema is published; the OpenAPI documents in circulation are third-party and years stale | `shopify` (3) |
 | Spec exists but is **not a fetchable document** — Airtable's is embedded in its docs page's SSR state under an `"openApi"` key, with no raw URL. Scraping HTML into a fixture would put a third party's page structure in the refresh path, which is the one thing the pinning design exists to prevent | `airtable` (2) |
 | Spec exists and documents **different endpoints than we call** | `pipedrive` (3 — the v1 document no longer contains `POST /deals`, `PUT /deals/{id}` or `POST /persons`; v2 needs a different base path, `PATCH`, and `{id}`), `sentry` (1 — only the org-scoped issue route; ours is the legacy un-scoped one) |
-| Spec exists but describes a **different API version than we pin**, so diffing it would report a working call as broken | `notion` (2 — we send `Notion-Version: 2022-06-28`; the published document is 2025-09-03, where `POST /databases/{id}/query` is superseded by data sources) |
 | Spec exists; matching needs a **path-rewrite seam** we chose not to build | `zendesk` (3 — canonicalises without the `.json` suffix our paths use). #813 set the bar at "worth doing when a second provider needs the same seam (Shopify's paths have the suffix too)"; Shopify turns out to publish no spec at all, so that bar can no longer be met and 3 actions do not justify a transform duplicated across the extractor and the drift spec, where a desync silently stops matching |
 | One action, not a provider: `hubspot.create_deal`. HubSpot's Deals document templates every path on the internal objectTypeId `0-3` and never the word `deals`. The generic Objects document has `/crm/v3/objects/{objectType}`, but binding a literal segment of ours to a placeholder of theirs would make `{}` match anything and quietly un-check every path in the file | `hubspot` (1 of 3) |
 
