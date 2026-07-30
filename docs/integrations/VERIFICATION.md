@@ -282,10 +282,14 @@ body could never be accepted, shipped looking exactly as trustworthy as one that
 `sendgrid` · `slack` · `stripe` · `todoist` · `twilio` · `webflow` · `zoom` — **125 body fields
 confirmed, 8 unknowable, 2 wrong (both adjudicated).**
 
-- The **unknowable** ones are properties a provider's own spec marks `readOnly` while its docs
-  require them on a write (PagerDuty's `incident.service.id`/`.type`, Cloudflare's DNS `content`),
-  or free-form maps where any key is legal (HubSpot's `properties`). The spec contradicts itself, or
-  says nothing — either way it neither confirms nor denies.
+- The **8 unknowable** break down as: **5 are all of `jira.create_issue`**, whose every field lands
+  under Jira's `fields`, declared `additionalProperties` — any key is legal there, so the spec
+  cannot confirm or deny `fields.project.key` or `fields.summary`. That action is *covered* and
+  contributes **zero** confirmed fields, which is exactly why the three states are printed
+  separately: counting it as verified would be the inflation this audit exists to prevent. The other
+  3 are properties a provider's own spec marks `readOnly` while its docs require them on a write
+  (PagerDuty's `incident.service.id`/`.type`, Cloudflare's DNS `content`) — the spec contradicts
+  itself there, so it neither confirms nor denies.
 - The **2 wrong are not a red build.** A `wrong` verdict stays in the total once adjudicated, and
   both are `msgraph.send_mail`: Microsoft's generated document names the action parameters `Message`
   and `SaveToSentItems` after the CSDL declaration, while Microsoft's own reference and every one of
@@ -293,8 +297,10 @@ confirmed, 8 unknowable, 2 wrong (both adjudicated).**
   evidence, and each must STILL be produced or the test fails — an acknowledgment that stops
   matching is either a fixed catalog or a changed spec, and both deserve a look.
 
-**Not spec-verified — 10 providers, 25 actions.** Grouped by why, because "we didn't check", "there
-is nothing to check against", and "the check would lie" are three different claims:
+**Not spec-verified — 10 providers plus one action of an 11th, 25 actions in total.** (`hubspot` is
+in both lists: 2 of its 3 writes are verified, `create_deal` is not — which is why 25 + 10 lands on
+35.) Grouped by why, because "we didn't check", "there is nothing to check against", and "the check
+would lie" are three different claims:
 
 | Why | Providers |
 | --- | --- |
