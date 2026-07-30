@@ -33,12 +33,12 @@
     "prod": "docker compose --env-file ./deploy/.env -f docker-compose.yml -f deploy/docker-compose.prod.yml up -d --build"
   },
   "devDependencies": {
-    "@swc/core": "^1.15.46",
+    "@swc/core": "^1.15.47",
     "@swc/register": "^0.1.10",
-    "@types/node": "^26.1.1",
+    "@types/node": "^26.1.2",
     "dotenv-cli": "^11.0.0",
-    "jsdom": "^29.1.1",
-    "prisma": "7.9.0",
+    "jsdom": "^30.0.1",
+    "prisma": "7.9.1",
     "typescript": "^7.0.2",
     "unplugin-swc": "^1.5.9",
     "vitest": "^4.1.10"
