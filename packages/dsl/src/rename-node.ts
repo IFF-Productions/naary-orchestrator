@@ -181,6 +181,15 @@ function handoffNamesLosingTheirId(
 }
 
 /**
+ * Keys the RUNTIME seeds into ctx, which are therefore never node ids: `$vars`, `$secrets`, and
+ * the `__*` bookkeeping (`__input`, `__costUsd`, `__nodeTimes`, …). Exported because callers that
+ * walk a ctx by key — not just by reference — need the same list.
+ */
+export function isReservedCtxKey(id: string): boolean {
+  return id === "$vars" || id === "$secrets" || id.startsWith("__");
+}
+
+/**
  * Which node ids a node's CONFIG reads data from — the read-only sibling of `rewriteConfig`.
  *
  * "Reads data from" is the precise claim, and it is narrower than "references". Only the two
@@ -192,6 +201,11 @@ function handoffNamesLosingTheirId(
  * `EdgeCondition.path` belong to the graph's edges rather than to this node, and
  * `handoff.targets[].to` names somewhere the node can hand control TO — a downstream routing
  * target, not data it consumed.
+ *
+ * Also not included: the RESERVED ctx keys. `{{ $vars.REGION }}` and `{{ __input.id }}` are
+ * ordinary references and the walk sees `$vars`/`__input` as their heads — but those are keys the
+ * runtime seeds into ctx, not node ids, so returning them would make this function's name a lie
+ * and hand every caller a filtering job it would eventually forget. Filtered here, once.
  *
  * Exists for the run diagnosis (see run-diagnosis.ts), which sends a failing node's inputs to a
  * model and must therefore know exactly which upstream outputs it actually read — anything wider
@@ -230,7 +244,7 @@ export function referencedNodeIds(node: NodeDef): string[] {
   walk(node.config);
   // A node referring to itself is not an input — `{{ self.x }}` reads an output it hasn't written.
   found.delete(node.id);
-  return [...found];
+  return [...found].filter((id) => !isReservedCtxKey(id));
 }
 
 export function renameNode(

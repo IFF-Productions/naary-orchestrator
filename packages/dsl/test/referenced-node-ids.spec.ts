@@ -70,6 +70,20 @@ describe("referencedNodeIds", () => {
   it("handles a node with no config at all", () => {
     expect(referencedNodeIds(node("bare"))).toEqual([]);
   });
+
+  it("does NOT report reserved ctx keys — they are runtime-seeded, not node ids", () => {
+    // `{{ $vars.K }}` is an ordinary reference whose head is `$vars`, so without this filter the
+    // function would return something that is not a node id and every caller would have to know
+    // to drop it. Filtered once, here, so the name stays true.
+    const n = node("call", {
+      region: "{{ $vars.REGION }}",
+      token: "{{ $secrets.PD_TOKEN }}",
+      echo: "{{ __input.ticketId }}",
+      cost: "{{ __costUsd }}",
+      real: "{{ upstream.value }}",
+    });
+    expect(referencedNodeIds(n)).toEqual(["upstream"]);
+  });
 });
 
 // ── The drift guard ───────────────────────────────────────────────────────────────────────────

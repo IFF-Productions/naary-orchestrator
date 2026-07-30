@@ -62,6 +62,13 @@ export interface FixInstructionInput {
   http?: DiagnosisHttpCapture | null;
   /** The run ctx. Only the entries named by `referencedNodeIds` are ever read out of it. */
   ctx?: Record<string, unknown>;
+  /**
+   * Whether the run's step outputs could be READ at all — distinct from the run having produced
+   * none. A closed run whose ctx we failed to recover answers `{}`, which is indistinguishable
+   * from an empty run unless the caller says so. Pass `false` there, and the instruction admits
+   * the gap instead of telling the model the node reads nothing. Defaults to true.
+   */
+  ctxAvailable?: boolean;
 }
 
 export interface FixInstruction {
@@ -75,16 +82,6 @@ export interface FixInstruction {
 const MAX_OUTPUT_CHARS = 2_000;
 /** Cap on a captured request/response body, which the worker has already truncated once. */
 const MAX_BODY_CHARS = 1_000;
-
-/**
- * Never sent, whatever the reference walk turns up.
- *
- * `$vars` and `$secrets` are reachable as reference heads, and `__input`/`__costUsd`/`__nodeTimes`
- * and friends are run bookkeeping that tells a model nothing about why a node failed.
- */
-function isSendableNodeId(id: string): boolean {
-  return id !== "$vars" && id !== "$secrets" && !id.startsWith("__");
-}
 
 /** JSON, length-capped, with the truncation stated rather than silent. */
 function clip(value: unknown, max: number): string {
@@ -129,7 +126,8 @@ function describeHttp(http: DiagnosisHttpCapture): string {
 export function buildFixInstruction(
   input: FixInstructionInput,
 ): FixInstruction {
-  const { graph, failedNodeId, error, failureKind, http, ctx } = input;
+  const { graph, failedNodeId, error, failureKind, http, ctx, ctxAvailable } =
+    input;
   const node: NodeDef | undefined = graph?.nodes?.find(
     (n) => n.id === failedNodeId,
   );
@@ -160,14 +158,11 @@ export function buildFixInstruction(
   }
 
   // The data the failing node actually read — the whole reason `referencedNodeIds` exists.
-  const includedNodeIds: string[] = [];
-  if (node && ctx) {
-    for (const id of referencedNodeIds(node)) {
-      if (!isSendableNodeId(id)) continue;
-      if (!(id in ctx)) continue; // never ran, or produced nothing — nothing to send
-      includedNodeIds.push(id);
-    }
-  }
+  // Reserved ctx keys ($vars/$secrets/__*) never appear: referencedNodeIds drops them at source,
+  // since they are runtime-seeded keys rather than node ids.
+  const reads = node ? referencedNodeIds(node) : [];
+  const includedNodeIds = ctx ? reads.filter((id) => id in ctx) : [];
+
   if (includedNodeIds.length) {
     const rendered = includedNodeIds
       .map((id) => `  ${id}: ${clip(ctx?.[id], MAX_OUTPUT_CHARS)}`)
@@ -176,8 +171,18 @@ export function buildFixInstruction(
       `\nWhat that node received from the steps it reads from:\n${rendered}`,
     );
   } else if (node) {
+    // Three different situations, and collapsing them would state a fact about the workflow that
+    // is really a fact about our fetch. `ctxAvailable: false` is the one that matters: a closed
+    // run whose ctx we could not read answers `{}`, and calling that "reads no data" would send
+    // the model a confident falsehood — the same shape of bug as a swallowed catch.
     parts.push(
-      `\nThat node reads no data from other steps (or those steps produced none).`,
+      `\n${
+        ctxAvailable === false
+          ? "The step outputs for this run could not be read, so what that node received is unknown. Diagnose from the error and configuration alone."
+          : reads.length === 0
+            ? "That node reads no data from other steps."
+            : `That node reads from ${reads.map((r) => `"${r}"`).join(", ")}, but those steps produced no output in this run.`
+      }`,
     );
   }
 

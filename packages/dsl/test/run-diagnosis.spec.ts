@@ -178,6 +178,41 @@ describe("buildFixInstruction — bounds and edge cases", () => {
     expect(includedNodeIds).toEqual(["start"]);
   });
 
+  it("says the outputs were UNREADABLE rather than absent, when told so", () => {
+    // A closed run whose ctx we couldn't recover answers `{}` — indistinguishable from an empty
+    // run unless the caller says which it was. Calling it "reads no data" would hand the model a
+    // confident falsehood about the workflow.
+    const { instruction } = buildFixInstruction({
+      ...base,
+      ctx: {},
+      ctxAvailable: false,
+    });
+    expect(instruction).toContain("could not be read");
+    expect(instruction).not.toContain("reads no data from other steps");
+  });
+
+  it("distinguishes 'reads nothing' from 'read steps that produced nothing'", () => {
+    // Node with no references at all.
+    const noRefs = buildFixInstruction({
+      ...base,
+      graph: {
+        ...GRAPH,
+        nodes: GRAPH.nodes.map((n) =>
+          n.id === "pagerduty" ? node("pagerduty", { action: "x" }) : n,
+        ),
+      },
+      ctx: {},
+    });
+    expect(noRefs.instruction).toContain("reads no data from other steps");
+
+    // Node that DOES reference upstream steps, which simply produced nothing this run.
+    const emptyUpstream = buildFixInstruction({ ...base, ctx: {} });
+    expect(emptyUpstream.instruction).toContain(
+      "produced no output in this run",
+    );
+    expect(emptyUpstream.instruction).toContain('"lookup"');
+  });
+
   it("handles a missing error and a missing ctx", () => {
     const { instruction } = buildFixInstruction({
       graph: GRAPH,
