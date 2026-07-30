@@ -362,16 +362,18 @@ async function materialize(node, docUrl, stack = new Set(), hops = 0) {
     if (stack.has(key)) return { "x-circular-ref": node.$ref };
     const target = pointerInto(await loadDocument(targetUrl), pointer);
     if (target === undefined) return { "x-unresolved-ref": node.$ref };
-    const resolved = await materialize(
-      target,
-      targetUrl,
-      new Set(stack).add(key),
-      hops + 1,
-    );
+    // ONE stack for both descents. The target and the siblings are both reached THROUGH this
+    // `$ref`, so `key` is on the path for both — giving the siblings the un-extended `stack`
+    // meant a sibling pointing back at this same key wasn't seen as a cycle and re-resolved the
+    // chain, bounded only by the `hops > 12` backstop rather than caught as circular. OpenAPI 3.1
+    // permits `$ref` siblings, so that shape is legal input, not a malformed spec.
+    const stackWithKey = new Set(stack).add(key);
+    const resolved = await materialize(target, targetUrl, stackWithKey, hops + 1);
     // OpenAPI 3.1 allows keys beside `$ref` (a `description` override, most often). Ours win.
+    // `hops` is NOT incremented: siblings sit at this node's level, not one indirection deeper.
     const { $ref: _ignored, ...siblings } = node;
     return Object.keys(siblings).length
-      ? { ...resolved, ...(await materialize(siblings, docUrl, stack, hops)) }
+      ? { ...resolved, ...(await materialize(siblings, docUrl, stackWithKey, hops)) }
       : resolved;
   }
   const out = {};
