@@ -180,7 +180,13 @@ export function RerunMenu({
   const latest = versions?.[0]?.version ?? null;
 
   return (
-    <span ref={wrap} style={{ position: "relative", display: "inline-flex" }}>
+    <span
+      ref={wrap}
+      // `btn-split` joins the primary and its caret into one control (see components.css). Only
+      // meaningful when the caret is actually rendered — a lone button needs no seam handling.
+      className={workflowKey ? "btn-split" : undefined}
+      style={{ position: "relative", display: "inline-flex" }}
+    >
       {/* Primary: re-run against the latest graph (the original behaviour). */}
       <Button
         size={size}

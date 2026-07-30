@@ -28,6 +28,23 @@ import { makeStreamPositions } from "./stream-positions";
 /** What the panel does with what's already on the canvas: change it, or replace it. */
 export type AiMode = "edit" | "create";
 
+/**
+ * Does a LANDED generation become the unsaved-changes guard's new baseline?
+ *
+ * Only a CREATE. It presents a graph rather than editing one — the same act as opening a template
+ * — so there is no prior state the user is departing from.
+ *
+ * An EDIT must not. It produces unsaved changes to an already-saved workflow, which is exactly
+ * what the guard exists to catch; re-baselining marks the AI's work clean the moment it lands, and
+ * leaving the canvas then discards it silently. #874 (edit mode) and #919 (the guard) were each
+ * right on their own and nothing tested them together, so the composed behaviour was wrong with no
+ * test to notice. Extracted as a named predicate for that reason — the rule is one boolean, but it
+ * is a boolean that has now been got wrong once and is invisible at the call site.
+ */
+export function shouldRebaselineAfterGeneration(mode: AiMode): boolean {
+  return mode === "create";
+}
+
 export function useAiBuilder({
   nodes,
   graph,
@@ -43,6 +60,7 @@ export function useAiBuilder({
   setStatus,
   setSearchParams,
   onGraphPresented,
+  onEditApplied,
 }: {
   nodes: Node<NaaryData>[];
   /** The live-compiled canvas, or undefined while it doesn't compile. What an edit sends. */
@@ -65,6 +83,13 @@ export function useAiBuilder({
    * site for why a failed stream must NOT re-baseline).
    */
   onGraphPresented: () => void;
+  /**
+   * An EDIT landed and the canvas now differs from the last saved version. Distinct from
+   * `onGraphPresented`, which fires only for a CREATE — the two are mutually exclusive by
+   * construction (see shouldRebaselineAfterGeneration), and conflating them is what would make the
+   * review panel open on a draft that has nothing to compare against.
+   */
+  onEditApplied?: () => void;
 }) {
   // AI workflow builder: describe a flow → generate a draft onto the canvas.
   const [showAi, setShowAi] = useState(false);
@@ -219,17 +244,19 @@ export function useAiBuilder({
       setNodes(toFlowNodes(positions.settle(cn)));
       setEdges(toFlowEdges(ce));
       setName(genName);
-      // A completed generation PRESENTS a graph rather than editing one, so it becomes the
-      // unsaved-changes guard's new baseline. Here — on the SUCCESS path, after the reconcile —
-      // and not on the falling edge of `generating`: a generation that dies mid-stream leaves a
-      // half-drawn graph on the canvas, and baselining THAT would mark the user's real unsaved
-      // edits clean and let them be discarded without a prompt.
-      onGraphPresented();
+      // Whether this landing becomes the guard's new baseline — see the predicate for why an EDIT
+      // must not. Called on the SUCCESS path, after the reconcile, and not on the falling edge of
+      // `generating`: a generation that dies mid-stream leaves a half-drawn graph on the canvas,
+      // and baselining THAT would mark the user's real unsaved edits clean.
+      if (shouldRebaselineAfterGeneration(editing ? "edit" : "create")) {
+        onGraphPresented();
+      }
       if (editing) {
-        // Keep workflowKey + version: this is the SAME workflow, so Save writes its next
-        // version. Blanking them (what the create path does) forks a copy and orphans the
-        // original — the run history, schedules and webhook URLs all stay behind on it.
+        // Keep workflowKey + version: this is the SAME workflow, so Save writes its next version.
+        // Blanking them (what the create path does) forks a copy and orphans the original — the
+        // run history, schedules and webhook URLs all stay behind on it.
         setStatus("Updated — review the changes and Save to keep them.");
+        onEditApplied?.();
       } else {
         setWorkflowKey(""); // now a NEW unsaved draft (only after a successful generation)
         setVersion(null);

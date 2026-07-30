@@ -1,9 +1,14 @@
 /**
  * Version-diff MODAL (redesign "Naary Workflows.dc.html") — the restyled
- * successor of the old inline WorkflowDiffPanel. Renders the server-computed
- * structural diff (GET /graphs/:key/diff → diffGraphs in @naary/dsl) as
- * +/~/− rows with node icon tiles, per-row tinted borders, a summary-count
- * footer, and an optional "Promote" CTA.
+ * successor of the old inline WorkflowDiffPanel. Owns the VERSION-COMPARISON
+ * part: the pickers, the fetch (GET /graphs/:key/diff), and an optional
+ * "Promote" CTA.
+ *
+ * The rendering — +/~/− rows and the summary counts — moved to `GraphDiffBody`,
+ * so a diff computed some other way can be shown the same way. The canvas
+ * reviews an UNSAVED AI edit against the graph it started from, which is a
+ * `diffGraphs` call in the browser with no versions and no fetch involved; that
+ * has no business reaching for a modal that owns pickers and a version history.
  *
  * Two entry modes:
  * - cross-env ("View diff: sandbox → prod"): the parent resolves the target
@@ -14,164 +19,18 @@
  * - manual ("Compare…" from Version history): pickers only, user-driven.
  */
 import { useEffect, useState } from "react";
-import type { GraphDiff, NodeType } from "@naary/dsl";
-import { Icon, type IconName, Spinner } from "../../../components";
+import type { GraphDiff } from "@naary/dsl";
+import { Icon, Spinner } from "../../../components";
 import { api, type GraphVersion } from "../../../lib/api";
-import { nodeDisplayLabel } from "../../../lib/graph-model";
-import { ACCENT } from "../../../lib/graph-model";
-import { nodeIcon } from "./model";
+import { GraphDiffBody, GraphDiffCounts, isEmptyDiff } from "./GraphDiffBody";
 
 type Diff = GraphDiff & { fromVersion: number; toVersion: number };
-type DiffNode = GraphDiff["nodesAdded"][number];
-type DiffEdge = GraphDiff["edgesAdded"][number];
 
 export interface DiffPreset {
   from: number;
   to: number;
   /** Mono subtitle, e.g. "prod v6 → sandbox v9". */
   title: string;
-}
-
-type Kind = "add" | "chg" | "del" | "info";
-
-const TINT: Record<Kind, string> = {
-  add: "var(--state-done)",
-  chg: "var(--state-paused)",
-  del: "var(--state-error)",
-  info: "var(--ink-3)",
-};
-const SIGN: Record<Kind, string> = { add: "+", chg: "~", del: "−", info: "·" };
-const TAG: Record<Kind, string> = {
-  add: "added",
-  chg: "changed",
-  del: "removed",
-  info: "",
-};
-
-function DiffRow({
-  kind,
-  icon,
-  accent,
-  name,
-  detail,
-  tag,
-}: {
-  kind: Kind;
-  icon: IconName;
-  accent: string;
-  name: string;
-  detail?: string;
-  tag?: string;
-}) {
-  const fg = TINT[kind];
-  return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 12,
-        border: `1px solid color-mix(in srgb, ${fg} 35%, transparent)`,
-        background:
-          kind === "info"
-            ? "var(--card)"
-            : `color-mix(in srgb, ${fg} 8%, var(--card))`,
-        borderRadius: 11,
-        padding: "11px 13px",
-      }}
-    >
-      <span
-        className="mono"
-        style={{
-          width: 20,
-          height: 20,
-          flex: "none",
-          borderRadius: 6,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          fontSize: "var(--text-body)",
-          fontWeight: "var(--weight-bold)",
-          color: fg,
-          border: `1px solid color-mix(in srgb, ${fg} 40%, transparent)`,
-        }}
-      >
-        {SIGN[kind]}
-      </span>
-      <span
-        style={{
-          width: 30,
-          height: 30,
-          flex: "none",
-          borderRadius: 8,
-          border: `1px solid ${accent}`,
-          color: accent,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        <Icon name={icon} size={15} />
-      </span>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div
-          style={{
-            fontSize: "var(--text-sm)",
-            fontWeight: "var(--weight-semibold)",
-            color: "var(--ink)",
-          }}
-        >
-          {name}
-        </div>
-        {detail && (
-          <div
-            style={{
-              fontSize: "var(--text-xs)",
-              color: "var(--ink-faint)",
-              marginTop: 1,
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {detail}
-          </div>
-        )}
-      </div>
-      {(tag ?? TAG[kind]) && (
-        <span
-          className="mono"
-          style={{
-            fontSize: "var(--text-2xs)",
-            fontWeight: "var(--weight-bold)",
-            letterSpacing: "0.04em",
-            textTransform: "uppercase",
-            color: fg,
-            flex: "none",
-          }}
-        >
-          {tag ?? TAG[kind]}
-        </span>
-      )}
-    </div>
-  );
-}
-
-const nodeName = (n: DiffNode): string =>
-  nodeDisplayLabel(n.type as NodeType, n.config);
-const edgeName = (e: DiffEdge): string => `${e.from} → ${e.to}`;
-const edgeDetail = (e: DiffEdge): string | undefined =>
-  e.condition ? `when ${e.condition.path} ${e.condition.op}` : undefined;
-
-function isEmpty(d: GraphDiff): boolean {
-  return (
-    d.nodesAdded.length === 0 &&
-    d.nodesRemoved.length === 0 &&
-    d.nodesChanged.length === 0 &&
-    d.edgesAdded.length === 0 &&
-    d.edgesRemoved.length === 0 &&
-    !d.edgesReordered &&
-    !d.startNodeChanged
-  );
 }
 
 export function DiffModal({
@@ -271,17 +130,6 @@ export function DiffModal({
       </select>
     </label>
   );
-
-  const counts = diff
-    ? {
-        add: diff.nodesAdded.length + diff.edgesAdded.length,
-        chg:
-          diff.nodesChanged.length +
-          (diff.startNodeChanged ? 1 : 0) +
-          (diff.edgesReordered ? 1 : 0),
-        del: diff.nodesRemoved.length + diff.edgesRemoved.length,
-      }
-    : null;
 
   return (
     <div className="overlay" onClick={onClose} style={{ padding: 36 }}>
@@ -411,85 +259,12 @@ export function DiffModal({
                 : "Pick two versions and hit Compare."}
             </div>
           )}
-          {diff && isEmpty(diff) && (
+          {diff && isEmptyDiff(diff) && (
             <div style={{ fontSize: "var(--text-sm)", color: "var(--ink-3)" }}>
               No structural changes between these versions.
             </div>
           )}
-          {diff && !isEmpty(diff) && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {diff.nodesAdded.map((n) => (
-                <DiffRow
-                  key={`na-${n.id}`}
-                  kind="add"
-                  icon={nodeIcon(n.type as NodeType)}
-                  accent={ACCENT[n.type as NodeType] ?? "var(--ink-2)"}
-                  name={nodeName(n)}
-                  detail={n.id}
-                />
-              ))}
-              {diff.nodesChanged.map((c) => (
-                <DiffRow
-                  key={`nc-${c.id}`}
-                  kind="chg"
-                  icon={nodeIcon(c.after.type as NodeType)}
-                  accent={ACCENT[c.after.type as NodeType] ?? "var(--ink-2)"}
-                  name={nodeName(c.after)}
-                  detail={`${c.id} · ${c.fields.join(", ")}`}
-                />
-              ))}
-              {diff.nodesRemoved.map((n) => (
-                <DiffRow
-                  key={`nr-${n.id}`}
-                  kind="del"
-                  icon={nodeIcon(n.type as NodeType)}
-                  accent={ACCENT[n.type as NodeType] ?? "var(--ink-2)"}
-                  name={nodeName(n)}
-                  detail={n.id}
-                />
-              ))}
-              {diff.edgesAdded.map((e, i) => (
-                <DiffRow
-                  key={`ea-${i}-${e.from}-${e.to}`}
-                  kind="add"
-                  icon="arrow-right"
-                  accent="var(--ink-2)"
-                  name={edgeName(e)}
-                  detail={edgeDetail(e)}
-                  tag="edge added"
-                />
-              ))}
-              {diff.edgesRemoved.map((e, i) => (
-                <DiffRow
-                  key={`er-${i}-${e.from}-${e.to}`}
-                  kind="del"
-                  icon="arrow-right"
-                  accent="var(--ink-2)"
-                  name={edgeName(e)}
-                  detail={edgeDetail(e)}
-                  tag="edge removed"
-                />
-              ))}
-              {diff.startNodeChanged && (
-                <DiffRow
-                  kind="chg"
-                  icon="bolt"
-                  accent="var(--node-trigger)"
-                  name="Entry node changed"
-                  detail="the workflow now starts from a different node"
-                />
-              )}
-              {diff.edgesReordered && (
-                <DiffRow
-                  kind="chg"
-                  icon="router"
-                  accent="var(--node-router)"
-                  name="Edges reordered"
-                  detail="affects branch precedence"
-                />
-              )}
-            </div>
-          )}
+          {diff && <GraphDiffBody diff={diff} />}
         </div>
 
         {/* footer */}
@@ -502,50 +277,7 @@ export function DiffModal({
             gap: 12,
           }}
         >
-          {counts && (
-            <div
-              style={{
-                fontSize: "var(--text-xs)",
-                color: "var(--ink-faint)",
-                display: "flex",
-                gap: 14,
-              }}
-            >
-              <span>
-                <span
-                  style={{
-                    color: "var(--state-done)",
-                    fontWeight: "var(--weight-semibold)",
-                  }}
-                >
-                  +{counts.add}
-                </span>{" "}
-                added
-              </span>
-              <span>
-                <span
-                  style={{
-                    color: "var(--state-paused)",
-                    fontWeight: "var(--weight-semibold)",
-                  }}
-                >
-                  ~{counts.chg}
-                </span>{" "}
-                changed
-              </span>
-              <span>
-                <span
-                  style={{
-                    color: "var(--state-error)",
-                    fontWeight: "var(--weight-semibold)",
-                  }}
-                >
-                  −{counts.del}
-                </span>{" "}
-                removed
-              </span>
-            </div>
-          )}
+          {diff && <GraphDiffCounts diff={diff} />}
           {promoteCta && (
             <button
               type="button"

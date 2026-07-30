@@ -180,6 +180,73 @@ function handoffNamesLosingTheirId(
   return paths;
 }
 
+/**
+ * Keys the RUNTIME seeds into ctx, which are therefore never node ids: `$vars`, `$secrets`, and
+ * the `__*` bookkeeping (`__input`, `__costUsd`, `__nodeTimes`, …). Exported because callers that
+ * walk a ctx by key — not just by reference — need the same list.
+ */
+export function isReservedCtxKey(id: string): boolean {
+  return id === "$vars" || id === "$secrets" || id.startsWith("__");
+}
+
+/**
+ * Which node ids a node's CONFIG reads data from — the read-only sibling of `rewriteConfig`.
+ *
+ * "Reads data from" is the precise claim, and it is narrower than "references". Only the two
+ * kinds that pull an upstream node's OUTPUT into this node count:
+ *   - `{{ nodeId… }}` template tokens anywhere in a nested config string
+ *   - `ArgBinding.from` — `{ from, path? }` objects anywhere
+ *
+ * Deliberately NOT included, though `renameNode` rewrites them all: `edges[].from/.to` and
+ * `EdgeCondition.path` belong to the graph's edges rather than to this node, and
+ * `handoff.targets[].to` names somewhere the node can hand control TO — a downstream routing
+ * target, not data it consumed.
+ *
+ * Also not included: the RESERVED ctx keys. `{{ $vars.REGION }}` and `{{ __input.id }}` are
+ * ordinary references and the walk sees `$vars`/`__input` as their heads — but those are keys the
+ * runtime seeds into ctx, not node ids, so returning them would make this function's name a lie
+ * and hand every caller a filtering job it would eventually forget. Filtered here, once.
+ *
+ * Exists for the run diagnosis (see run-diagnosis.ts), which sends a failing node's inputs to a
+ * model and must therefore know exactly which upstream outputs it actually read — anything wider
+ * ships data the diagnosis has no use for. It lives HERE, sharing `isArgBinding` and
+ * `templateTokens` with the rename walk, so the two enumerations cannot drift apart; a drift test
+ * asserts a config is rewritten by `renameNode` if and only if it appears here.
+ *
+ * Pure. Never throws. Ids are returned deduped, in first-seen order.
+ */
+export function referencedNodeIds(node: NodeDef): string[] {
+  const found = new Set<string>();
+
+  const walk = (value: unknown): void => {
+    if (typeof value === "string") {
+      // `templateTokens` is the SAME parser the runtime resolves with, so an escaped `\{{` is
+      // skipped for free and this cannot diverge from what actually resolves at run time.
+      for (const t of templateTokens(value)) {
+        const id = head(t.path);
+        if (id) found.add(id);
+      }
+      return;
+    }
+    if (Array.isArray(value)) {
+      for (const v of value) walk(v);
+      return;
+    }
+    if (value && typeof value === "object") {
+      if (isArgBinding(value)) {
+        found.add(value.from);
+        return;
+      }
+      for (const v of Object.values(value as Record<string, unknown>)) walk(v);
+    }
+  };
+
+  walk(node.config);
+  // A node referring to itself is not an input — `{{ self.x }}` reads an output it hasn't written.
+  found.delete(node.id);
+  return [...found].filter((id) => !isReservedCtxKey(id));
+}
+
 export function renameNode(
   graph: GraphDef,
   oldId: string,

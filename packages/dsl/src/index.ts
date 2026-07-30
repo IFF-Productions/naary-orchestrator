@@ -122,7 +122,17 @@ export { resolveText } from "./text-node";
 export { resolveRenameKeys } from "./rename-keys";
 // Rename a node's ID, moving every reference with it (#833) — pure, so it's testable against the
 // full enumeration of reference kinds rather than spot-checked on a canvas.
-export { renameNode, type RenameNodeResult } from "./rename-node";
+export {
+  referencedNodeIds,
+  renameNode,
+  type RenameNodeResult,
+} from "./rename-node";
+export {
+  buildFixInstruction,
+  type DiagnosisHttpCapture,
+  type FixInstruction,
+  type FixInstructionInput,
+} from "./run-diagnosis";
 export {
   resolveFilter,
   resolveAggregate,

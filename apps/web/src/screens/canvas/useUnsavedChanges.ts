@@ -131,5 +131,11 @@ export function useUnsavedChanges({
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
   }, [dirty]);
 
-  return { dirty, markSaved, resetBaseline };
+  // `baseline` is exposed for the review-changes panel, which diffs it against the live graph.
+  // It is the RIGHT left-hand side for that and not a convenience: it is the graph as last saved
+  // or presented, captured through the same compiler as the live one (see canvas-dirty's header
+  // on why comparing against the server's copy would report edits nobody made). Notably an AI
+  // EDIT does not move it — only a save or a freshly presented graph does — so "what changed"
+  // spans the whole editing session rather than resetting under the user mid-edit.
+  return { dirty, baseline, markSaved, resetBaseline };
 }
