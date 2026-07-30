@@ -180,6 +180,59 @@ function handoffNamesLosingTheirId(
   return paths;
 }
 
+/**
+ * Which node ids a node's CONFIG reads data from — the read-only sibling of `rewriteConfig`.
+ *
+ * "Reads data from" is the precise claim, and it is narrower than "references". Only the two
+ * kinds that pull an upstream node's OUTPUT into this node count:
+ *   - `{{ nodeId… }}` template tokens anywhere in a nested config string
+ *   - `ArgBinding.from` — `{ from, path? }` objects anywhere
+ *
+ * Deliberately NOT included, though `renameNode` rewrites them all: `edges[].from/.to` and
+ * `EdgeCondition.path` belong to the graph's edges rather than to this node, and
+ * `handoff.targets[].to` names somewhere the node can hand control TO — a downstream routing
+ * target, not data it consumed.
+ *
+ * Exists for the run diagnosis (see run-diagnosis.ts), which sends a failing node's inputs to a
+ * model and must therefore know exactly which upstream outputs it actually read — anything wider
+ * ships data the diagnosis has no use for. It lives HERE, sharing `isArgBinding` and
+ * `templateTokens` with the rename walk, so the two enumerations cannot drift apart; a drift test
+ * asserts a config is rewritten by `renameNode` if and only if it appears here.
+ *
+ * Pure. Never throws. Ids are returned deduped, in first-seen order.
+ */
+export function referencedNodeIds(node: NodeDef): string[] {
+  const found = new Set<string>();
+
+  const walk = (value: unknown): void => {
+    if (typeof value === "string") {
+      // `templateTokens` is the SAME parser the runtime resolves with, so an escaped `\{{` is
+      // skipped for free and this cannot diverge from what actually resolves at run time.
+      for (const t of templateTokens(value)) {
+        const id = head(t.path);
+        if (id) found.add(id);
+      }
+      return;
+    }
+    if (Array.isArray(value)) {
+      for (const v of value) walk(v);
+      return;
+    }
+    if (value && typeof value === "object") {
+      if (isArgBinding(value)) {
+        found.add(value.from);
+        return;
+      }
+      for (const v of Object.values(value as Record<string, unknown>)) walk(v);
+    }
+  };
+
+  walk(node.config);
+  // A node referring to itself is not an input — `{{ self.x }}` reads an output it hasn't written.
+  found.delete(node.id);
+  return [...found];
+}
+
 export function renameNode(
   graph: GraphDef,
   oldId: string,
