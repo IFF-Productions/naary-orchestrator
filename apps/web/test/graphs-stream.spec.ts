@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-// Replace the heavy Firebase module with a tiny stub — generateGraphStream only needs a
+// Replace the lazy-Firebase accessor with a tiny stub — generateGraphStream only needs a
 // bearer token from it. (http.ts is import-safe in node: it guards `typeof localStorage`.)
-vi.mock("../src/lib/firebase", () => ({
+vi.mock("../src/lib/firebase-lazy", () => ({
   getBearerToken: async () => "test-token",
 }));
 
@@ -133,7 +133,12 @@ describe("graphsApi.generateGraphStream (`previous` ⇒ edit)", () => {
     const fetchMock = vi.fn().mockResolvedValue(sseResponse(RESULT));
     vi.stubGlobal("fetch", fetchMock);
 
-    await graphsApi.generateGraphStream("no open incidents ⇒ end", "anthropic", undefined, GRAPH);
+    await graphsApi.generateGraphStream(
+      "no open incidents ⇒ end",
+      "anthropic",
+      undefined,
+      GRAPH,
+    );
 
     expect(bodyOf(fetchMock)).toEqual({
       prompt: "no open incidents ⇒ end",
@@ -171,7 +176,12 @@ describe("graphsApi.generateGraphStream (`previous` ⇒ edit)", () => {
       } as unknown as Response);
     vi.stubGlobal("fetch", fetchMock);
 
-    const out = await graphsApi.generateGraphStream("add a branch", undefined, undefined, GRAPH);
+    const out = await graphsApi.generateGraphStream(
+      "add a branch",
+      undefined,
+      undefined,
+      GRAPH,
+    );
 
     expect(out.name).toBe("Flow");
     const fallback = JSON.parse(

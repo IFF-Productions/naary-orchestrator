@@ -14,9 +14,9 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-// The middleware pulls a fresh bearer token from ../firebase; stub it (no real Firebase in node).
+// The middleware pulls a fresh bearer token from ../firebase-lazy; stub it (no real Firebase in node).
 const getBearerToken = vi.fn(async (): Promise<string | null> => "test-token");
-vi.mock("../src/lib/firebase", () => ({
+vi.mock("../src/lib/firebase-lazy", () => ({
   getBearerToken: () => getBearerToken(),
 }));
 

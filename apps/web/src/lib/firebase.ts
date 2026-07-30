@@ -1,21 +1,27 @@
 /**
- * Firebase Auth for the SPA. Replaces the previous Keycloak login. The web config
- * is public (Firebase API keys are not secrets — access is enforced by Firebase
- * security rules + the backend verifying the ID token), but we still keep it OUT
- * of source: all values come from VITE_FIREBASE_* env, injected at build time
- * (see docker-compose web build-args / .env.example).
+ * Firebase Auth for the SPA. Replaces the previous Keycloak login.
  *
- * The bearer token sent to the API is the user's Firebase ID token (a Google-signed
- * JWT carrying the `tenant` custom claim the API authorizes on); when not signed
- * in, we fall back to a pasted `nry_` API token (the secondary path).
+ * THIS MODULE IS BEHIND AN ASYNC BOUNDARY. Nothing on the critical path may import it
+ * statically — it is reached only through the memoized `import("./firebase")` in ./firebase-lazy,
+ * so a visitor to a public form/chat/approve page never downloads the auth SDK (#934's follow-up:
+ * 138 KB raw / 41.5 KB gzip of eager bytes). If you need one fact from here in an eagerly-reachable
+ * file, take it from ./firebase-env (config only) or ./firebase-lazy (the async accessors); adding
+ * `import { … } from "./firebase"` anywhere the app shell can reach puts the whole SDK back on the
+ * critical path with no error and no failing build. `apps/web/test/eager-bundle.spec.ts` is what
+ * catches that.
+ *
+ * The bearer token sent to the API is the user's Firebase ID token (a Google-signed JWT carrying
+ * the `tenant` custom claim the API authorizes on); when not signed in, we fall back to a pasted
+ * `nry_` API token (the secondary path).
  */
-import { type FirebaseApp, initializeApp } from "firebase/app";
 import {
   type Auth,
   GoogleAuthProvider,
+  type User,
   createUserWithEmailAndPassword,
   getAuth,
   getRedirectResult,
+  onAuthStateChanged,
   sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signInWithPopup,
@@ -28,57 +34,29 @@ import {
   oneShot,
   shouldRetryWithRedirect,
 } from "./auth-errors";
-import { initAppCheck, mintBotGateToken } from "./app-check";
 import { getToken } from "./auth";
+// initializeApp + App Check. Imported for its VALUE and for its ORDERING: this import is
+// evaluated in full before `getAuth()` below, which is the "App Check before the first auth
+// request" invariant. See ./firebase-app.
+import { firebaseApp } from "./firebase-app";
 
-const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID,
-};
-
-/** True when the build was given a Firebase project (else login is unavailable;
- *  the `nry_` token paste still works). */
-export const firebaseConfigured = Boolean(firebaseConfig.apiKey);
-
-// Init ONLY when configured: getAuth() with an empty apiKey throws
-// `auth/invalid-api-key` synchronously at load, which would white-screen the whole
-// SPA — including the `nry_` paste path. Unconfigured ⇒ auth is undefined and the
-// app still renders (login disabled, token paste works).
-export const firebaseApp: FirebaseApp | undefined = firebaseConfigured
-  ? initializeApp(firebaseConfig)
-  : undefined;
-
-// App Check BEFORE getAuth(): attestation tokens must be available to the first auth
-// request, and auth-state restoration can fire a token refresh as soon as `auth`
-// exists. No-op unless VITE_FIREBASE_APPCHECK_SITE_KEY was set at build time; never
-// throws (see ./app-check).
-export const appCheckPlan = firebaseApp
-  ? initAppCheck(firebaseApp)
-  : ({ kind: "off" } as const);
+export { firebaseConfigured } from "./firebase-env";
 
 export const auth: Auth | undefined = firebaseApp
   ? getAuth(firebaseApp)
   : undefined;
 
 /**
- * Re-exported so the public form/chat pages have ONE import that both initializes App Check
- * (that happens as a side effect of loading this module) and mints a submission token. Importing
- * ./app-check directly would compile fine and always return null, because nothing would have
- * called initAppCheck.
- */
-export { mintBotGateToken };
-
-/**
  * The outcome of a `signInWithRedirect` return leg: a message when it FAILED, null otherwise.
  *
- * Started here at module load, deliberately, because the SDK's own completion happens during auth
- * init and throws its error away (see captureRedirectFailure). `getRedirectResult` awaits
+ * Started at THIS module's load, deliberately, because the SDK's own completion happens during
+ * auth init and throws its error away (see captureRedirectFailure). `getRedirectResult` awaits
  * `_initializationPromise` first, so this always reads the outcome init already computed — it
- * never races it or consumes the pending-redirect flag out from under it.
+ * never races it or consumes the pending-redirect flag out from under it. That reasoning is
+ * unchanged by the async boundary: `getAuth()` is three lines up, in the same module evaluation.
+ * What changed is only WHEN the module evaluates — on the redirect's return leg the visitor lands
+ * back on /auth, whose route loader activates the boundary (see router.tsx), so this still runs
+ * while nothing else has touched the pending-redirect flag.
  *
  * THAT DEPENDS ON `getAuth()` ABOVE, which registers `browserPopupRedirectResolver`. Swap it for
  * an `initializeAuth()` without a popupRedirectResolver and init skips `tryRedirectSignIn`
@@ -106,7 +84,39 @@ const notConfigured = (): Promise<never> =>
   Promise.reject(new Error("Firebase login isn’t configured for this build."));
 
 /**
+ * Subscribe to auth-state changes. Wrapped here rather than exposing `auth` + `onAuthStateChanged`
+ * to the caller so AuthProvider — which is EAGER — needs no `firebase/auth` value import of its
+ * own. (It keeps `import type { User }`, which erases.)
+ *
+ * Unconfigured build ⇒ there is no session to restore, so `next(null)` fires on a microtask and
+ * the caller's ready-gate resolves exactly as it does for a real "signed out" emission. Async so
+ * the callback never runs synchronously inside the subscriber's render/effect.
+ */
+export function subscribeToAuth(
+  next: (user: User | null) => void,
+  onError: () => void,
+): () => void {
+  if (!auth) {
+    let live = true;
+    queueMicrotask(() => {
+      if (live) next(null);
+    });
+    return () => {
+      live = false;
+    };
+  }
+  return onAuthStateChanged(auth, next, onError);
+}
+
+/**
  * Google sign-in, popup first with a full-page redirect as the fallback.
+ *
+ * SYNCHRONOUS TO `signInWithPopup`, AND IT MUST STAY THAT WAY. AuthScreen calls this inside the
+ * button's onClick; every `await` before `window.open` spends the browser's user-gesture window,
+ * and this app has already been bitten by exactly that (#800: an App Check await ahead of
+ * `window.open` broke Google sign-in). The async boundary in ./firebase-lazy is therefore crossed
+ * by a NON-async function that calls straight through when the module is already loaded — see
+ * `loginWithGoogle` there and the synchrony test in test/firebase-lazy.spec.ts.
  *
  * A blocked popup is NOT simply the visitor's browser config. Our handler is clean — AuthScreen
  * calls this synchronously inside the button's onClick — but the SDK puts two network round trips
@@ -178,6 +188,9 @@ export function logout(): Promise<void> {
  * The bearer token for an API call: a FRESH Firebase ID token when signed in (the
  * SDK returns a cached valid token or refreshes automatically), otherwise the
  * pasted `nry_` API token. Returns null when neither is available.
+ *
+ * Call it through ./firebase-lazy's `getBearerToken`, not directly — that one answers from the
+ * `nry_` store without pulling this module in when nobody has activated the auth boundary.
  */
 export async function getBearerToken(): Promise<string | null> {
   const user = auth?.currentUser;

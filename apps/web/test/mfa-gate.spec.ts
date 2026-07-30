@@ -13,8 +13,8 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// http()/the middleware pull a fresh bearer token from ../firebase; stub it (no real Firebase).
-vi.mock("../src/lib/firebase", () => ({
+// http()/the middleware pull a fresh bearer token from ../firebase-lazy; stub it (no real Firebase).
+vi.mock("../src/lib/firebase-lazy", () => ({
   getBearerToken: async () => "test-token",
 }));
 

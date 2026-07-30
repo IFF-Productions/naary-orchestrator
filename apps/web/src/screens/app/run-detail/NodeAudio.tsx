@@ -16,7 +16,7 @@
 import { useEffect, useState } from "react";
 import { getActiveEnvironment, getActiveWorkspace } from "../../../lib/api";
 import { BASE } from "../../../lib/api/http";
-import { getBearerToken } from "../../../lib/firebase";
+import { getBearerToken } from "../../../lib/firebase-lazy";
 
 /** The non-auto-resolved object reference a textToSpeech node writes to the run ctx. */
 export interface AudioRef {

@@ -14,13 +14,17 @@
  */
 import { useEffect, useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
-import { useAuth } from "../auth/AuthProvider";
+import { useAuthSession } from "../auth/AuthProvider";
 import { setToken } from "../lib/auth";
-import { takeRedirectSignInError } from "../lib/firebase";
+import { takeRedirectSignInError } from "../lib/firebase-lazy";
 import { AuthScreen } from "./auth/AuthScreen";
 
 export function AuthPage() {
   const navigate = useNavigate();
+  // useAuthSession: mounting the sign-in screen is a declaration that this page needs Firebase,
+  // so it activates the async boundary (lib/firebase-lazy). The /auth route's loader has usually
+  // started that fetch already — in parallel with this chunk — which is what keeps the Google
+  // button's click path synchronous all the way to signInWithPopup (#800).
   const {
     authenticated,
     login,
@@ -28,7 +32,7 @@ export function AuthPage() {
     signupEmail,
     resetPassword,
     configured,
-  } = useAuth();
+  } = useAuthSession();
   const [redirectError, setRedirectError] = useState<string | null>(null);
 
   // A redirect that FAILED (App Check refusal, an iframe that couldn't hand the credential back)
@@ -40,10 +44,20 @@ export function AuthPage() {
   // null. A `live` flag would then make effect #1's resolution discard the only copy, so the
   // diagnostic would never appear in development — the one place we most need to see it. Setting
   // state after unmount is a no-op in React 18+, not the leak the old warning implied.
+  //
+  // The rejection arm is NOT optional now that this crosses the async auth boundary. It used to
+  // read a promise from an already-loaded module and could only settle one way; it now awaits a
+  // dynamic import, which rejects when a cached client's chunk is gone after a deploy (#603's
+  // exact scenario). Unhandled, that becomes a Sentry report via lib/sentry-rejections for a
+  // condition `vite:preloadError` already handles by reloading. Swallow it: there is no redirect
+  // diagnostic to show if the module carrying it never arrived.
   useEffect(() => {
-    void takeRedirectSignInError().then((msg) => {
-      if (msg) setRedirectError(msg);
-    });
+    void takeRedirectSignInError().then(
+      (msg) => {
+        if (msg) setRedirectError(msg);
+      },
+      () => undefined,
+    );
   }, []);
 
   // Already signed in — including the moment `onAuthStateChanged` restores the session after a

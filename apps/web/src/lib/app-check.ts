@@ -57,7 +57,7 @@ const ENTERPRISE_ALIASES = [
 export function planAppCheck(env: AppCheckEnv): AppCheckPlan {
   const siteKey = env.VITE_FIREBASE_APPCHECK_SITE_KEY?.trim();
   // No key ⇒ off. Never a partially-configured attempt: initializeAppCheck with an
-  // empty key throws, and this module loads on the SPA's critical path.
+  // empty key throws, and this module loads under an anonymous visitor's bot gate.
   if (!siteKey) return { kind: "off" };
 
   const raw = env.VITE_FIREBASE_APPCHECK_PROVIDER?.trim().toLowerCase();
@@ -78,9 +78,10 @@ export function planAppCheck(env: AppCheckEnv): AppCheckPlan {
 
 /**
  * Initialize App Check. MUST be called after `initializeApp` and before the first
- * auth request, so the caller invokes it between those two lines in firebase.ts —
- * `getAuth()` runs at module load there, and auth-state restoration can fire a token
- * refresh straight away.
+ * auth request, so the caller invokes it between those two lines in firebase-app.ts —
+ * and firebase.ts imports THAT module before calling `getAuth()`, so ES module evaluation
+ * order enforces the ordering rather than a convention. Auth-state restoration can fire a
+ * token refresh as soon as `auth` exists.
  *
  * Never throws: App Check is a hardening layer, and a failure here must not
  * white-screen the SPA (which would also take out the `nry_` token-paste path).
@@ -147,15 +148,24 @@ let attestationFailed = false;
  * sign-in works, so a warning on arrival would be a false alarm. After a failure it is the single
  * most likely cause, and worth saying.
  *
- * False while the probe is still in flight. That is fine here — the probe starts at module load
- * and a visitor cannot click sign-in inside that window — and it is the right way to be wrong:
- * silence rather than a guess. Also false when the startup probe SUCCEEDED and a later refresh
- * failed; same conservative direction.
+ * False while the probe is still in flight, and it is the right way to be wrong: silence rather
+ * than a guess. Also false when the startup probe SUCCEEDED and a later refresh failed; same
+ * conservative direction.
  *
- * Unlike `mintBotGateToken`, this is safe to import directly rather than through ./firebase: it
- * reports a flag rather than using the App Check instance, so an importer that never triggered
+ * THE IN-FLIGHT WINDOW MOVED, and now overlaps the sign-in screen. This module used to load with
+ * the app shell, so the probe was long finished before anything could be clicked. Since the auth
+ * SDK went behind an async boundary (lib/firebase-lazy) it loads when /auth matches — i.e. while
+ * the visitor is looking at the form they are about to use. A click fast enough to beat the probe
+ * therefore reads `false` and gets the generic error instead of the App Check hint. That is the
+ * conservative direction this function was designed around (a missing hint, never a wrong one),
+ * and the /auth route loader starts the fetch in parallel with the screen's own chunk, so the
+ * probe still normally wins by a wide margin.
+ *
+ * Unlike `mintBotGateToken`, this is safe to import directly rather than through ./firebase-app:
+ * it reports a flag rather than using the App Check instance, so an importer that never triggered
  * `initAppCheck` reads "no failure observed" instead of silently getting null forever. The
- * sign-in screen is under AuthProvider → ./firebase anyway, so the probe has always run.
+ * sign-in screen is rendered by AuthPage, which activates the boundary → ./firebase →
+ * ./firebase-app, so the probe has run by the time an error can be shown.
  */
 export function appCheckAttestationFailed(): boolean {
   return attestationFailed;

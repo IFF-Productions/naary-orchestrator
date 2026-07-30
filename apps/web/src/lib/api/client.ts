@@ -20,7 +20,7 @@
  */
 import * as Sentry from "@sentry/react";
 import createClient, { type Middleware } from "openapi-fetch";
-import { getBearerToken } from "../firebase";
+import { getBearerToken } from "../firebase-lazy";
 import {
   AccessNotAllowedError,
   BASE,

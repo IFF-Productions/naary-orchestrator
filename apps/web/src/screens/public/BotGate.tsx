@@ -63,8 +63,13 @@ export function BotGate({
  *
  * The Firebase modules are pulled in by DYNAMIC import, so a tenant on Turnstile (or on no
  * gate at all) never ships firebase/app + firebase/app-check to an anonymous visitor. It also
- * guarantees `initAppCheck` has run — importing lib/firebase is what initializes it, and this
+ * guarantees `initAppCheck` has run — importing lib/firebase-app is what initializes it, and this
  * component may be the first thing on the page to need it.
+ *
+ * lib/firebase-APP, not lib/firebase: the auth half is a separate module behind its own boundary,
+ * so this import brings firebase/app + firebase/app-check and NOT the ~90 KB auth SDK. An
+ * anonymous visitor filling in a form never signs in; they should not pay for the code that would
+ * let them.
  */
 function AppCheckGate({
   onToken,
@@ -85,7 +90,7 @@ function AppCheckGate({
     if (resetSignal) cb.current.onReset?.();
     void (async () => {
       try {
-        const { mintBotGateToken } = await import("../../lib/firebase");
+        const { mintBotGateToken } = await import("../../lib/firebase-app");
         const token = await mintBotGateToken();
         if (cancelled) return;
         if (token) cb.current.onToken(token);

@@ -2,7 +2,7 @@
  * Notification-channel endpoints (N channels per type: several Slack/Teams
  * webhooks, each its own row) + the send-a-test-message call.
  */
-import { getBearerToken } from "../firebase";
+import { getBearerToken } from "../firebase-lazy";
 import { BASE, getActiveEnvironment, getActiveWorkspace, http } from "./http";
 import type { NotificationChannel, NotificationChannelType } from "./types";
 
