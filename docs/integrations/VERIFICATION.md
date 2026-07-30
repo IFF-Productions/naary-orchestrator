@@ -132,44 +132,44 @@ catalog's own `write` flag and `fields[].required`). `Needs` = the fields you mu
 
 | Provider | Safest read action | Needs | Read/total actions | Live proof |
 | --- | --- | --- | --- | --- |
-| airtable | `list_records` | baseId, tableId | 2/4 | — |
-| asana | `get_task` | taskGid | 1/4 | — |
-| box | `list_folder_items` | folderId (`0` = root) | 2/4 | — |
+| airtable | `list_records` | baseId, tableId | 3/5 | — |
+| asana | `get_task` | taskGid | 2/5 | — |
+| box | `list_folder_items` | folderId (`0` = root) | 3/5 | — |
 | calendly | `get_me` | — | 3/4 | — |
-| clickup | `get_task` | taskId | 2/5 | — |
+| clickup | `get_task` | taskId | 3/6 | — |
 | cloudflare | `list_zones` | — | 2/4 | — |
 | deepl | `get_usage` | — | 3/3 | — |
 | digitalocean | `list_droplets` | — | 2/4 | — |
-| discord | `get_channel` | channelId | 2/5 | — |
+| discord | `get_channel` | channelId | 3/6 | — |
 | dropbox | `list_folder` | path (`""` = root) | 2/4 | — |
 | front | `list_conversations` | — | 3/4 | — |
-| github | `get_issue` | owner, repo, issueNumber | 2/5 | **yes** — `github-agent.live.spec.ts` |
-| gitlab | `list_issues` | projectId | 2/4 | — |
+| github | `get_issue` | owner, repo, issueNumber | 4/7 | **yes** — `github-agent.live.spec.ts` |
+| gitlab | `list_issues` | projectId | 3/5 | — |
 | googlesheets | `get_spreadsheet` | spreadsheetId | 2/5 | — |
 | hubspot | `get_contact` | contactId | 1/4 | — |
-| intercom | `get_contact` | contactId | 1/4 | — |
-| jira | `get_issue` | issueKey | 1/4 | — |
+| intercom | `get_contact` | contactId | 2/5 | — |
+| jira | `get_issue` | issueKey | 2/5 | — |
 | linear | `list_issues` | query (GraphQL) | 2/5 | — |
-| mailchimp | `list_members` | listId | 2/5 | — |
-| mattermost | `list_channel_posts` | channelId | 3/5 | — |
+| mailchimp | `list_members` | listId | 3/6 | — |
+| mattermost | `list_channel_posts` | channelId | 4/6 | — |
 | monday | `list_items` | query (GraphQL) | 2/5 | — |
 | msgraph | `list_messages` | userId | 2/4 | — |
 | netlify | `list_sites` | — | 4/4 | — |
-| notion | `get_page` | pageId | 3/5 | — |
+| notion | `get_page` | pageId | 4/6 | — |
 | pagerduty | `list_incidents` | — | 2/6 | — |
 | pipedrive | `list_deals` | — | 2/5 | — |
-| posthog | `list_events` | projectId | 3/4 | — |
+| posthog | `list_events` | projectId | 4/5 | — |
 | sendgrid | `list_templates` | — | 1/3 | — |
-| sentry | `get_issue` | issueId | 3/4 | — |
+| sentry | `get_issue` | issueId | 4/5 | — |
 | shopify | `list_products` | — | 2/5 | — |
 | **slack** | **none — all 3 actions write** | — | 0/3 | **yes** — webhook path, `approval-notify.live.spec.ts` |
 | stripe | `list_charges` | — | 2/5 | — |
 | todoist | `list_tasks` | — | 2/4 | — |
-| twilio | `list_messages` | accountSid | 2/4 | — |
+| twilio | `list_messages` | accountSid | 3/5 | — |
 | vercel | `list_deployments` | — | 3/4 | — |
-| webflow | `list_collections` | siteId | 3/4 | — |
+| webflow | `list_collections` | siteId | 4/5 | — |
 | zendesk | `list_tickets` | — | 2/5 | — |
-| zoom | `list_meetings` | userId | 2/4 | — |
+| zoom | `list_meetings` | userId | 3/5 | — |
 
 ### 2.1 Slack has no read-only smoke check
 

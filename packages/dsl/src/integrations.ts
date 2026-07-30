@@ -125,6 +125,21 @@ export interface IntegrationAction {
    * migrated does not keep failing over a leftover key that the request builder ignores anyway.
    */
   retiredFields?: RetiredField[];
+  /**
+   * Send `{}` rather than NO body when every body field is empty.
+   *
+   * A body-bearing action whose fields are all optional builds `body: undefined`, so the request
+   * goes out with no payload at all. That is fine where the provider treats the body as optional,
+   * and a 400 where its spec says `requestBody.required: true` — Notion's data-source query is
+   * exactly that: filter/sorts/pageSize are all optional, so "query everything" produced a
+   * bodyless POST against an endpoint that requires one.
+   *
+   * Deliberately opt-in per action rather than inferred from "the method is POST": plenty of our
+   * writes legitimately send nothing (a close/complete/acknowledge with the id in the path), and
+   * conjuring `{}` for those would change requests that work today. Set it where the provider's
+   * own document marks the body required.
+   */
+  alwaysSendBody?: boolean;
   /** One-line description for the config panel + docs. */
   description: string;
 }
@@ -620,6 +635,10 @@ const NOTION: IntegrationProvider = {
       method: "POST",
       pathTemplate: "/data_sources/{dataSourceId}/query",
       write: false,
+      // Every body field here is optional (filter/sorts/pageSize), so "query everything" built a
+      // POST with NO body — and this endpoint's `requestBody` is `required: true` in Notion's own
+      // pinned spec. The commonest use of the action was the one that could 400.
+      alwaysSendBody: true,
       retiredFields: [
         {
           key: "databaseId",
@@ -5005,7 +5024,10 @@ export function buildIntegrationRequest(
   return {
     method: act.method,
     path: qs ? `${path}?${qs}` : path,
-    body,
+    // `{}` instead of nothing where the provider's spec requires a body (see `alwaysSendBody`).
+    // Applied here, at the end, so it can't mask an empty-field bug earlier in assembly: every
+    // field has already had its chance to write, and this only fills a body that stayed absent.
+    body: body === undefined && act.alwaysSendBody ? {} : body,
     headers,
   };
 }

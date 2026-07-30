@@ -120,7 +120,13 @@ describe("integration catalog — request construction", () => {
       filter: {}, // empty optional filter — must not land in the body
     });
     expect(req.path).toBe("/data_sources/ds-1/query");
-    expect(req.body).toBeUndefined();
+    // `{}`, not `undefined` — and the difference is the point. This action carries
+    // `alwaysSendBody` because Notion marks the query's `requestBody` required, so the ENVELOPE
+    // is sent while the empty `filter` is still omitted. The old `toBeUndefined()` conflated
+    // "no field was written" with "no body exists"; asserting an EMPTY object keeps this test on
+    // its own subject (field omission) and would still fail if `filter: {}` ever leaked through.
+    expect(req.body).toEqual({});
+    expect(req.body).not.toHaveProperty("filter");
   });
 
   it("Notion query_database targets a DATA SOURCE, not a database (#944)", () => {
