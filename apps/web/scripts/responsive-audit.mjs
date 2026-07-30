@@ -22,6 +22,12 @@
  *    121px past the LEFT edge, or a `position: fixed` popover 78px below the fold, read as clean.
  *    A control the page cannot scroll to is not "cramped" — it does not exist for the user.
  *
+ * KNOWN GAP, stated because an unstated one is how this issue kept reporting false clean: the
+ * vertical half of `offscreen` only fires inside a `position: fixed` subtree. For an IN-FLOW element
+ * below the fold, "unreachable" depends on whether some ancestor can scroll far enough, which is not
+ * a rect comparison — so e.g. `screens-runs--populated`'s in-flow re-run menu, measured 214px below
+ * the fold at 390×844, is NOT in the `offscreen` count. Treat that number as a floor.
+ *
  * `safe` is a conservative flag: it assumes a control is centre-grown in place, so a stacked
  * flow-layout row that would simply reflow (a card getting taller) is still reported unsafe.
  * Read it as "cannot be bumped by a blanket CSS rule", not "cannot be fixed".

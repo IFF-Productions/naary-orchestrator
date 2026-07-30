@@ -158,6 +158,15 @@ function clamp(v: number, lo: number, hi: number): number {
  * back in makes "does it fit below?" answer yes on the second pass purely because pass one had
  * shrunk it — the menu would flip sides while you scrolled. `scrollHeight` is the content height and
  * is unaffected by the cap; the `offset* - client*` term adds the borders it omits.
+ *
+ * Two limits to know before widening a menu into them:
+ *
+ *  - `scrollHeight` is immune to `max-height` but NOT to `max-width`. If the width cap ever bit, the
+ *    text would wrap, the measured height would inflate, and the flip could oscillate. It cannot bite
+ *    today: both menus set `min-width` (150 / 170) far below the 374px cap a 390px viewport gives.
+ *  - `offset* - client*` is borders PLUS any classic scrollbar, so on a platform that reserves
+ *    scrollbar space a capped, scrolling menu measures ~15px wider than it wants, and `KebabMenu`'s
+ *    re-place can nudge `left` once by that much. Cosmetic and one-shot; zero with overlay scrollbars.
  */
 export function naturalSize(el: HTMLElement): {
   width: number;
