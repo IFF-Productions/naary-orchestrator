@@ -253,7 +253,9 @@ const mockActivities = {
           ? subThrowChildGraph
           : meta.workflowKey === "err-flow"
             ? errorHandlerGraph
-            : subChildGraph;
+            : meta.workflowKey === "start-flow"
+              ? subStartChildGraph
+              : subChildGraph;
     return { graph, contentHash: "child-hash", version: 1 };
   },
   callHmac: async (
@@ -739,6 +741,57 @@ const subChildGraph: GraphDef = {
   edges: [
     { from: "trigger", to: "worker" },
     { from: "worker", to: "end" },
+  ],
+};
+
+// A child graph entered through a plain `start` node — which is what a REAL sub-workflow uses
+// (a child run is called by its parent, so it is not webhook/schedule/form-triggered). Every
+// other child fixture here enters through `webhookTrigger`, whose handler has always published
+// the run input as its output — which is precisely why the `start` gap survived: the tests used
+// the one entry node that worked. `shape` BINDS to the start node, so this fails outright unless
+// `start` publishes its input.
+const subStartChildGraph: GraphDef = {
+  startNodeId: "start",
+  nodes: [
+    { id: "start", type: "start" },
+    {
+      id: "shape",
+      type: "set",
+      config: {
+        fieldBindings: {
+          ticket: { from: "start", path: "ticketId" },
+          who: { from: "start", path: "nested.user" },
+        },
+      },
+    },
+    { id: "end", type: "end" },
+  ],
+  edges: [
+    { from: "start", to: "shape" },
+    { from: "shape", to: "end" },
+  ],
+};
+
+// Parent that passes an EXPLICIT input to a `start`-entered child (the reported shape: a flow
+// triggering a sub-flow and expecting its data to arrive addressable on the other side).
+const subStartParentGraph: GraphDef = {
+  startNodeId: "trigger",
+  nodes: [
+    { id: "trigger", type: "webhookTrigger" },
+    {
+      id: "sub",
+      type: "executeSubWorkflow",
+      config: {
+        workflowKey: "start-flow",
+        input: { nested: { user: "u-42" } },
+        inputBindings: { ticketId: { from: "trigger", path: "id" } },
+      },
+    },
+    { id: "end", type: "end" },
+  ],
+  edges: [
+    { from: "trigger", to: "sub" },
+    { from: "sub", to: "end" },
   ],
 };
 
@@ -1283,6 +1336,8 @@ export {
   throwGraph,
   danglingGraph,
   subParentGraph,
+  subStartChildGraph,
+  subStartParentGraph,
   waitGraph,
   stopGraph,
   transformGraph,

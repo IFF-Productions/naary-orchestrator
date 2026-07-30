@@ -26,6 +26,7 @@ import {
   sqlExecGraph,
   setGraph,
   subParentGraph,
+  subStartParentGraph,
   waitGraph,
   stopGraph,
   transformGraph,
@@ -260,6 +261,42 @@ describe("runGraph interpreter — per-node behavior: data, http, sql, sub-workf
       expect(sub.output.__costUsd).toBeUndefined();
       // the child's agent cost (mock 0.01) was metered into the PARENT budget
       expect(result.ctx.__costUsd).toBeCloseTo(0.01, 5);
+    });
+  });
+
+  it("executeSubWorkflow: a `start`-entered child can BIND to the input its parent passed", async () => {
+    // The reported bug: "a flow triggering a sub flow — the data is not being passed correctly
+    // between the workflows". It was arriving (the child's `__input`) but had no node id to be
+    // read by, because `start` — unlike every other entry node — published nothing to ctx. So a
+    // binding the canvas offers (upstreamOf lists entry nodes) silently resolved to undefined.
+    subResolveCalls.length = 0;
+    const worker = await makeWorker(env);
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [
+          subStartParentGraph,
+          { id: "NAARY-42" },
+          { tenantId: "t-sub", environmentId: "e-sub" },
+        ],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-subworkflow-start-input",
+      });
+      const result = await handle.result();
+      expect(result.status).toBe("completed");
+      const sub = result.ctx.sub as {
+        status: string;
+        output: Record<string, unknown>;
+      };
+      expect(sub.status).toBe("completed");
+      // The start node's own output IS the input the parent passed (static `input` merged with
+      // the `inputBindings` read off the parent's trigger).
+      expect(sub.output.start).toEqual({
+        nested: { user: "u-42" },
+        ticketId: "NAARY-42",
+      });
+      // …and, the actual point: a downstream child node BOUND to it reads real values. Both of
+      // these were `undefined` before the fix, which is what the user saw.
+      expect(sub.output.shape).toEqual({ ticket: "NAARY-42", who: "u-42" });
     });
   });
 

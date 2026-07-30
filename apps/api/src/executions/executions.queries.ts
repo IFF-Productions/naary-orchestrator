@@ -240,6 +240,85 @@ function logQueryFailure(where: string, runId: string, e: unknown): void {
   );
 }
 
+/**
+ * A usable ctx: a plain object, never an array. `typeof [] === "object"`, so a bare typeof test
+ * accepts an array and passes it downstream as if it were a node-id → output map.
+ */
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return v != null && typeof v === "object" && !Array.isArray(v);
+}
+
+/**
+ * The `{status, ctx, currentNodeId}` a completed run returned, read straight off its history's
+ * close event — the SECOND way to get the same payload `handle.result()` fetches.
+ *
+ * Why a second way exists. Reported as every step of a finished run saying "No output was
+ * recorded", with the timeline, the execution log and the graph all rendering correctly. That
+ * combination is the diagnosis: `fetchHistory()` plainly works for these runs (queryRunGraph and
+ * originalTriggerInput read the START event out of the very same history to draw the graph the
+ * user is looking at), so the history is present, in retention, and decodable. Only the ctx was
+ * missing — so what failed is `handle.result()`'s own fetch/convert, not our access to the data.
+ *
+ * So we stop depending on that one call. The completion payload is an ordinary history event;
+ * decoding it with `defaultPayloadConverter` is the same thing this file already does twice
+ * (queryRunGraph, originalTriggerInput) against these same runs.
+ *
+ * Returns undefined — never throws — when there is no readable close event, so the caller can
+ * report the ORIGINAL failure rather than one raised while recovering from it.
+ */
+async function completionFromHistory(
+  deps: ExecutionsDeps,
+  id: string,
+): Promise<
+  | {
+      status: ExecutionStatus;
+      ctx: Record<string, unknown>;
+      currentNodeId?: string;
+    }
+  | undefined
+> {
+  try {
+    const h = (await deps.client.workflow.getHandle(id).fetchHistory()) as {
+      events?: unknown[] | null;
+    };
+    // Walk from the END: the close event is the last one, and a run that continued-as-new has
+    // several completed-shaped events in its chain — the final one is the real result.
+    const events = h.events ?? [];
+    for (let i = events.length - 1; i >= 0; i--) {
+      const attrs = (
+        events[i] as {
+          workflowExecutionCompletedEventAttributes?: {
+            result?: { payloads?: unknown[] };
+          };
+        }
+      ).workflowExecutionCompletedEventAttributes;
+      const payload = attrs?.result?.payloads?.[0];
+      if (!payload) continue;
+      const decoded = defaultPayloadConverter.fromPayload(payload as never);
+      if (decoded == null || typeof decoded !== "object") continue;
+      const r = decoded as {
+        status?: unknown;
+        ctx?: unknown;
+        currentNodeId?: unknown;
+      };
+      // Require a ctx OBJECT. A close event we can decode but that carries no ctx is not a
+      // recovery — falling through leaves the caller's honest "we could not read it".
+      if (!isPlainObject(r.ctx)) continue;
+      return {
+        status: (typeof r.status === "string"
+          ? r.status
+          : "completed") as ExecutionStatus,
+        ctx: r.ctx as Record<string, unknown>,
+        currentNodeId:
+          typeof r.currentNodeId === "string" ? r.currentNodeId : undefined,
+      };
+    }
+  } catch {
+    /* history unreadable too — the caller reports the original failure */
+  }
+  return undefined;
+}
+
 async function resolveCtxRefs(
   ctx: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
@@ -296,12 +375,39 @@ export async function queryState(
     }
     if (desc.status.name === "COMPLETED") {
       try {
-        const r = (await handle.result()) as {
+        let r = (await handle.result()) as {
           status: ExecutionStatus;
           ctx: Record<string, unknown>;
           currentNodeId?: string;
         };
-        const ctx = await resolveCtxRefs(r.ctx);
+        // `handle.result()` can also SUCCEED with nothing usable in it — a payload that decodes
+        // but carries no ctx reaches the UI as "every step produced no output", the same symptom
+        // as a throw and just as wrong. A real run's ctx always holds at least `__input`, so an
+        // absent/wrong-shaped ctx here means we didn't get the payload, not that the run was
+        // empty. Recover it from history the same way the throw path does.
+        //
+        // The shape test is the SAME one completionFromHistory applies to its own candidate —
+        // a plain object, not an array. `typeof [] === "object"`, so a bare `typeof` check would
+        // accept an array and hand it downstream as a ctx.
+        if (!isPlainObject(r?.ctx)) {
+          const recovered = await completionFromHistory(deps, id);
+          if (recovered) {
+            logQueryFailure(
+              "state:completed-empty-ctx",
+              id,
+              new Error("result() returned no ctx; recovered from history"),
+            );
+            r = recovered as typeof r;
+          }
+        }
+        // Normalize ONCE, then read only from this. Reading `r.ctx` further down would throw on
+        // a null ctx that history couldn't recover (nodeTimesFrom indexes its argument) — which
+        // lands in the catch below, re-fetches the same history a second time, and logs a second,
+        // misleading failure for what is really just "there was no ctx".
+        const rawCtx: Record<string, unknown> = isPlainObject(r?.ctx)
+          ? r.ctx
+          : {};
+        const ctx = await resolveCtxRefs(rawCtx);
         // The node the run ENDED on (the `end` passthrough on a clean completion). Without it the
         // detail view marks that terminal node "skipped" instead of "done" (it writes no ctx
         // output). New runs carry it in the result — CHEAP, read straight from the completion
@@ -309,7 +415,7 @@ export async function queryState(
         // it with a one-off query of the closed workflow (a history replay). Best-effort and gated
         // on the field being absent, so only legacy runs ever pay the replay, and it NEVER fails
         // the detail view — an unavailable/aged-out history just leaves "" (the prior behaviour).
-        let currentNodeId = r.currentNodeId ?? "";
+        let currentNodeId = r?.currentNodeId ?? "";
         if (!currentNodeId) {
           try {
             currentNodeId = (await handle.query(stateQuery)).currentNodeId;
@@ -318,25 +424,40 @@ export async function queryState(
           }
         }
         return {
-          status: r.status,
+          status: r?.status ?? "completed",
           currentNodeId,
           ctx,
-          executedNodeIds: [], // completed ctx carries every node's output
-          nodeTimes: nodeTimesFrom(r.ctx),
-          spentUsd: costUsdFrom(r.ctx),
+          // A recovered/normalized ctx carries every node's output, so the UI derives the step
+          // states from it. When there was no ctx at all, fall back to the read-model stamp
+          // rather than leaving a completed run's steps looking "skipped" (#525).
+          executedNodeIds: isPlainObject(r?.ctx) ? [] : row.executedNodeIds,
+          nodeTimes: nodeTimesFrom(rawCtx),
+          spentUsd: costUsdFrom(rawCtx),
           perExecutionCapUsd: null, // closed — no live cap to meter against
         };
       } catch (e) {
-        // A COMPLETED run whose result we could not read. This branch used to swallow the reason
-        // and answer `ctx: {}` — indistinguishable from "the run produced no output", which is
-        // how a completed run's steps all read "No output was recorded for this step" with
-        // nothing anywhere saying why. Reported exactly that way.
+        // A COMPLETED run whose result `handle.result()` could not give us. #957 made this
+        // branch say WHY instead of silently answering `ctx: {}` — which had been reaching the
+        // user as every step reading "No output was recorded for this step".
         //
-        // `handle.result()` is what fails here: the ctx IS in the completion payload (runGraph
-        // returns it), so an empty one means we could not fetch or decode that payload — history
-        // aged out past retention, a payload/codec error, a transient Temporal fault. The run
-        // detail must still render, so this stays non-fatal, but it no longer lies about why.
+        // Now it also RECOVERS. The ctx is not gone: it is in the completion event of a history
+        // this same request has already proven it can read (the graph on screen was decoded from
+        // the START event of it). So re-read the payload ourselves rather than treat one SDK
+        // call's failure as the data being unavailable.
         logQueryFailure("state:completed", id, e);
+        const recovered = await completionFromHistory(deps, id);
+        if (recovered) {
+          const ctx = await resolveCtxRefs(recovered.ctx);
+          return {
+            status: recovered.status,
+            currentNodeId: recovered.currentNodeId ?? "",
+            ctx,
+            executedNodeIds: [], // the recovered ctx carries every node's output
+            nodeTimes: nodeTimesFrom(recovered.ctx),
+            spentUsd: costUsdFrom(recovered.ctx),
+            perExecutionCapUsd: null,
+          };
+        }
         return {
           status: "completed",
           currentNodeId: "",
@@ -351,12 +472,29 @@ export async function queryState(
         };
       }
     }
-    // Temporal-level failure (the workflow threw, was terminated, etc.) — there's no
-    // returned {status,ctx} to recover. Fall back to what the interpreter stamped on the
-    // read-model before it rethrew (#525): the node it died on (→ currentNodeId, so the UI
-    // marks it FAILED) and the nodes that had run (→ the UI marks them done, not "skipped").
-    return {
+    // Temporal-level failure (the workflow threw, was terminated, etc.).
+    //
+    // There IS no returned `{status,ctx}` — the workflow threw instead of returning. But that is
+    // not the same as the ctx being unrecoverable, which is what this branch used to assume: it
+    // answered `ctx: {}`, so EVERY step of a failed run read "No output was recorded for this
+    // step", with `—` for every duration. Reported exactly that way, screenshot and all — and it
+    // is the worst possible moment to withhold the outputs, because a failed run is precisely
+    // when you need to see what each step actually returned.
+    //
+    // A closed workflow can still be QUERIED: Temporal replays its history and answers from the
+    // rebuilt state. That is not a new trick here — the COMPLETED branch above already queries a
+    // closed workflow to recover `currentNodeId`, so we know it works against this deployment.
+    // `stateQuery` returns the whole ExecutionState, ctx included, which is the data the run
+    // detail wanted all along. Node timings and spend come back with it, so the `—`s fill in too.
+    //
+    // Best-effort by construction: a history that has aged out, a query the server rejects, or a
+    // replay that can't reconstruct all leave us exactly where we were before, so the failed run
+    // still renders. Nothing here can turn a readable failure into an unreadable one.
+    const closed: RunStateView = {
       status: TEMPORAL_CLOSED_STATUS[desc.status.name] ?? "unknown",
+      // The read-model's failedNodeId stays authoritative for WHICH node died (#525) — it was
+      // stamped by the interpreter at the throwing node, and is race-safe across concurrent
+      // branches in a way the replayed `currentNodeId` is not.
       currentNodeId: row.failedNodeId ?? "",
       ctx: {},
       executedNodeIds: row.executedNodeIds,
@@ -364,6 +502,31 @@ export async function queryState(
       spentUsd: null,
       perExecutionCapUsd: null,
     };
+    // Only replay for a status the SPA treats as TERMINAL. A run detail polls every 1.5s until
+    // then, and "running"/"unknown" keep it polling — so replaying under those would fire a fresh
+    // history replay every 1.5s for as long as the tab is open. Under the mapped failure statuses
+    // the poll stops after one read, which is what makes this affordable.
+    const replayable =
+      closed.status !== "unknown" && closed.status !== "running";
+    try {
+      const s = replayable
+        ? await handle.query(stateQuery)
+        : ({ ctx: undefined } as unknown as ExecutionState);
+      if (isPlainObject(s.ctx)) {
+        return {
+          ...closed,
+          ctx: await resolveCtxRefs(s.ctx),
+          // Keep the read-model's executedNodeIds: the recovered ctx is the better source for
+          // "this node produced output", but a node can run and write nothing (`end`), and
+          // dropping the stamp would regress those back to "skipped".
+          nodeTimes: nodeTimesFrom(s.ctx),
+          spentUsd: s.spentUsd ?? costUsdFrom(s.ctx),
+        };
+      }
+    } catch (e) {
+      logQueryFailure("state:closed-replay", id, e);
+    }
+    return closed;
   } catch (e) {
     if (e instanceof WorkflowNotFoundError) {
       throw new NotFoundException("Execution not found");
