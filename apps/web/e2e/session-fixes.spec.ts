@@ -1,7 +1,11 @@
 import { readFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 import { acceptConfirm } from "./confirm";
-import { expectWorkflowOffered, pickWorkflow } from "./workflow-picker";
+import {
+  expectWorkflowOffered,
+  openDialogWith,
+  pickWorkflow,
+} from "./workflow-picker";
 
 /**
  * Regression e2e for the fixes made during the deploy/smoke-test session:
@@ -117,8 +121,10 @@ test("webhook registration: pick the workflow from a dropdown of saved workflows
 }) => {
   await page.goto("/app/integrations?tab=webhooks");
 
-  // Open the webhook registration dialog ("New webhook" → "Register a webhook").
-  await page.getByRole("button", { name: "New webhook" }).click();
+  // Open the webhook registration dialog ("New webhook" → "Register a webhook"). Via the helper:
+  // a click that lands before React binds the handler is a silent no-op, which is how this spec
+  // went flaky on main while `webhook-howto` — same helper — failed outright.
+  await openDialogWith(page, "New webhook", "Register a webhook");
 
   // The workflow is CHOSEN from real saved workflows — never free text (typing an unsaved or
   // typo'd key was the "No graph seeded for '…'" 404 footgun). It is a filterable combobox now,
