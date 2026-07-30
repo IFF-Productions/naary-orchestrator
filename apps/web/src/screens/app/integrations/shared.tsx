@@ -4,6 +4,11 @@ import type { ReactNode } from "react";
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { HScroll, Icon, type IconName } from "../../../components";
+import {
+  type FixedPlacement,
+  naturalSize,
+  placeFixedPopover,
+} from "../../../lib/popoverPlacement";
 
 export const monoLabel: React.CSSProperties = {
   fontFamily: "var(--font-mono)",
@@ -248,18 +253,30 @@ export function KebabMenu({ items }: { items: KebabItem[] }) {
   // sits inside `cardShell` (overflow:hidden), which would otherwise CLIP an absolutely-positioned
   // menu — the "3-dots menu is hidden/not viewable" bug. Fixed + portal escapes every ancestor's
   // overflow. Right-aligned under the button; re-anchored on scroll/resize.
-  const [pos, setPos] = useState<{ top: number; right: number }>({
-    top: 0,
-    right: 0,
-  });
+  //
+  // #511: `top: r.bottom + 4` was unclamped, so on a phone a row near the fold opened its menu off
+  // the bottom of the screen. Unlike `settings/shared.tsx`'s RowMenu this one RE-ANCHORS on scroll
+  // rather than closing, so it was recoverable by scrolling — unless the row is the last one and
+  // there is no scroll room left, which is exactly the row a "remove" action tends to be on. Shared
+  // `placeFixedPopover` flips it above the button instead and clamps to every edge.
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<FixedPlacement | null>(null);
   const place = useCallback(() => {
     const el = btnRef.current;
-    if (!el) return;
-    const r = el.getBoundingClientRect();
-    setPos({ top: r.bottom + 4, right: window.innerWidth - r.right });
+    const menu = menuRef.current;
+    if (!el || !menu) return;
+    setPos(
+      placeFixedPopover(el.getBoundingClientRect(), naturalSize(menu), {
+        width: window.innerWidth,
+        height: window.innerHeight,
+      }),
+    );
   }, []);
   useLayoutEffect(() => {
-    if (!open) return;
+    if (!open) {
+      setPos(null);
+      return;
+    }
     place();
     // Capture-phase scroll catches scrolling in ANY ancestor scroll container, not just window.
     window.addEventListener("scroll", place, true);
@@ -289,11 +306,18 @@ export function KebabMenu({ items }: { items: KebabItem[] }) {
               onClick={() => setOpen(false)}
             />
             <div
+              ref={menuRef}
               className="menu-pop"
               style={{
                 position: "fixed",
-                top: pos.top,
-                right: pos.right,
+                top: pos?.top ?? 0,
+                left: pos?.left ?? 0,
+                // Hidden for the one frame before the layout effect has measured it, so the
+                // unclamped position is never painted.
+                visibility: pos ? "visible" : "hidden",
+                maxHeight: pos?.maxHeight,
+                maxWidth: pos?.maxWidth,
+                overflowY: "auto",
                 zIndex: 61,
                 minWidth: 170,
                 background: "var(--card)",

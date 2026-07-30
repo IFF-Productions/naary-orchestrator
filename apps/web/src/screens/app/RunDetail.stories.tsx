@@ -1,5 +1,6 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { http, HttpResponse } from "msw";
+import { expect, userEvent, waitFor, within } from "storybook/test";
 import type { GraphDef } from "@naary/dsl";
 import type { ExecutionState, RunEvent } from "../../lib/api";
 import { RunDetail } from "./RunDetail";
@@ -325,6 +326,55 @@ export const Failed: Story = {
         failedHistory,
       ),
     },
+  },
+};
+
+/**
+ * **The failed run with its re-run menu OPEN — a state no story opened.**
+ *
+ * `Failed` is the only terminal state that also renders "Resume", which makes the action row WRAP
+ * on a phone and leaves the Re-run group short of the right edge. `RerunMenu`'s popover is
+ * `position: absolute; right: 0` at a fixed `minWidth: 272`, so it grows leftwards from whatever x
+ * the anchor happens to sit at — measured at 390×844 before the fix, `left: -121`. `global.css`
+ * clamps the root with `overflow-x: hidden`, so those 121px are not scrollable-to, they are gone:
+ * the debug item and every version row lost their left third, including the "v4 latest" labels
+ * that say WHICH version you are about to run.
+ *
+ * Reproduces at 390 and 375, and NOT at 1440 (left: 1140 there) — the anchor's x drives it. Only
+ * the failed run wraps, which is why `Completed` (left: 28) read clean in every previous sweep.
+ */
+export const FailedRerunMenuOpen: Story = {
+  parameters: {
+    msw: {
+      handlers: [
+        http.get("*/api/graphs/:key/versions", () =>
+          HttpResponse.json([
+            { version: 4, createdAt: "2026-07-17T08:00:00Z" },
+            { version: 3, createdAt: "2026-07-16T08:00:00Z" },
+            { version: 2, createdAt: "2026-07-10T08:00:00Z" },
+          ]),
+        ),
+        ...handlers(
+          {
+            status: "failed",
+            currentNodeId: "classify",
+            ctx: {},
+            executedNodeIds: ["enrich"],
+          },
+          failedHistory,
+        ),
+      ],
+    },
+  },
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const caret = () =>
+      canvas.getByRole("button", { name: "More re-run options" });
+    await waitFor(() => expect(caret()).toBeEnabled(), { timeout: 8000 });
+    await userEvent.click(caret());
+    await waitFor(() =>
+      expect(canvasElement.querySelector(".menu-pop")).toBeTruthy(),
+    );
   },
 };
 

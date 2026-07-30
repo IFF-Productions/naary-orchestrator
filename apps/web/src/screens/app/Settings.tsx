@@ -60,8 +60,8 @@ const LOCAL_CSS = `
 .naary-set-fade{animation:naaryFadeUp .25s ease;}
 .naary-set-row{transition:background .12s;}
 .naary-set-row:hover{background:var(--hover);}
-.naary-set-menu-item{display:block;width:100%;text-align:left;border:none;background:transparent;color:var(--ink);font-family:var(--font-sans);font-size:12.5px;padding:8px 10px;border-radius:7px;cursor:pointer;}
-.naary-set-menu-item:hover{background:var(--hover);}
+/* .naary-set-menu-item moved to components/components.css — it styles RowMenu, a COMPONENT, so
+   scoping it to this screen left every other consumer (and RowMenu's own story) unstyled. */
 .naary-var-cell{width:100%;min-width:0;height:30px;font-size:12px;color:var(--ink-2);background:transparent;border:1px solid transparent;border-radius:7px;padding:0 7px;transition:border-color .12s,background .12s;}
 .naary-var-cell::placeholder{color:var(--ink-faint);}
 .naary-var-cell:hover{border-color:var(--line-2);}

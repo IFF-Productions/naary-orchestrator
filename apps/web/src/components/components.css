@@ -683,6 +683,35 @@
   animation: naaryMenuIn 0.16s ease;
 }
 
+/**
+ * Row-action menu items (`settings/shared.tsx`'s RowMenu).
+ *
+ * These rules used to live in `Settings.tsx`'s `LOCAL_CSS` string, which mounts only while the
+ * Settings SCREEN is on screen — but the class is applied by `RowMenu`, a component. Any other
+ * consumer therefore shipped the menu UNSTYLED: `display:block; width:100%` never applied, so the
+ * items laid out inline and the whole menu measured 170×34 with two 24px items SIDE BY SIDE
+ * instead of 150×74 with two stacked 32px ones. Its own Storybook story
+ * (`settings-rowmenu--inside-panel`) was rendering exactly that — a layout the app never produces,
+ * fed to every responsive sweep as if it were real. Styles belong with the component that names
+ * them.
+ */
+.naary-set-menu-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: transparent;
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-size: 12.5px;
+  padding: 8px 10px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+.naary-set-menu-item:hover {
+  background: var(--hover);
+}
+
 /* ---------- Dialog / Drawer overlay ---------- */
 .overlay {
   position: fixed;
