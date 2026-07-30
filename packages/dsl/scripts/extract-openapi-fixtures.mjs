@@ -515,15 +515,21 @@ function catalogBodyPrefixes(action) {
 /**
  * Parameters, `$ref`s inlined, trimmed to what the drift test reads.
  *
- * A HEADER parameter also keeps its declared value set, and only a header's: that is what makes a
- * pinned header CHECKABLE rather than merely believed. Notion declares `Notion-Version` as
- * `enum: ["2026-03-11"]`, so the fixture can prove the provider-wide header we send is a value the
- * pinned document accepts — the #944 failure, where we shipped `2022-06-28` for years against a
- * document describing a different API and no test could say so. Capped and string-only so a
- * parameter with a large vocabulary (which is not a version pin anyway) can't inflate a fixture.
- * Swagger 2 puts `enum` on the parameter, OpenAPI 3 on its schema.
+ * A parameter also keeps its declared value set when it is a HEADER THE CATALOG PINS — and only
+ * then. That is what makes a pinned header CHECKABLE rather than merely believed: Notion declares
+ * `Notion-Version` as `enum: ["2026-03-11"]`, so the fixture can prove the provider-wide header we
+ * send is a value the pinned document accepts. The #944 failure was sending `2022-06-28` for years
+ * against a document describing a different API, with a spec-diff test in the repo that could say
+ * nothing. Swagger 2 puts `enum` on the parameter, OpenAPI 3 on its schema.
+ *
+ * Restricted to pinned headers (rather than every header, or everything) for the same reason
+ * everything else here is pruned: the fixture vendors what the drift spec READS, and it reads a
+ * declared value set only to compare it with a value we send. Still capped and string-only as a
+ * backstop — Notion declares 1 value, Intercom 22 (`1.0` … `2.16`), so a header listing more than
+ * 64 is a vocabulary rather than a pin and goes unchecked. Which is the thing to remember about this
+ * whole mechanism: a fixture carrying no `enum` means "the spec did not say", never "we agree".
  */
-function pruneParameters(raw, deref) {
+function pruneParameters(raw, deref, pinnedHeaders = new Set()) {
   return (
     (Array.isArray(raw) ? raw : [])
       .map((p) => deref(p))
@@ -534,11 +540,13 @@ function pruneParameters(raw, deref) {
       .filter((p) => p.in !== "body" && p.in !== "formData")
       .map((p) => {
         const values =
-          p.in === "header" ? (deref(p.schema)?.enum ?? p.enum) : undefined;
+          p.in === "header" && pinnedHeaders.has(p.name.toLowerCase())
+            ? (deref(p.schema)?.enum ?? p.enum)
+            : undefined;
         const keep =
           Array.isArray(values) &&
           values.length > 0 &&
-          values.length <= 12 &&
+          values.length <= 64 &&
           values.every((v) => typeof v === "string");
         return {
           name: p.name,
@@ -694,11 +702,19 @@ for (const [provider, { url, pathPrefix, format, external }] of Object.entries(
     const { deref, spec, isSwagger2 } = hit;
     const op = deref(hit.item[hit.method]);
     const entry = (paths[hit.path] ??= {});
+    // Headers this action sends with a FIXED value, so `pruneParameters` knows which declared value
+    // sets are worth vendoring — see its docblock. Lower-cased: header names are case-insensitive.
+    const pinnedHeaders = new Set(
+      [
+        ...Object.keys(catalogEntry.headers ?? {}),
+        ...Object.keys(action.headers ?? {}),
+      ].map((h) => h.toLowerCase()),
+    );
     // Path-level params merge into every operation; fold them in so the fixture entry is
     // self-contained and `parseOpenApi`'s own merge stays a no-op.
     const parameters = [
-      ...pruneParameters(hit.item.parameters, deref),
-      ...pruneParameters(op.parameters, deref),
+      ...pruneParameters(hit.item.parameters, deref, pinnedHeaders),
+      ...pruneParameters(op.parameters, deref, pinnedHeaders),
     ];
     const keep = keepByOp.get(key) ?? catalogBodyPrefixes(action);
     const requestBody = isSwagger2

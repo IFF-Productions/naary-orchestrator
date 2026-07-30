@@ -302,6 +302,36 @@ in both lists: 2 of its 3 writes are verified, `create_deal` is not — which is
 35.) Grouped by why, because "we didn't check", "there is nothing to check against", and "the check
 would lie" are three different claims:
 
+Three catalog providers send a provider-wide header that pins an API version: `notion`
+(`Notion-Version`), `intercom` (`Intercom-Version`) and `github` (`X-GitHub-Api-Version`). That header
+decides which request shapes are legal, so a spec diff that compares only paths and property names can
+be fully green while we are talking to a different API from the one the document describes. Notion is
+the case in point: we sent `Notion-Version: 2022-06-28` while the published spec described 2026-03-11,
+where a database's rows had moved behind a **data source** and `POST /databases/{id}/query` no longer
+exists. Nothing was broken — that pin is exactly what kept the old call working — but nothing could
+tell us either.
+
+Two things now close that gap. `pruneParameters` keeps a pinned header's declared `enum` in the
+fixture, so the fixture records **which API version it describes**; and the drift spec hard-fails when
+the value the catalog pins is not one the pinned document lists. Bumping a version header is therefore
+never a one-line edit: the test goes red until every action has been re-read against the new version's
+document. That is how #944's migration was carried out, and what makes the *next* one show up as a red
+build instead of a year of silence.
+
+**Where it actually bites today**, because a mechanism's reach is not the same as its coverage:
+`notion` (spec declares `enum: ["2026-03-11"]`) and `intercom` (`1.0` … `2.16`, we pin `2.11`) — both
+refreshed here, both compared. `github` is **not** covered and cannot be: its 13MB description never
+mentions `X-GitHub-Api-Version` at all, so there is nothing to compare with. Every other fixture was
+extracted before this existed and carries no `enum`; each gains the check on its next refresh, as a
+reviewable diff. **A fixture with no `enum` means the spec did not say — never that it agrees.**
+
+The reverse still holds, and it is the rule to reach for first: **a spec mismatch on a
+version-pinned API is not evidence that an endpoint is gone.** Check which version we send, and check
+the live status code, before "the spec doesn't have it" becomes "it's broken".
+
+**Not spec-verified (21 providers, 45 actions)** — grouped by why, because "we didn't check" and
+"there is nothing to check against" are different claims:
+
 | Why | Providers |
 | --- | --- |
 | **GraphQL — permanently out of scope, not pending.** The body IS `{query, variables}`, which is right by construction; the risk lives inside the query STRING, and only introspection can check that. Do not expect these to appear above | `linear` (3) `monday` (3) |
