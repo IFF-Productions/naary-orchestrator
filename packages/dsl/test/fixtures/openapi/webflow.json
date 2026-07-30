@@ -1,0 +1,158 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Data API",
+    "version": "2.0.0"
+  },
+  "x-naary": {
+    "provider": "webflow",
+    "pathPrefix": "",
+    "source": "https://raw.githubusercontent.com/webflow/openapi-spec/main/openapi/v2.yml",
+    "fetchedAt": "2026-07-30",
+    "note": "PRUNED snapshot — see packages/dsl/scripts/extract-openapi-fixtures.mjs. Do not hand-edit."
+  },
+  "paths": {
+    "/sites/{site_id}/collections": {
+      "get": {
+        "operationId": "list-collections",
+        "parameters": [
+          {
+            "name": "site_id",
+            "in": "path",
+            "required": true
+          }
+        ]
+      }
+    },
+    "/collections/{collection_id}/items": {
+      "get": {
+        "operationId": "list-collection-items",
+        "parameters": [
+          {
+            "name": "collection_id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "cmsLocaleId",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "name",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "slug",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "createdOn",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "lastPublished",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "lastUpdated",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "sortBy",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "sortOrder",
+            "in": "query",
+            "required": false
+          }
+        ]
+      },
+      "post": {
+        "operationId": "create-item",
+        "parameters": [
+          {
+            "name": "collection_id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "skipInvalidFiles",
+            "in": "query",
+            "required": false
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "id": {},
+                  "cmsLocaleId": {},
+                  "lastPublished": {},
+                  "lastUpdated": {},
+                  "createdOn": {},
+                  "isArchived": {},
+                  "isDraft": {},
+                  "fieldData": {},
+                  "items": {}
+                },
+                "x-readonly": [
+                  "id",
+                  "lastPublished",
+                  "lastUpdated",
+                  "createdOn"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/collections/{collection_id}/items/{item_id}": {
+      "get": {
+        "operationId": "Get-Item",
+        "parameters": [
+          {
+            "name": "collection_id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "cmsLocaleId",
+            "in": "query",
+            "required": false
+          }
+        ]
+      }
+    },
+    "/token/authorized_by": {
+      "get": {
+        "operationId": "authorized_by"
+      }
+    }
+  }
+}

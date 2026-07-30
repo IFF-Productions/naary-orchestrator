@@ -1,0 +1,101 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "DigitalOcean API",
+    "version": "2.0"
+  },
+  "x-naary": {
+    "provider": "digitalocean",
+    "pathPrefix": "/v2",
+    "source": "https://raw.githubusercontent.com/digitalocean/openapi/main/specification/DigitalOcean-public.v2.yaml",
+    "fetchedAt": "2026-07-30",
+    "note": "PRUNED snapshot — see packages/dsl/scripts/extract-openapi-fixtures.mjs. Do not hand-edit."
+  },
+  "paths": {
+    "/v2/droplets": {
+      "get": {
+        "operationId": "droplets_list",
+        "parameters": [
+          {
+            "name": "per_page",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "tag_name",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "name",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "required": false
+          }
+        ]
+      },
+      "post": {
+        "operationId": "droplets_create",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "name": {},
+                  "region": {},
+                  "size": {},
+                  "image": {},
+                  "ssh_keys": {},
+                  "backups": {},
+                  "backup_policy": {},
+                  "ipv6": {},
+                  "monitoring": {},
+                  "tags": {},
+                  "user_data": {},
+                  "private_networking": {},
+                  "volumes": {},
+                  "vpc_uuid": {},
+                  "with_droplet_agent": {},
+                  "public_networking": {},
+                  "names": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/droplets/{droplet_id}": {
+      "get": {
+        "operationId": "droplets_get",
+        "parameters": [
+          {
+            "name": "droplet_id",
+            "in": "path",
+            "required": true
+          }
+        ]
+      },
+      "delete": {
+        "operationId": "droplets_destroy",
+        "parameters": [
+          {
+            "name": "droplet_id",
+            "in": "path",
+            "required": true
+          }
+        ]
+      }
+    }
+  }
+}

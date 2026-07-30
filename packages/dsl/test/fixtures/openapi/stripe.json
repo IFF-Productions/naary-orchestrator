@@ -2,13 +2,13 @@
   "openapi": "3.0.3",
   "info": {
     "title": "Stripe API",
-    "version": "2026-06-24.dahlia"
+    "version": "2026-07-29.dahlia"
   },
   "x-naary": {
     "provider": "stripe",
     "pathPrefix": "/v1",
     "source": "https://raw.githubusercontent.com/stripe/openapi/master/openapi/spec3.json",
-    "fetchedAt": "2026-07-29",
+    "fetchedAt": "2026-07-30",
     "note": "PRUNED snapshot — see packages/dsl/scripts/extract-openapi-fixtures.mjs. Do not hand-edit."
   },
   "paths": {
@@ -90,6 +90,7 @@
                   "currency"
                 ],
                 "properties": {
+                  "allowed_payment_method_types": {},
                   "amount": {},
                   "amount_details": {},
                   "application_fee_amount": {},

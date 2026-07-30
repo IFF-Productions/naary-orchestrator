@@ -1,0 +1,146 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Meetings",
+    "version": "2"
+  },
+  "x-naary": {
+    "provider": "zoom",
+    "pathPrefix": "",
+    "source": "https://developers.zoom.us/api-hub/meetings/methods/endpoints.json, https://developers.zoom.us/api-hub/users/methods/endpoints.json",
+    "fetchedAt": "2026-07-30",
+    "note": "PRUNED snapshot — see packages/dsl/scripts/extract-openapi-fixtures.mjs. Do not hand-edit."
+  },
+  "paths": {
+    "/users/{userId}/meetings": {
+      "get": {
+        "operationId": "meetings",
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "next_page_token",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "page_number",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "timezone",
+            "in": "query",
+            "required": false
+          }
+        ]
+      },
+      "post": {
+        "operationId": "meetingCreate",
+        "parameters": [
+          {
+            "name": "userId",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "agenda": {},
+                  "default_password": {},
+                  "duration": {},
+                  "password": {},
+                  "pre_schedule": {},
+                  "recurrence": {},
+                  "schedule_for": {},
+                  "settings": {},
+                  "start_time": {},
+                  "sensitivity_label_id": {},
+                  "template_id": {},
+                  "timezone": {},
+                  "topic": {},
+                  "tracking_fields": {},
+                  "type": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/meetings/{meetingId}": {
+      "get": {
+        "operationId": "meeting",
+        "parameters": [
+          {
+            "name": "meetingId",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "occurrence_id",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "show_previous_occurrences",
+            "in": "query",
+            "required": false
+          }
+        ]
+      },
+      "delete": {
+        "operationId": "meetingDelete",
+        "parameters": [
+          {
+            "name": "meetingId",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "occurrence_id",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "schedule_for_reminder",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "cancel_meeting_reminder",
+            "in": "query",
+            "required": false
+          }
+        ]
+      }
+    }
+  }
+}

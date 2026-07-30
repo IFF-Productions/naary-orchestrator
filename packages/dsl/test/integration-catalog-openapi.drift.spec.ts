@@ -8,6 +8,12 @@ import {
   type IntegrationProvider,
 } from "../src/integrations";
 import { type ApiOperation, parseOpenApi } from "../src/introspection";
+import {
+  ACKNOWLEDGED,
+  ACKNOWLEDGED_BODY,
+  ACKNOWLEDGED_REQUIRED_BODY,
+  UNSPECIFIED,
+} from "./openapi-drift-adjudications";
 
 /**
  * The hand-written integration catalog, diffed against the providers' own OpenAPI specs.
@@ -70,6 +76,14 @@ import { type ApiOperation, parseOpenApi } from "../src/introspection";
  * fixture, in a PR, as a reviewable diff. Fixtures are read with `readFileSync` rather than
  * imported, so they add no runtime dependency and cannot reach the worker bundle.
  *
+ * ## Where the adjudications live
+ *
+ * The four lists of looked-at-and-kept findings — `ACKNOWLEDGED`, `UNSPECIFIED`,
+ * `ACKNOWLEDGED_BODY`, `ACKNOWLEDGED_REQUIRED_BODY` — are in `./openapi-drift-adjudications`. They
+ * are prose, and they are what a reviewer argues with; the CHECKS are here. Every one of them is
+ * asserted in the other direction below (it must still be produced), so moving them out cannot
+ * silence anything.
+ *
  * ## Reusing `parseOpenApi`
  *
  * Operation lookup + parameters come from `parseOpenApi` (`src/introspection.ts`) rather than a
@@ -105,97 +119,6 @@ const AUTH_PARAMETERS: Record<string, Set<string>> = {
   slack: new Set(["token"]),
 };
 
-/**
- * Findings of class (4) we have looked at and decided to keep. Each MUST still be produced —
- * an acknowledgment that no longer matches anything is either a fixed catalog entry whose note
- * was left behind, or upstream having changed its mind. Both deserve a look.
- */
-const ACKNOWLEDGED: { finding: string; why: string }[] = [
-  {
-    finding:
-      'pagerduty.create_incident: header "From" is required upstream, catalog says required:false',
-    why: "#909 — required only for an account-level (General Access) key; a user-scoped key must NOT send it. No spec can express 'conditional on the key you hold'.",
-  },
-  {
-    finding:
-      'pagerduty.acknowledge_incident: header "From" is required upstream, catalog says required:false',
-    why: "#909 — same conditional-on-key-scope rule.",
-  },
-  {
-    finding:
-      'pagerduty.resolve_incident: header "From" is required upstream, catalog says required:false',
-    why: "#909 — same conditional-on-key-scope rule.",
-  },
-  {
-    finding:
-      'pagerduty.add_note: header "From" is required upstream, catalog says required:false',
-    why: "#909 — same conditional-on-key-scope rule.",
-  },
-  {
-    finding:
-      'stripe.get_customer: path field "customerId" ↔ upstream "customer"',
-    why: 'Deliberate rename: a config panel labelled "customer" reads as the customer OBJECT, not its id. Substitution is positional, so the name is ours to choose.',
-  },
-  {
-    finding: 'twilio.get_message: path field "messageSid" ↔ upstream "Sid"',
-    why: 'Deliberate rename: Twilio calls every id "Sid"; the action already has an accountSid, so an unqualified "Sid" would be ambiguous in the UI.',
-  },
-  {
-    finding:
-      'cloudflare.delete_dns_record: path field "recordId" ↔ upstream "dns_record_id"',
-    why: 'Deliberate rename: the action is already scoped to DNS records, so the "dns_record_" prefix is noise in a config panel. Substitution is positional.',
-  },
-  {
-    finding: 'discord.add_reaction: path field "emoji" ↔ upstream "emoji_name"',
-    why: 'Deliberate rename: the segment takes either a unicode emoji or a custom `name:id`, so "emoji" describes the input better than upstream\'s "emoji_name".',
-  },
-  {
-    finding: 'posthog.get_person: path field "personId" ↔ upstream "id"',
-    why: 'Deliberate rename: a bare "id" in a config panel is ambiguous when the same action also takes a projectId.',
-  },
-  {
-    finding:
-      'box.create_folder: body "parent.id" is required upstream and reaches the API only inside the free-form JSON field "parent"',
-    why: 'By design: `parent` is a `type: "json"` field whose hint is `{ "id": "0" } for root`. Splitting it into a scalar `parent.id` would drop the other keys Box accepts there.',
-  },
-  {
-    finding:
-      'sendgrid.send_mail: body "from.email" is required upstream and reaches the API only inside the free-form JSON field "from"',
-    why: 'By design: `from` is a `type: "json"` field hinted `{ email, name? }`. The v3 Mail Send body is deeply structured (personalizations/content are arrays), so the whole envelope is authored as JSON.',
-  },
-];
-
-/**
- * Actions with no upstream operation, on purpose. Empty today — an entry here is a claim that the
- * provider's own spec omits an endpoint they document elsewhere, which needs a reason, not a
- * shrug. (Refreshing the fixture is nearly always the right fix instead.)
- */
-const UNSPECIFIED: { action: string; why: string }[] = [
-  {
-    action: "asana.get_me",
-    why:
-      "Asana's OAS models the user read as `/users/{user_gid}` only; `me` is a documented magic " +
-      "gid, not a distinct operation, so the literal path can never appear in the spec. Verified " +
-      "live: unauthenticated `GET https://app.asana.com/api/1.0/users/me` → 401, not 404 — the " +
-      "endpoint exists and is reachable, which is what the connection probe needs.",
-  },
-  {
-    action: "posthog.get_me",
-    why:
-      "PostHog's schema is generated from DRF and omits this route; `@me` is a viewset alias " +
-      "rather than a registered path. Verified live: unauthenticated " +
-      "`GET https://app.posthog.com/api/users/@me/` → 401, not 404.",
-  },
-];
-
-/**
- * WRONG body paths (#813) we have adjudicated and decided to keep — one per (action, field), and
- * each must STILL be produced, asserted below in the same both-directions way as ACKNOWLEDGED. An
- * entry is a claim that the spec is wrong or incomplete about a field we send on purpose; it is
- * not a place to park a finding nobody wanted to read.
- */
-const ACKNOWLEDGED_BODY: { action: string; field: string; why: string }[] = [];
-
 // ── helpers ─────────────────────────────────────────────────────────────────────────────────────
 
 /** `/repos/{owner}/{repo}/issues/{issueNumber}` → `/repos/{}/{}/issues/{}`. Placeholder NAMES are
@@ -219,6 +142,15 @@ const isSupplied = (f: IntegrationField): boolean =>
 const bodyPathOf = (f: IntegrationField): string => f.bodyPath ?? f.key;
 
 /**
+ * A body key the PROTOCOL owns, not the author. `@odata.type` and its siblings are OData control
+ * annotations: Microsoft Graph's generated document marks `@odata.type` required on every entity
+ * because it is the discriminator of the CSDL base type, and no `fields[]` entry could sensibly
+ * ask a user for it. Excluded by SHAPE (`@`-prefixed) rather than by name, and only in the
+ * required walk — the same reasoning `TRANSPORT_HEADERS` applies to `content-type`.
+ */
+const isProtocolBodyKey = (name: string): boolean => name.startsWith("@");
+
+/**
  * Every dotted path upstream marks required, walking INTO required objects:
  * PagerDuty's create_incident yields `incident`, `incident.type`, `incident.title`,
  * `incident.service`. Reads the fixture's pruned schema (see the docblock on `parseOpenApi`).
@@ -234,7 +166,7 @@ function requiredBodyPaths(
   const required = Array.isArray(s.required) ? s.required : [];
   const properties = (s.properties ?? {}) as Record<string, unknown>;
   for (const name of required) {
-    if (typeof name !== "string") continue;
+    if (typeof name !== "string" || isProtocolBodyKey(name)) continue;
     const path = prefix ? `${prefix}.${name}` : name;
     out.push(path);
     if (properties[name])
@@ -801,7 +733,17 @@ for (const check of checks) {
     });
 
     it("has a field for every required body property", () => {
-      expect(check.bodyProblems, check.key).toEqual([]);
+      const excused = new Set(
+        ACKNOWLEDGED_REQUIRED_BODY.filter((a) => a.action === check.key).map(
+          (a) => a.path,
+        ),
+      );
+      expect(
+        check.bodyProblems.filter(
+          (p) => !excused.has(p.match(/body "([^"]+)"/)?.[1] ?? ""),
+        ),
+        check.key,
+      ).toEqual([]);
     });
 
     it("writes every body field to a property the spec declares", () => {
@@ -864,6 +806,19 @@ describe("advisory drift — reported, never failed", () => {
       ).toBe(true);
     }
   });
+
+  it("still finds every acknowledged MISSING required body property", () => {
+    for (const { action, path, why } of ACKNOWLEDGED_REQUIRED_BODY) {
+      const check = checks.find((c) => c.key === action);
+      expect(check, `${action} is no longer a checked action`).toBeDefined();
+      expect(
+        check?.bodyProblems.some((p) => p.includes(`body "${path}"`)),
+        `${action}: "${path}" is no longer reported as a missing required body property.\n  it ` +
+          `was acknowledged because: ${why}\n  Either the catalog now supplies it (delete the ` +
+          "entry) or upstream dropped the requirement (worth a look).",
+      ).toBe(true);
+    }
+  });
 });
 
 /**
@@ -876,7 +831,19 @@ describe("advisory drift — reported, never failed", () => {
  */
 describe("body-encoding coverage (#813)", () => {
   it("reports how much of the catalog a spec can actually vouch for", () => {
+    // The DENOMINATOR is computed from the whole catalog, not from the fixtures (#813 follow-up).
+    // §2.5 of docs/integrations/VERIFICATION.md quotes an "X of Y" — counting Y by hand is how a
+    // coverage claim goes stale silently the next time somebody adds a provider.
+    const bodyBearing = (a: IntegrationAction) =>
+      a.write === true && a.fields.some((f) => f.in === "body");
+    const universe = Object.entries(INTEGRATION_CATALOG).flatMap(
+      ([provider, entry]) =>
+        entry.actions.filter(bodyBearing).map((a) => `${provider}.${a.key}`),
+    );
     const writes = checks.filter((c) => c.action.write);
+    const covered = new Set(
+      writes.filter((c) => bodyBearing(c.action) && c.op).map((c) => c.key),
+    );
     const rows: string[] = [];
     let confirmed = 0;
     let unknowable = 0;
@@ -892,15 +859,36 @@ describe("body-encoding coverage (#813)", () => {
           `${String(counts.unknowable).padStart(2)} unknowable  ${String(counts.wrong).padStart(2)} wrong`,
       );
     }
+    const providersWithBodyWrites = new Set(
+      universe.map((k) => k.split(".")[0]),
+    );
+    // A `wrong` verdict still COUNTS in the total when it is acknowledged, so the table can print a
+    // non-zero `wrong` on a green build. Saying how many are adjudicated is the difference between
+    // that reading as "CI is red" and as "we looked, and wrote down why".
+    const acknowledgedWrong = ACKNOWLEDGED_BODY.length;
     process.stderr.write(
       `\n#813 spec-verified write bodies — ${writes.length} write action(s) across ` +
         `${new Set(writes.map((c) => c.provider)).size} pinned provider(s):\n` +
         `${rows.join("\n")}\n` +
-        `    ${"TOTAL body fields".padEnd(34)} ${confirmed} confirmed, ${unknowable} unknowable, ${wrong} wrong\n\n`,
+        `    ${"TOTAL body fields".padEnd(34)} ${confirmed} confirmed, ${unknowable} unknowable, ${wrong} wrong` +
+        `${wrong ? ` (${acknowledgedWrong} acknowledged — see ACKNOWLEDGED_BODY)` : ""}\n` +
+        `\n    COVERAGE  ${covered.size} of ${universe.length} body-bearing write actions, ` +
+        `${new Set([...covered].map((k) => k.split(".")[0])).size} of ` +
+        `${providersWithBodyWrites.size} providers.\n` +
+        `    NOT covered: ${universe
+          .filter((k) => !covered.has(k))
+          .join(", ")}\n\n`,
     );
-    // The only assertion: the summary must be summarizing something. A fixture directory that
-    // stopped loading would otherwise print a tidy table of zeroes.
+    // The summary must be summarizing something — a fixture directory that stopped loading would
+    // otherwise print a tidy table of zeroes.
     expect(writes.length).toBeGreaterThan(0);
     expect(confirmed).toBeGreaterThan(0);
+    // …and the numerator must be drawn from the same population as the denominator. `covered ⊆
+    // universe` is true by construction TODAY; it stops being true the moment the two `bodyBearing`
+    // computations drift apart, which is the only way this line can fail and the reason it is here.
+    for (const key of covered) expect(universe).toContain(key);
+    // Every `wrong` on a green build is adjudicated; a NEW one fails its own action's test above,
+    // so this pins the printed number to the acknowledgment list rather than to nothing.
+    expect(wrong).toBeLessThanOrEqual(acknowledgedWrong);
   });
 });

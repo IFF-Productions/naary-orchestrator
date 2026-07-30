@@ -1,0 +1,319 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "ClickUp API v2 Reference",
+    "version": "2.0"
+  },
+  "x-naary": {
+    "provider": "clickup",
+    "pathPrefix": "/v2",
+    "source": "https://developer.clickup.com/openapi/clickup-api-v2-reference.json",
+    "fetchedAt": "2026-07-30",
+    "note": "PRUNED snapshot — see packages/dsl/scripts/extract-openapi-fixtures.mjs. Do not hand-edit."
+  },
+  "paths": {
+    "/v2/list/{list_id}/task": {
+      "post": {
+        "operationId": "CreateTask",
+        "parameters": [
+          {
+            "name": "list_id",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "name"
+                ],
+                "properties": {
+                  "name": {},
+                  "description": {},
+                  "assignees": {},
+                  "archived": {},
+                  "group_assignees": {},
+                  "tags": {},
+                  "status": {},
+                  "priority": {},
+                  "due_date": {},
+                  "due_date_time": {},
+                  "time_estimate": {},
+                  "start_date": {},
+                  "start_date_time": {},
+                  "points": {},
+                  "notify_all": {},
+                  "parent": {},
+                  "markdown_content": {},
+                  "links_to": {},
+                  "check_required_custom_fields": {},
+                  "custom_fields": {},
+                  "custom_item_id": {}
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "GetTasks",
+        "parameters": [
+          {
+            "name": "list_id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "archived",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "include_markdown_description",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "order_by",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "reverse",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "subtasks",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "statuses",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "include_closed",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "include_timl",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "assignees",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "watchers",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "tags",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "due_date_gt",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "due_date_lt",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "date_created_gt",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "date_created_lt",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "date_updated_gt",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "date_updated_lt",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "date_done_gt",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "date_done_lt",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "custom_fields",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "custom_field",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "custom_items",
+            "in": "query",
+            "required": false
+          }
+        ]
+      }
+    },
+    "/v2/task/{task_id}": {
+      "get": {
+        "operationId": "GetTask",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "custom_task_ids",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "team_id",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "include_subtasks",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "include_markdown_description",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "custom_fields",
+            "in": "query",
+            "required": false
+          }
+        ]
+      },
+      "put": {
+        "operationId": "UpdateTask",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "custom_task_ids",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "team_id",
+            "in": "query",
+            "required": false
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "custom_item_id": {},
+                  "name": {},
+                  "description": {},
+                  "markdown_content": {},
+                  "status": {},
+                  "priority": {},
+                  "due_date": {},
+                  "due_date_time": {},
+                  "parent": {},
+                  "time_estimate": {},
+                  "start_date": {},
+                  "start_date_time": {},
+                  "points": {},
+                  "assignees": {},
+                  "group_assignees": {},
+                  "watchers": {},
+                  "archived": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/task/{task_id}/comment": {
+      "post": {
+        "operationId": "CreateTaskComment",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "custom_task_ids",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "team_id",
+            "in": "query",
+            "required": false
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "comment_text",
+                  "notify_all"
+                ],
+                "properties": {
+                  "comment_text": {},
+                  "assignee": {},
+                  "group_assignee": {},
+                  "notify_all": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/user": {
+      "get": {
+        "operationId": "GetAuthorizedUser"
+      }
+    }
+  }
+}

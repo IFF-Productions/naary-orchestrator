@@ -1,0 +1,114 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Calendly API",
+    "version": "2.0.0"
+  },
+  "x-naary": {
+    "provider": "calendly",
+    "pathPrefix": "",
+    "source": "https://calendly.stoplight.io/api/v1/projects/calendly/api-docs/nodes/reference/calendly-api/openapi.yaml",
+    "fetchedAt": "2026-07-30",
+    "note": "PRUNED snapshot — see packages/dsl/scripts/extract-openapi-fixtures.mjs. Do not hand-edit."
+  },
+  "paths": {
+    "/users/me": {
+      "get": {
+        "operationId": "get-current-user"
+      }
+    },
+    "/scheduled_events": {
+      "get": {
+        "operationId": "list-scheduled-events",
+        "parameters": [
+          {
+            "name": "user",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "organization",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "invitee_email",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "min_start_time",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "max_start_time",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "page_token",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "count",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "group",
+            "in": "query",
+            "required": false
+          }
+        ]
+      }
+    },
+    "/scheduled_events/{uuid}": {
+      "get": {
+        "operationId": "get-scheduled-event",
+        "parameters": [
+          {
+            "name": "uuid",
+            "in": "path",
+            "required": true
+          }
+        ]
+      }
+    },
+    "/scheduled_events/{uuid}/cancellation": {
+      "post": {
+        "operationId": "create-scheduled-event-cancellation",
+        "parameters": [
+          {
+            "name": "uuid",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "reason": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

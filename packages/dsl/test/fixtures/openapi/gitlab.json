@@ -1,0 +1,352 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "GitLab REST API",
+    "version": "19.3.0-pre"
+  },
+  "x-naary": {
+    "provider": "gitlab",
+    "pathPrefix": "/api/v4",
+    "source": "https://gitlab.com/gitlab-org/gitlab/-/raw/master/doc/api/openapi/openapi_v3.yaml",
+    "fetchedAt": "2026-07-30",
+    "note": "PRUNED snapshot — see packages/dsl/scripts/extract-openapi-fixtures.mjs. Do not hand-edit."
+  },
+  "paths": {
+    "/api/v4/projects/{id}/issues/{issue_iid}": {
+      "get": {
+        "operationId": "getApiV4ProjectsIdIssuesIssueIid",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "issue_iid",
+            "in": "path",
+            "required": true
+          }
+        ]
+      }
+    },
+    "/api/v4/projects/{id}/issues": {
+      "get": {
+        "operationId": "getApiV4ProjectsIdIssues",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "with_labels_details",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "closed_by_id",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "order_by",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "due_date",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "issue_type",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "labels",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "milestone",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "milestone_id",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "iids",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "in",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "author_id",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "author_username",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "assignee_id",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "assignee_username",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "created_after",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "created_before",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "updated_after",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "updated_before",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "not",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "not[labels]",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "not[milestone]",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "not[milestone_id]",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "not[iids]",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "not[author_id]",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "not[author_username]",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "not[assignee_id]",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "not[assignee_username]",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "not[weight]",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "not[iteration_id]",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "not[iteration_title]",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "my_reaction_emoji",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "confidential",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "weight",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "epic_id",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "health_status",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "iteration_id",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "iteration_title",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "per_page",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false
+          }
+        ]
+      },
+      "post": {
+        "operationId": "postApiV4ProjectsIdIssues",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "title"
+                ],
+                "properties": {
+                  "title": {},
+                  "created_at": {},
+                  "merge_request_to_resolve_discussions_of": {},
+                  "discussion_to_resolve": {},
+                  "iid": {},
+                  "description": {},
+                  "assignee_ids": {},
+                  "assignee_id": {},
+                  "milestone_id": {},
+                  "milestone": {},
+                  "labels": {},
+                  "add_labels": {},
+                  "remove_labels": {},
+                  "due_date": {},
+                  "start_date": {},
+                  "confidential": {},
+                  "discussion_locked": {},
+                  "issue_type": {},
+                  "severity": {},
+                  "weight": {},
+                  "epic_id": {},
+                  "epic_iid": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v4/projects/{id}/issues/{noteable_id}/notes": {
+      "post": {
+        "operationId": "postApiV4ProjectsIdIssuesNoteableIdNotes",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "noteable_id",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "body"
+                ],
+                "properties": {
+                  "body": {},
+                  "confidential": {},
+                  "internal": {},
+                  "created_at": {},
+                  "merge_request_diff_head_sha": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v4/user": {
+      "get": {
+        "operationId": "getApiV4User"
+      }
+    }
+  }
+}

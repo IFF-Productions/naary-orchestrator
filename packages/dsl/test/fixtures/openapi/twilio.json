@@ -8,7 +8,7 @@
     "provider": "twilio",
     "pathPrefix": "/2010-04-01",
     "source": "https://raw.githubusercontent.com/twilio/twilio-oai/main/spec/json/twilio_api_v2010.json",
-    "fetchedAt": "2026-07-29",
+    "fetchedAt": "2026-07-30",
     "note": "PRUNED snapshot — see packages/dsl/scripts/extract-openapi-fixtures.mjs. Do not hand-edit."
   },
   "paths": {
