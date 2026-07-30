@@ -482,8 +482,16 @@ export async function queryState(
       spentUsd: null,
       perExecutionCapUsd: null,
     };
+    // Only replay for a status the SPA treats as TERMINAL. A run detail polls every 1.5s until
+    // then, and "running"/"unknown" keep it polling — so replaying under those would fire a fresh
+    // history replay every 1.5s for as long as the tab is open. Under the mapped failure statuses
+    // the poll stops after one read, which is what makes this affordable.
+    const replayable =
+      closed.status !== "unknown" && closed.status !== "running";
     try {
-      const s = await handle.query(stateQuery);
+      const s = replayable
+        ? await handle.query(stateQuery)
+        : ({ ctx: undefined } as unknown as ExecutionState);
       if (s.ctx && typeof s.ctx === "object" && !Array.isArray(s.ctx)) {
         return {
           ...closed,

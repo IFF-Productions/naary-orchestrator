@@ -122,6 +122,16 @@ describe("queryState — a run that FAILED at the Temporal level", () => {
     expect(out.executedNodeIds).toEqual(ROW.executedNodeIds);
   });
 
+  it("does NOT replay for a status the SPA keeps polling", async () => {
+    // The run detail polls every 1.5s until the status is terminal, and "unknown" never is. A
+    // replay here would fire a full history replay every 1.5s for as long as the tab is open.
+    const query = vi.fn();
+    const deps = makeDeps({ describeStatus: "SOMETHING_NEW", query });
+    const out = await queryState(deps, "wf-1", TENANT);
+    expect(out.status).toBe("unknown");
+    expect(query).not.toHaveBeenCalled();
+  });
+
   it("ignores a replay that answers with a non-object ctx", async () => {
     const deps = makeDeps({
       describeStatus: "TERMINATED",
