@@ -10,7 +10,7 @@ import { describe, expect, it } from "vitest";
 import {
   healFailureSignature,
   normalizeFailureMessage,
-} from "../src/temporal/workflow/heal-signature";
+} from "../src/heal/heal-signature";
 
 const sig = (
   message: string,

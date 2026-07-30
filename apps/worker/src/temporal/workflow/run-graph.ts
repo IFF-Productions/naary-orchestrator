@@ -514,6 +514,12 @@ export async function runGraph(
                   // this carries no run content and stays a small payload.
                   failedNodeId: state.failedNodeId ?? state.currentNodeId,
                   failureKind: classifyFailure(threw),
+                  // The message makes the dedupe signature SPECIFIC. Without it, two different
+                  // errors on the same node and kind share one signature, so the second is never
+                  // proposed and never explained. Its volatile parts (ids, timestamps, numbers)
+                  // are normalized away when the signature is built.
+                  failureMessage:
+                    threw instanceof Error ? threw.message : String(threw),
                 },
               ],
             });
