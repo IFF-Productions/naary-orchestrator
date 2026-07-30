@@ -11,6 +11,7 @@ import {
   type BuilderSessionSummary,
   SAVE_OPTION,
 } from "../../../lib/api/builder";
+import type { EditTarget } from "./edit-target";
 import type { PlanLine } from "./model";
 import { ProviderPicker } from "./ProviderPicker";
 import type { AiBuilderProvider, ProviderOption } from "./providers";
@@ -67,6 +68,21 @@ const EXAMPLES: { label: string; icon: "bolt" | "agent" | "approval" }[] = [
   },
 ];
 
+/**
+ * Openers for an EDIT chat. A separate list, not the create examples reworded: those describe whole
+ * workflows ("when a refund request arrives, …"), and offering one here would invite the user to
+ * ask for the very rewrite this screen is built to avoid.
+ */
+const EDIT_EXAMPLES: { label: string; icon: "bolt" | "agent" | "approval" }[] =
+  [
+    { label: "Add a Slack notification when it finishes", icon: "bolt" },
+    {
+      label: "Require my approval before the last step runs",
+      icon: "approval",
+    },
+    { label: "Retry the HTTP request twice before giving up", icon: "agent" },
+  ];
+
 export function ConversationPanel({
   phase,
   messages,
@@ -75,6 +91,9 @@ export function ConversationPanel({
   error,
   resumables,
   opening,
+  editing,
+  seeding,
+  staleWarning,
   onSend,
   providerOptions,
   provider,
@@ -82,6 +101,8 @@ export function ConversationPanel({
   providerHint,
   onResume,
   onOpenInCanvas,
+  onConfirmStale,
+  onDismissStale,
   compact,
 }: {
   phase: BuildPhase;
@@ -94,6 +115,12 @@ export function ConversationPanel({
   resumables: BuilderSessionSummary[] | null;
   /** "Open in canvas" in flight (saving the draft). */
   opening: boolean;
+  /** The workflow this chat edits, or null for a from-scratch build. */
+  editing: EditTarget | null;
+  /** `?key=` present, binding not resolved — no turn may be sent yet (see BuildWithAiState). */
+  seeding: boolean;
+  /** Save refused: the draft may not descend from what's saved now — confirm or cancel. */
+  staleWarning: string | null;
   onSend: (text: string) => void;
   /** Which model/agent to generate with — see ./providers. */
   providerOptions: ProviderOption[];
@@ -102,6 +129,8 @@ export function ConversationPanel({
   providerHint: string | null;
   onResume: (id: string) => void;
   onOpenInCanvas: () => void;
+  onConfirmStale: () => void;
+  onDismissStale: () => void;
   compact?: boolean;
 }) {
   const [draft, setDraft] = useState("");
@@ -119,28 +148,40 @@ export function ConversationPanel({
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages, typing, plan, error]);
 
-  const canSend = draft.trim().length > 0 && !streaming && !opening;
+  // `seeding` blocks a turn until we know WHICH workflow it edits — see BuildWithAiState.seeding.
+  const canSend = draft.trim().length > 0 && !streaming && !opening && !seeding;
   const send = () => {
     const text = draft.trim();
-    if (!text || streaming || opening) return;
+    if (!text || streaming || opening || seeding) return;
     setDraft("");
     onSend(text);
   };
 
+  // Editing an existing workflow rewrites every "what shall we build?" prompt in the column: the
+  // answer is already decided, and asking again is how a user comes to believe they're starting over.
+  const idlePlaceholder = editing
+    ? `Describe a change to “${editing.name}”…`
+    : "Describe what you want to automate…";
   const placeholder = showIntro
-    ? "Describe what you want to automate…"
+    ? idlePlaceholder
     : streaming
       ? "Naary is building…"
       : ready
         ? "Ask for a change — “add a Slack step”…"
-        : "Describe what you want to automate…";
-  const hint = showIntro
-    ? "Your first message becomes a draft workflow — refine it by chatting."
-    : streaming
-      ? "One moment…"
-      : ready
-        ? "The draft is on the canvas — refine by chatting, or open it."
-        : "Send a message to keep building.";
+        : idlePlaceholder;
+  const hint = seeding
+    ? "Loading the workflow you're editing…"
+    : showIntro
+      ? editing
+        ? "Your message changes this workflow — nothing is saved until you publish a new version."
+        : "Your first message becomes a draft workflow — refine it by chatting."
+      : streaming
+        ? "One moment…"
+        : ready
+          ? editing
+            ? "The change is on the canvas — refine by chatting, or publish it."
+            : "The draft is on the canvas — refine by chatting, or open it."
+          : "Send a message to keep building.";
 
   return (
     <div
@@ -169,7 +210,7 @@ export function ConversationPanel({
               color: "var(--ink)",
             }}
           >
-            What should we automate?
+            {editing ? "What should we change?" : "What should we automate?"}
           </div>
           <div
             style={{
@@ -179,8 +220,20 @@ export function ConversationPanel({
               lineHeight: 1.55,
             }}
           >
-            Tell me the goal in a sentence. I'll draft a runnable workflow on
-            the canvas — then you refine it by chatting.
+            {editing ? (
+              <>
+                You're editing{" "}
+                <strong style={{ color: "var(--ink)" }}>{editing.name}</strong>{" "}
+                — it's already on the canvas to the right. Tell me the change in
+                a sentence and I'll apply it to this workflow, not start a new
+                one.
+              </>
+            ) : (
+              <>
+                Tell me the goal in a sentence. I'll draft a runnable workflow
+                on the canvas — then you refine it by chatting.
+              </>
+            )}
           </div>
 
           <div
@@ -193,13 +246,16 @@ export function ConversationPanel({
               margin: "20px 0 9px",
             }}
           >
-            Start from an idea
+            {editing ? "Common changes" : "Start from an idea"}
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-            {EXAMPLES.map((ex) => (
+            {(editing ? EDIT_EXAMPLES : EXAMPLES).map((ex) => (
               <button
                 key={ex.label}
                 type="button"
+                // Same gate as the composer: a tapped chip is a turn, and a turn before the
+                // binding resolves is a from-scratch build of someone's existing workflow.
+                disabled={seeding}
                 onClick={() => onSend(ex.label)}
                 className="bwa-chip"
                 style={{
@@ -207,7 +263,8 @@ export function ConversationPanel({
                   background: "var(--card)",
                   borderRadius: 10,
                   padding: "10px 12px",
-                  cursor: "pointer",
+                  cursor: seeding ? "wait" : "pointer",
+                  opacity: seeding ? 0.55 : 1,
                   display: "flex",
                   alignItems: "center",
                   gap: 10,
@@ -303,6 +360,8 @@ export function ConversationPanel({
                       >
                         {s.title ?? "Untitled build"}
                       </span>
+                      {/* A session bound to a workflow says so HERE too — resuming one is a
+                          decision about someone's live workflow, and the list is where it's made. */}
                       <span
                         className="mono"
                         style={{
@@ -310,8 +369,12 @@ export function ConversationPanel({
                           fontSize: "var(--text-2xs)",
                           color: "var(--ink-3)",
                           marginTop: 2,
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
                         }}
                       >
+                        {s.workflowKey ? `editing ${s.workflowKey} · ` : ""}
                         {new Date(s.updatedAt).toLocaleString()}
                       </span>
                     </span>
@@ -623,8 +686,64 @@ export function ConversationPanel({
         </div>
       )}
 
-      {/* Open in canvas — the draft is real (validated result frame) */}
-      {ready && (
+      {/* The draft can no longer be shown to descend from what's saved — the ONE prompt on this
+          path, because it's the one place a Save can destroy someone else's work (#874). */}
+      {ready && staleWarning && (
+        <div style={{ flex: "none", padding: "4px 20px 0" }}>
+          <div
+            style={{
+              padding: "10px 12px",
+              borderRadius: "var(--radius-sm)",
+              background: "var(--error-soft)",
+              border:
+                "1px solid color-mix(in srgb, var(--state-error) 40%, transparent)",
+              color: "var(--state-error)",
+              fontSize: "var(--text-sm)",
+              lineHeight: 1.5,
+            }}
+          >
+            {staleWarning}
+            <div style={{ display: "flex", gap: 8, marginTop: 9 }}>
+              <button
+                type="button"
+                onClick={onConfirmStale}
+                style={{
+                  border:
+                    "1px solid color-mix(in srgb, var(--state-error) 55%, transparent)",
+                  background: "transparent",
+                  color: "var(--state-error)",
+                  borderRadius: "var(--radius-sm)",
+                  padding: "6px 12px",
+                  fontSize: "var(--text-sm)",
+                  fontWeight: "var(--weight-semibold)",
+                  cursor: "pointer",
+                }}
+              >
+                Save anyway
+              </button>
+              <button
+                type="button"
+                onClick={onDismissStale}
+                style={{
+                  border: "1px solid var(--line-2)",
+                  background: "var(--card)",
+                  color: "var(--ink-2)",
+                  borderRadius: "var(--radius-sm)",
+                  padding: "6px 12px",
+                  fontSize: "var(--text-sm)",
+                  cursor: "pointer",
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Save — the draft is real (validated result frame). Bound to a workflow this publishes its
+          next VERSION; unbound it creates a new one and opens it. */}
+      {ready && !staleWarning && (
         <div style={{ flex: "none", padding: "4px 20px 12px" }}>
           <button
             type="button"
@@ -648,8 +767,20 @@ export function ConversationPanel({
               opacity: opening ? 0.7 : 1,
             }}
           >
-            <Icon name="external" size={14} strokeWidth={1.7} />
-            {opening ? "Saving draft…" : "Open in canvas"}
+            <Icon
+              name={editing ? "check" : "external"}
+              size={14}
+              strokeWidth={1.7}
+            />
+            {opening
+              ? editing
+                ? "Publishing…"
+                : "Saving draft…"
+              : editing
+                ? editing.baseVersion !== null
+                  ? `Save as v${editing.baseVersion + 1}`
+                  : "Save as a new version"
+                : "Open in canvas"}
           </button>
         </div>
       )}

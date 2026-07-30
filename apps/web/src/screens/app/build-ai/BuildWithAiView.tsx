@@ -14,6 +14,7 @@ import {
   useMediaQuery,
 } from "../../../lib/useMediaQuery";
 import { CanvasStage } from "./CanvasStage";
+import { type EditTarget, renameNotice } from "./edit-target";
 import type { AiBuilderProvider, ProviderOption } from "./providers";
 import {
   type BuildPhase,
@@ -48,6 +49,20 @@ export interface BuildWithAiState {
   error: string | null;
   resumables: BuilderSessionSummary[] | null;
   opening: boolean;
+  /** The workflow this chat EDITS (`?key=`), or null for a from-scratch build. */
+  editing: EditTarget | null;
+  /**
+   * `?key=` is present but the binding hasn't resolved yet — DERIVED by the container, not stored.
+   *
+   * It gates the composer, and that gate is load-bearing: a turn sent in this window would open a
+   * session with no `workflowKey`, which makes it a from-scratch CREATE and makes the save a
+   * slugified fork of the user's workflow. Waiting for one round trip is the whole fix.
+   */
+  seeding: boolean;
+  /** The binding is real but the workflow couldn't be read (deleted, wrong env, failed fetch). */
+  editProblem: string | null;
+  /** Save-time refusal: the draft can't be shown to descend from what's saved now (#874). */
+  staleWarning: string | null;
 }
 
 export const INITIAL_BUILD_STATE: BuildWithAiState = {
@@ -61,7 +76,89 @@ export const INITIAL_BUILD_STATE: BuildWithAiState = {
   error: null,
   resumables: null,
   opening: false,
+  editing: null,
+  seeding: false,
+  editProblem: null,
+  staleWarning: null,
 };
+
+/**
+ * "You are editing THIS workflow" — a persistent strip under the header, not a one-off toast.
+ *
+ * The canvas AI panel's version of this failure (#874) was reported as *"it rewrote the whole
+ * workflow"*: the panel gave no indication of what a turn was operating on, so a faithful edit and
+ * a from-scratch replacement looked identical. The binding is therefore stated continuously, with
+ * the three facts a user needs to trust the next Save — which workflow, which version it descends
+ * from, and what saving will produce — plus the rename, if the draft changed the name.
+ */
+function EditBanner({
+  editing,
+  draftName,
+  problem,
+}: {
+  editing: EditTarget;
+  draftName: string | null;
+  problem: string | null;
+}) {
+  const rename = renameNotice(editing, draftName);
+  const nextVersion =
+    editing.baseVersion !== null
+      ? `v${editing.baseVersion + 1}`
+      : "a new version";
+  return (
+    <div
+      style={{
+        flex: "none",
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        flexWrap: "wrap",
+        padding: "9px 20px",
+        borderBottom: "1px solid var(--line)",
+        background: problem ? "var(--error-soft)" : "var(--brand-soft)",
+      }}
+    >
+      <Icon
+        name={problem ? "alert" : "edit"}
+        size={14}
+        strokeWidth={1.8}
+        style={{
+          flex: "none",
+          color: problem ? "var(--state-error)" : "var(--brand-2)",
+        }}
+      />
+      <span
+        style={{
+          fontSize: "var(--text-sm)",
+          fontWeight: "var(--weight-semibold)",
+          color: "var(--ink)",
+        }}
+      >
+        Editing “{editing.name}”
+      </span>
+      <span
+        className="mono"
+        style={{ fontSize: "var(--text-2xs)", color: "var(--ink-3)" }}
+      >
+        {editing.workflowKey}
+        {editing.baseVersion !== null ? ` · v${editing.baseVersion}` : ""}
+      </span>
+      <span
+        style={{
+          flex: "1 1 260px",
+          minWidth: 0,
+          fontSize: "var(--text-xs)",
+          lineHeight: 1.45,
+          color: problem ? "var(--state-error)" : "var(--ink-2)",
+        }}
+      >
+        {problem ??
+          `Every message changes this workflow. Saving publishes ${nextVersion} — its run history, schedules and webhook URLs stay.`}
+        {rename ? ` ${rename}` : ""}
+      </span>
+    </div>
+  );
+}
 
 /** Presentational shell — header (status pill) + conversation + live stage. */
 export function BuildWithAiView({
@@ -73,6 +170,8 @@ export function BuildWithAiView({
   providerHint,
   onResume,
   onOpenInCanvas,
+  onConfirmStale,
+  onDismissStale,
   onReset,
 }: {
   state: BuildWithAiState;
@@ -84,6 +183,9 @@ export function BuildWithAiView({
   providerHint: string | null;
   onResume: (id: string) => void;
   onOpenInCanvas: () => void;
+  /** "Save anyway" on a stale-draft warning. */
+  onConfirmStale: () => void;
+  onDismissStale: () => void;
   onReset: () => void;
 }) {
   const compact = useMediaQuery(BELOW_RAIL_QUERY);
@@ -99,6 +201,10 @@ export function BuildWithAiView({
     error,
     resumables,
     opening,
+    editing,
+    seeding,
+    editProblem,
+    staleWarning,
   } = state;
 
   const streaming = phase === "streaming";
@@ -175,7 +281,7 @@ export function BuildWithAiView({
             className="mono"
             style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}
           >
-            conversational · beta
+            {editing ? "editing a workflow · beta" : "conversational · beta"}
           </span>
         )}
         <div
@@ -236,6 +342,10 @@ export function BuildWithAiView({
         </div>
       </div>
 
+      {editing && (
+        <EditBanner editing={editing} draftName={name} problem={editProblem} />
+      )}
+
       <div
         style={{
           flex: 1,
@@ -252,6 +362,9 @@ export function BuildWithAiView({
           error={error}
           resumables={resumables}
           opening={opening}
+          editing={editing}
+          seeding={seeding}
+          staleWarning={staleWarning}
           onSend={onSend}
           providerOptions={providerOptions}
           provider={provider}
@@ -259,6 +372,8 @@ export function BuildWithAiView({
           providerHint={providerHint}
           onResume={onResume}
           onOpenInCanvas={onOpenInCanvas}
+          onConfirmStale={onConfirmStale}
+          onDismissStale={onDismissStale}
           compact={compact}
         />
         <CanvasStage

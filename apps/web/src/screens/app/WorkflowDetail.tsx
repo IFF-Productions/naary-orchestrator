@@ -411,6 +411,25 @@ export function WorkflowDetail() {
           >
             Edit in canvas
           </Button>
+          {/*
+           * The conversational builder, seeded from THIS workflow (`?key=` — the same param the
+           * canvas reads). It sits beside "Edit in canvas" because they are the two ways to change
+           * a workflow, and the choice between them is the user's: the canvas for a known edit, a
+           * chat for one you'd rather describe.
+           *
+           * Not to be confused with the canvas's own inline "Build with AI" panel, which is
+           * stateless and edits the LIVE canvas including unsaved changes (#874). This route seeds
+           * from the SAVED graph, which is why it belongs on this screen and not in the canvas.
+           */}
+          <Button
+            variant="secondary"
+            icon="bolt"
+            onClick={() =>
+              navigate(`/app/build-ai?key=${encodeURIComponent(key)}`)
+            }
+          >
+            Edit with AI
+          </Button>
           {mayDelete && (
             <Button
               variant="secondary"
