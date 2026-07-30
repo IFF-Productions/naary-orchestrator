@@ -18,7 +18,12 @@ import {
   ApiProduces,
 } from "@nestjs/swagger";
 import { getBudget } from "@naary/usage";
-import { EnvironmentSel, TenantId } from "../auth/tenant.decorator";
+import {
+  CurrentPrincipal,
+  EnvironmentSel,
+  type Principal,
+  TenantId,
+} from "../auth/tenant.decorator";
 import { assertWithinMonthlyBudget } from "../budget/budget-guard";
 import { EnvironmentsService } from "../environments/environments.service";
 import { GraphGeneratorService } from "../graphs/graph-generator.service";
@@ -98,12 +103,17 @@ export class BuilderSessionsController {
     @TenantId() tenantId: string,
     @Body() body: OpenSessionDto,
     @EnvironmentSel() envSel?: string,
+    @CurrentPrincipal() principal?: Principal,
   ): Promise<BuilderSessionResponse> {
     const envId = await this.environments.resolveEnvId(tenantId, envSel);
-    return this.sessions.open(tenantId, envId, {
-      workflowKey: body?.workflowKey,
-      title: body?.title,
-    });
+    // The principal is threaded so seeding from `workflowKey` honours the per-workflow view
+    // grant — see the note in BuilderSessionsService.open.
+    return this.sessions.open(
+      tenantId,
+      envId,
+      { workflowKey: body?.workflowKey, title: body?.title },
+      principal,
+    );
   }
 
   @ApiEndpoint({

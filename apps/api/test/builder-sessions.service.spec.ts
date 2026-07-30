@@ -27,10 +27,13 @@ vi.mock("@naary/db", () => ({
 
 import { BuilderSessionsService } from "../src/builder/builder-sessions.service";
 
-const getLatest = vi.fn();
-// Only getLatest is used by the service; cast a minimal stub to the service type.
+// `getLatestNamed`, not `getLatest`: the ACTOR-AWARE accessor, which applies the same
+// per-workflow view grant as `GET /graphs/:workflowKey`. Seeding used the system-context
+// `getLatest` while nothing in the UI could pass a workflowKey; "Edit with AI" reaches it, so an
+// unchecked read would disclose a workflow the member cannot open.
+const getLatestNamed = vi.fn();
 const graphs = {
-  getLatest,
+  getLatestNamed,
 } as unknown as import("../src/graphs/graphs.service").GraphsService;
 const svc = new BuilderSessionsService(graphs);
 
@@ -61,7 +64,7 @@ beforeEach(() => {
     builderSession.updateMany,
     builderTurn.create,
     $transaction,
-    getLatest,
+    getLatestNamed,
   ])
     m.mockReset();
   // Default: $transaction re-invokes the callback with the tx client.
@@ -69,12 +72,23 @@ beforeEach(() => {
 });
 
 describe("BuilderSessionsService.open", () => {
+  it("passes the ACTOR through when seeding, so a view grant is enforced", async () => {
+    // The security property, asserted directly: an unchecked read here would stream back a
+    // workflow the member cannot open in a grant-enforcing workspace. If someone swaps this for
+    // the system-context `getLatest` again, this fails.
+    getLatestNamed.mockResolvedValue({ graph: { nodes: [], edges: [] } });
+    builderSession.create.mockResolvedValue(sessionRow({ workflowKey: "wf-1" }));
+    const actor = { userId: "u-1" } as never;
+    await svc.open("t-1", "e-1", { workflowKey: "wf-1" }, actor);
+    expect(getLatestNamed).toHaveBeenCalledWith("t-1", "e-1", "wf-1", actor);
+  });
+
   it("opens a blank session (no workflowKey → null draft, no graph lookup)", async () => {
     builderSession.create.mockResolvedValue(sessionRow());
 
     const out = await svc.open("t-1", "env-prod", {});
 
-    expect(getLatest).not.toHaveBeenCalled();
+    expect(getLatestNamed).not.toHaveBeenCalled();
     expect(builderSession.create).toHaveBeenCalledWith({
       data: {
         tenantId: "t-1",
@@ -92,7 +106,7 @@ describe("BuilderSessionsService.open", () => {
 
   it("seeds the working draft from the named workflow's latest graph", async () => {
     const graph = { nodes: [{ id: "n1" }], edges: [] };
-    getLatest.mockResolvedValue({ graph, contentHash: "h", version: 3 });
+    getLatestNamed.mockResolvedValue({ graph, contentHash: "h", version: 3 });
     builderSession.create.mockResolvedValue(
       sessionRow({ workflowKey: "onboarding", currentGraph: graph }),
     );
@@ -103,7 +117,15 @@ describe("BuilderSessionsService.open", () => {
     });
 
     // Seeds from the SAME tenant + environment (a prod build seeds the prod graph).
-    expect(getLatest).toHaveBeenCalledWith("t-1", "env-prod", "onboarding");
+    // 4th arg `undefined`: this call passes no actor, and GraphsService treats a missing
+    // actor as an internal/trigger caller that is never grant-checked (assertActor). Asserted
+    // explicitly so the actor position can't be dropped from the call without a failure.
+    expect(getLatestNamed).toHaveBeenCalledWith(
+      "t-1",
+      "env-prod",
+      "onboarding",
+      undefined,
+    );
     expect(builderSession.create).toHaveBeenCalledWith({
       data: {
         tenantId: "t-1",
@@ -118,7 +140,7 @@ describe("BuilderSessionsService.open", () => {
   });
 
   it("seeds a null draft when the named workflow has no graph yet", async () => {
-    getLatest.mockResolvedValue(null);
+    getLatestNamed.mockResolvedValue(null);
     builderSession.create.mockResolvedValue(
       sessionRow({ workflowKey: "empty" }),
     );

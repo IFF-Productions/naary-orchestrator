@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { getPrisma, Prisma } from "@naary/db";
 import type { GraphDef } from "@naary/dsl";
+import type { Principal } from "../auth/tenant.decorator";
 import { GraphsService } from "../graphs/graphs.service";
 import type {
   BuilderSessionResponse,
@@ -75,22 +76,28 @@ export class BuilderSessionsService {
     tenantId: string,
     environmentId: string,
     input: { workflowKey?: string; title?: string },
+    actor?: Principal,
   ): Promise<BuilderSessionResponse> {
     const workflowKey = input.workflowKey?.trim() || null;
 
     // Seed the draft from the named workflow's latest graph in this environment, if it exists.
-    // NOTE (per-workflow RBAC): getLatest is the system-context accessor — it does NOT apply
-    // the actor view-grant check that single-graph GET does. In a grant-enforcing workspace
-    // (RBAC-GROUPS "first-grant cliff") a member who can't view workflow X could seed a draft
-    // from it here. Accepted for Slice 1 (tenant-scoped per the design doc); when this feature
-    // reaches grant-enforcing workspaces, pass the Principal and reuse the single-graph
-    // view-check before seeding. Tracked in the PR description.
+    //
+    // `getLatestNamed` WITH the actor, not the system-context `getLatest`: it applies the same
+    // per-workflow view-grant check as `GET /graphs/:workflowKey`. That check used to be skipped
+    // here, which was tolerable only while nothing in the UI could pass a `workflowKey` — the
+    // seeding path was unreachable. Now that "Edit with AI" reaches it, an unchecked read would
+    // let a member of a grant-enforcing workspace stream back a workflow they cannot open
+    // (RBAC-GROUPS "first-grant cliff"), which is a real disclosure rather than a latent one.
+    //
+    // A missing grant therefore fails HERE, at open, rather than surfacing as an empty draft the
+    // first turn would silently fill with an invention.
     let currentGraph: unknown = null;
     if (workflowKey) {
-      const snapshot = await this.graphs.getLatest(
+      const snapshot = await this.graphs.getLatestNamed(
         tenantId,
         environmentId,
         workflowKey,
+        actor,
       );
       currentGraph = snapshot?.graph ?? null;
     }
