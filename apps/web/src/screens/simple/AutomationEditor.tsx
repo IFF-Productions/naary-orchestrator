@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useOpenInBuilder } from "./useOpenInBuilder";
 import { useNavigate } from "react-router-dom";
 import type { GraphDef } from "@naary/dsl";
 import { Button, Icon } from "../../components";
@@ -162,11 +163,11 @@ export function AutomationEditor({
     }
   }
 
+  // Switches to Builder mode, then navigates — see useOpenInBuilder. Navigating alone hit
+  // RequireBuilder and bounced straight back to /app/automations.
+  const toBuilder = useOpenInBuilder();
   function openInBuilder() {
-    const key = workflowKey;
-    navigate(
-      key ? `/app/canvas?key=${encodeURIComponent(key)}` : "/app/canvas",
-    );
+    toBuilder(workflowKey);
   }
 
   /* ---------- Beat grouping (a relabel of the real ordered steps) ---------- */

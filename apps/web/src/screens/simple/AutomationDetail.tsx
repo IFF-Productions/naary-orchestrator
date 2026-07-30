@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useCanvasLink } from "../../lib/useCanvasLink";
+import { useOpenInBuilder } from "./useOpenInBuilder";
 import type { GraphDef } from "@naary/dsl";
 import { Button, Icon, LoadingBlock, StatusPill } from "../../components";
 import {
@@ -195,6 +196,8 @@ function RunView({
   const navigate = useNavigate();
   // Canvas links carry ?from= so the canvas's back control returns HERE.
   const canvasLink = useCanvasLink();
+  // Mode switch + navigate: navigating alone bounced off RequireBuilder (see useOpenInBuilder).
+  const toBuilder = useOpenInBuilder();
   const phone = useMediaQuery(PHONE_QUERY);
   const [state, setState] = useState<ExecutionState | null>(null);
   const [graph, setGraph] = useState<GraphDef | null>(null);
@@ -396,9 +399,7 @@ function RunView({
           <Button
             variant="secondary"
             icon="workflow"
-            onClick={() =>
-              navigate(canvasLink(`/app/canvas?key=${encodeURIComponent(automationKey)}`))
-            }
+            onClick={() => toBuilder(automationKey)}
           >
             Open in Builder
           </Button>
@@ -821,6 +822,8 @@ function EmptyRun({
   const navigate = useNavigate();
   // Canvas links carry ?from= so the canvas's back control returns HERE.
   const canvasLink = useCanvasLink();
+  // Mode switch + navigate: navigating alone bounced off RequireBuilder (see useOpenInBuilder).
+  const toBuilder = useOpenInBuilder();
   const phone = useMediaQuery(PHONE_QUERY);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -949,9 +952,7 @@ function EmptyRun({
         <Button
           variant="secondary"
           icon="workflow"
-          onClick={() =>
-            navigate(canvasLink(`/app/canvas?key=${encodeURIComponent(automationKey)}`))
-          }
+          onClick={() => toBuilder(automationKey)}
         >
           Open in Builder
         </Button>
