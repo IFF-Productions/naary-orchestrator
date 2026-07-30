@@ -115,6 +115,15 @@ describe("ordinary defaults", () => {
     expect(oauthRedirectUri({ OAUTH_REDIRECT_URI: "https://x/cb" })).toBe(
       "https://x/cb",
     );
+    // BLANK is unset, not "the redirect URI is the empty string". compose now declares both
+    // vars (so an operator can actually set them), and an unset compose var interpolates to "" —
+    // under the previous `??` that empty string would have become the redirect URI itself.
+    expect(oauthRedirectUri({ OAUTH_REDIRECT_URI: "" })).toBe(
+      "http://localhost:3000/oauth/callback",
+    );
+    expect(
+      atlassianOauthRedirectUri({ ATLASSIAN_OAUTH_REDIRECT_URI: "  " }),
+    ).toBe("http://localhost:3000/atlassian/oauth/callback");
   });
 
   it("Swagger is on unless SWAGGER_DISABLED is exactly 1", () => {

@@ -207,19 +207,27 @@ export function mailFrom(env: Env = process.env): string {
   return env.MAIL_FROM?.trim() || "Naary <no-reply@naary.local>";
 }
 
-/** Where the generic MCP OAuth consent returns. Must match what was registered with the provider;
- *  the localhost default only fits local dev. */
+/**
+ * Where the generic MCP OAuth consent returns. Must match what was registered with the provider;
+ * the localhost default only fits local dev.
+ *
+ * BLANK counts as unset (`?.trim() ||`, not `??`), like {@link smtpUrl} and {@link mcpRegistryUrl}
+ * above. That is load-bearing now that compose declares the variable: an unset var interpolates to
+ * the EMPTY STRING, which `??` would happily hand back as the redirect URI. Absent and empty must
+ * mean the same thing, or declaring a variable would break the very default it exists to override.
+ */
 export function oauthRedirectUri(env: Env = process.env): string {
   return (
-    env.OAUTH_REDIRECT_URI ?? `http://localhost:${port(env)}/oauth/callback`
+    env.OAUTH_REDIRECT_URI?.trim() ||
+    `http://localhost:${port(env)}/oauth/callback`
   );
 }
 
 /** Same, for Atlassian 3LO — a separate variable because the paths differ and both must match the
- *  URI registered on the Atlassian app. */
+ *  URI registered on the Atlassian app. Blank ⇒ unset, as above. */
 export function atlassianOauthRedirectUri(env: Env = process.env): string {
   return (
-    env.ATLASSIAN_OAUTH_REDIRECT_URI ??
+    env.ATLASSIAN_OAUTH_REDIRECT_URI?.trim() ||
     `http://localhost:${port(env)}/atlassian/oauth/callback`
   );
 }
@@ -244,4 +252,3 @@ export function resumeSnapshotsEnabled(env: Env = process.env): boolean {
 export function storageProvider(env: Env = process.env): string | undefined {
   return env.STORAGE_PROVIDER;
 }
-
