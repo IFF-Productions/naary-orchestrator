@@ -114,7 +114,7 @@ integrations (SQL, SMTP, MCP, LLM providers, notification channels) and the oper
 - **[ClickUp](./clickup.md)** — Create, update and comment on ClickUp tasks from a workflow. <sub>(not live-verified)</sub>
 - **[Microsoft Graph](./msgraph.md)** — Read and send Outlook mail and manage calendar events via Microsoft Graph. <sub>(not live-verified)</sub>
 - **[Monday.com](./monday.md)** — Create and update monday.com items and post updates from a workflow. <sub>(not live-verified)</sub>
-- **[Notion](./notion.md)** — Read, query and create Notion pages and database rows — a common knowledge-base source for RAG, and an output sink for AI workflows. <sub>(not live-verified)</sub>
+- **[Notion](./notion.md)** — Read, query and create Notion pages and data-source rows — a common knowledge-base source for RAG, and an output sink for AI workflows. <sub>(not live-verified)</sub>
 - **[Todoist](./todoist.md)** — Create, list and close Todoist tasks from a workflow. <sub>(not live-verified)</sub>
 
 ### Sales (CRM)

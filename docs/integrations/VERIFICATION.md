@@ -155,7 +155,7 @@ catalog's own `write` flag and `fields[].required`). `Needs` = the fields you mu
 | monday | `list_items` | query (GraphQL) | 2/5 | — |
 | msgraph | `list_messages` | userId | 2/4 | — |
 | netlify | `list_sites` | — | 4/4 | — |
-| notion | `get_page` | pageId | 2/4 | — |
+| notion | `get_page` | pageId | 3/5 | — |
 | pagerduty | `list_incidents` | — | 2/6 | — |
 | pipedrive | `list_deals` | — | 2/5 | — |
 | posthog | `list_events` | projectId | 3/4 | — |

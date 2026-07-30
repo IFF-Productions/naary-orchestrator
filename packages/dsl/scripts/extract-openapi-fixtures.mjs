@@ -33,6 +33,7 @@
  * ## Refreshing
  *
  *     pnpm refresh:openapi-fixtures                  # builds @naary/dsl first, then runs this
+ *     pnpm refresh:openapi-fixtures notion           # …just one provider (or several)
  *     git diff packages/dsl/test/fixtures/openapi/   # review the drift, then run the test
  *
  * Needs network (it fetches each SOURCES url). A non-empty diff is the interesting part: it is
@@ -223,6 +224,16 @@ const SOURCES = {
       "https://developers.zoom.us/api-hub/users/methods/endpoints.json",
     ],
     pathPrefix: "",
+  // ── added by #944, the Notion data-source migration ────────────────────────────────────────────
+  notion: {
+    // Notion DOES publish a machine-readable document — one file, openapi 3.1.0, 34 paths, no
+    // external `$ref`s — which #931's row ("no official document found") had missed. It describes
+    // exactly ONE API version, and says which: `Notion-Version` is declared `enum: ["2026-03-11"]`.
+    // That makes the fixture a pin on the version too, so the day the catalog's provider-wide
+    // header and this document disagree, every Notion action stops matching and the drift spec
+    // says so — which is precisely the failure mode #944 was filed about.
+    url: "https://developers.notion.com/openapi.json",
+    pathPrefix: "/v1",
   },
 };
 
@@ -258,15 +269,16 @@ const SOURCES = {
  *                authenticates before routing, so an unknown path also answers 401.)
  *   sentry     — documents only the org-scoped `/api/0/organizations/{org}/issues/{id}/`; ours is
  *                the legacy un-scoped `/api/0/issues/{id}/`, which works but is not in the document.
- *   notion     — the published document is API version 2025-09-03; we pin `Notion-Version:
- *                2022-06-28`, under which `POST /databases/{id}/query` is still valid. Diffing
- *                across versions would report a working call as broken.
  *   zendesk    — real and fetchable (developer.zendesk.com/zendesk/oas.yaml) but canonicalises paths
  *                WITHOUT the `.json` suffix our catalog uses (`/api/v2/tickets` vs `/tickets.json`).
  *                #813 deferred the rewrite seam until a second provider needed it and named Shopify
  *                as that provider — but Shopify publishes no spec at all, so the condition can no
  *                longer be met, and 3 actions don't justify a transform duplicated across this
  *                script and the drift spec where a desync silently stops matching.
+ * `notion` was on that last row and should not have been: `developers.notion.com/openapi.json` is
+ * vendor-published, fetchable, and self-contained. It is in SOURCES as of #944. The lesson is that
+ * "not found" is a statement about a search, so it belongs next to the search that came back
+ * empty — and it expires the moment somebody looks again.
  */
 
 /** Placeholders differ in name between us and upstream, so match on SHAPE. */
@@ -500,16 +512,42 @@ function catalogBodyPrefixes(action) {
   return keep;
 }
 
-/** Parameters, `$ref`s inlined, trimmed to what the drift test reads. */
+/**
+ * Parameters, `$ref`s inlined, trimmed to what the drift test reads.
+ *
+ * A HEADER parameter also keeps its declared value set, and only a header's: that is what makes a
+ * pinned header CHECKABLE rather than merely believed. Notion declares `Notion-Version` as
+ * `enum: ["2026-03-11"]`, so the fixture can prove the provider-wide header we send is a value the
+ * pinned document accepts — the #944 failure, where we shipped `2022-06-28` for years against a
+ * document describing a different API and no test could say so. Capped and string-only so a
+ * parameter with a large vocabulary (which is not a version pin anyway) can't inflate a fixture.
+ * Swagger 2 puts `enum` on the parameter, OpenAPI 3 on its schema.
+ */
 function pruneParameters(raw, deref) {
-  return (Array.isArray(raw) ? raw : [])
-    .map((p) => deref(p))
-    .filter((p) => p && typeof p.name === "string" && typeof p.in === "string")
-    // Swagger 2's `body`/`formData` parameters ARE the request body; they are folded into a
-    // `requestBody` by `swagger2RequestBody` and must not also show up as parameters, where the
-    // drift spec would look for an `in:"formData"` catalog field that cannot exist.
-    .filter((p) => p.in !== "body" && p.in !== "formData")
-    .map((p) => ({ name: p.name, in: p.in, required: p.required === true }));
+  return (
+    (Array.isArray(raw) ? raw : [])
+      .map((p) => deref(p))
+      .filter((p) => p && typeof p.name === "string" && typeof p.in === "string")
+      // Swagger 2's `body`/`formData` parameters ARE the request body; they are folded into a
+      // `requestBody` by `swagger2RequestBody` and must not also show up as parameters, where the
+      // drift spec would look for an `in:"formData"` catalog field that cannot exist.
+      .filter((p) => p.in !== "body" && p.in !== "formData")
+      .map((p) => {
+        const values =
+          p.in === "header" ? (deref(p.schema)?.enum ?? p.enum) : undefined;
+        const keep =
+          Array.isArray(values) &&
+          values.length > 0 &&
+          values.length <= 12 &&
+          values.every((v) => typeof v === "string");
+        return {
+          name: p.name,
+          in: p.in,
+          required: p.required === true,
+          ...(keep ? { enum: values } : {}),
+        };
+      })
+  );
 }
 
 function pruneRequestBody(raw, deref, keep) {
@@ -570,9 +608,22 @@ function swagger2RequestBody(op, pathItem, root, deref, keep) {
 let total = 0;
 mkdirSync(outDir, { recursive: true });
 
+// Optional provider filter: `pnpm refresh:openapi-fixtures notion`. Without it every fixture is
+// refetched, which rewrites 13 `fetchedAt` stamps and drags any unrelated upstream drift into a PR
+// about one provider — two changes in one diff, and the reviewer can't tell which was intended.
+// With it, adding a provider is a one-file diff and a deliberate whole-catalog refresh is still the
+// default when you want it.
+const only = new Set(process.argv.slice(2));
+for (const name of only)
+  if (!SOURCES[name])
+    throw new Error(
+      `unknown provider "${name}" — SOURCES has: ${Object.keys(SOURCES).join(", ")}`,
+    );
+
 for (const [provider, { url, pathPrefix, format, external }] of Object.entries(
   SOURCES,
 )) {
+  if (only.size && !only.has(provider)) continue;
   const catalogEntry = INTEGRATION_CATALOG[provider];
   if (!catalogEntry) throw new Error(`no catalog provider "${provider}"`);
 
