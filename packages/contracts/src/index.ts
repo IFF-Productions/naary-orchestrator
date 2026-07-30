@@ -24,6 +24,49 @@ export const RUN_GRAPH_WORKFLOW = "runGraph";
 /** Workflow type name for the durable per-session chat workflow (design §2.1b, option A). */
 export const CHAT_SESSION_WORKFLOW = "chatSession";
 
+/**
+ * Dedicated queue for SELF-HEALING (Phase 2), polled by a Temporal worker hosted inside the API
+ * process rather than by the main worker pool.
+ *
+ * That is not an arbitrary split. Healing a run needs to GENERATE a graph (GraphGeneratorService)
+ * and SAVE one (GraphsService — save-gate, content hash, version increment, savedBy, form-asset
+ * ownership). Both are Nest services in the API, and the main worker has neither. The alternatives
+ * were a service-to-service HTTP path (a new auth surface) or a second copy of both (which drifts
+ * — the HMAC approval-token minting is already duplicated with a "must match" comment in each
+ * file). Running the activities where their dependencies already live avoids both.
+ *
+ * Same deploy-ordering rule as TASK_QUEUE_HEAVY: an API instance polling this queue must be up
+ * before a worker that launches healRun, or those runs strand. Unlike codeAgent, stranding here is
+ * harmless — nothing is waiting on the result and the failed run has already reported its failure.
+ */
+export const TASK_QUEUE_HEAL = "orchestrator-heal";
+
+/**
+ * Workflow type name for the self-healing workflow. Started BY NAME from the main worker's failure
+ * path, so that worker never needs healRun's code or its API-side dependencies in its bundle.
+ */
+export const HEAL_RUN_WORKFLOW = "healRun";
+
+/** What a human decided about a proposed fix. `by` is for the audit trail, never a credential. */
+export interface HealDecisionInput {
+  approved: boolean;
+  by?: string;
+  /** Set when the API applied the fix, so the workflow records the outcome rather than infer it. */
+  appliedVersion?: number;
+}
+
+/**
+ * A proposed fix was approved or rejected — delivered as a Signal to the parked `healRun`, awaited
+ * via condition() (Tier-1 rule 5: a durable wait, never a poll).
+ *
+ * The APPLY itself has already happened in the API by the time this arrives: the approve endpoint
+ * calls `graphs.save()` with the acting principal, which runs the `edit` save-gate — so
+ * authorization is enforced by the same code path a manual save uses, rather than re-implemented
+ * next to the workflow. The signal tells the workflow how it ended so it can stop waiting.
+ */
+export const healDecisionSignal =
+  defineSignal<[HealDecisionInput]>("healDecision");
+
 /** Registered name of the eval-batch workflow (#575) — one execution per eval run, launching one
  *  CHILD `runGraph` per golden case. Must match the export name in the worker's workflows.ts. */
 export const EVAL_RUN_WORKFLOW = "evalRun";

@@ -52,6 +52,21 @@ export const {
   retry: { maximumAttempts: 3 },
 });
 
+/**
+ * Self-healing opt-in read (Phase 2) — ONE attempt, deliberately.
+ *
+ * The activity already swallows its own errors and answers `false`, so the only way this proxy
+ * sees a failure is a Temporal-level one (unregistered activity, timeout, worker gone). Retrying
+ * that is pointless for an opt-in check whose safe answer is "no", and it is not free: this sits
+ * on the failure path BEFORE the run rethrows, so three attempts with backoff delayed a failed
+ * run's own error by ~3.7s in the e2e that caught it. A failing workflow should report its failure
+ * promptly; a missed proposal costs a notification nobody receives.
+ */
+export const { shouldSelfHeal } = wf.proxyActivities<typeof activities>({
+  startToCloseTimeout: "10 seconds",
+  retry: { maximumAttempts: 1 },
+});
+
 // Worker-side audit append (#576). BEST-EFFORT: the activity itself never throws (it swallows +
 // logs), so a couple of attempts cover a transient DB blip. It records a decision that has already
 // been enforced, so it must never be able to fail the run.

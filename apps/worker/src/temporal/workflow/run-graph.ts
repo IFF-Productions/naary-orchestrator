@@ -8,7 +8,9 @@
 // workflow args/history; wf.patched() call sites are load-bearing for replay.
 import * as wf from "@temporalio/workflow";
 import {
+  HEAL_RUN_WORKFLOW,
   RETURNED_FAILURE_STATUSES,
+  TASK_QUEUE_HEAL,
   approvalSignal,
   budgetResumeSignal,
   resumeSignal,
@@ -36,6 +38,7 @@ import {
   resolveSubWorkflowGraph,
   refreshBudget,
   sendNotification,
+  shouldSelfHeal,
 } from "./proxies";
 import { classifyFailure } from "./helpers";
 import type { RunGraphResult, RunGraphCtx, ResumeState } from "./types";
@@ -462,6 +465,59 @@ export async function runGraph(
             stepCount: state.stepCount,
             mergeArrivals: state.mergeArrivals,
           });
+        } catch {
+          /* best-effort — never mask the original failure */
+        }
+      }
+
+      /**
+       * SELF-HEALING (Phase 2): hand this failure to a detached `healRun`, which diagnoses it,
+       * proposes a graph edit and waits for a human to approve before anything is written.
+       *
+       * OPT-IN, DEFAULT OFF, and the check is a real read rather than an assumption — the setting
+       * is per (tenant, env, workflowKey) and absent for almost everyone, so almost every failure
+       * pays one small indexed read and then does nothing. That is the right place to pay it: this
+       * path has already failed, so it is not hot, and the alternative (folding the flag into
+       * setExecutionStatus's return) would couple an unrelated activity to this feature.
+       *
+       * DETACHED, exactly like the bound error-handler above: ABANDON so the failing run does not
+       * wait on it, does not pay its latency, and does not inherit its outcome. Wrapped in its own
+       * try/catch for the reason spelled out on the resume snapshot — a bookkeeping failure that
+       * replaced the run's real error would cost far more than a missed proposal.
+       *
+       * Started BY NAME on its own task queue: `healRun` lives in the API process, where the graph
+       * generator and the save path already are, so this worker never carries its code.
+       *
+       * `test` runs are excluded for the same reason the stamp and the snapshot exclude them — a
+       * single-node test is not a run anyone heals.
+       */
+      if (wf.patched("self-heal-v1")) {
+        try {
+          const heal = await shouldSelfHeal({
+            tenantId: runCtx.tenantId,
+            environmentId: runCtx.environmentId,
+            workflowKey: runCtx.workflowKey,
+          });
+          if (heal) {
+            await wf.startChild(HEAL_RUN_WORKFLOW, {
+              workflowId: `${wf.workflowInfo().workflowId}-heal`,
+              taskQueue: TASK_QUEUE_HEAL,
+              parentClosePolicy: wf.ParentClosePolicy.ABANDON,
+              args: [
+                {
+                  runId: wf.workflowInfo().workflowId,
+                  tenantId: runCtx.tenantId,
+                  environmentId: runCtx.environmentId,
+                  workflowKey: runCtx.workflowKey,
+                  // The node that died and how the failure classified — everything else the
+                  // diagnosis needs (the CURRENT graph, the run's ctx) is read in-activity, so
+                  // this carries no run content and stays a small payload.
+                  failedNodeId: state.failedNodeId ?? state.currentNodeId,
+                  failureKind: classifyFailure(threw),
+                },
+              ],
+            });
+          }
         } catch {
           /* best-effort — never mask the original failure */
         }
