@@ -117,3 +117,59 @@ describe("savedWorkflowName", () => {
     expect(savedWorkflowName("   ")).toBe(UNTITLED_WORKFLOW);
   });
 });
+
+/**
+ * The AI-edit case, which the dirty rule can only get right if the CALLER doesn't re-baseline.
+ *
+ * Reported as an `if` node 404ing on Test right after "Build with AI" edited a saved workflow: the
+ * node was on the canvas and absent from the saved graph, yet `dirty` was false, so Test never
+ * offered to save and ran against the stored version. The rule below was always correct — the bug
+ * was `useAiBuilder` calling `onGraphPresented()` on the EDIT path, which made the AI's output the
+ * new baseline and declared divergence-from-saved to be clean.
+ *
+ * These assert the RULE. The call-site guarantee is asserted in useAiBuilder's own spec.
+ */
+describe("isCanvasDirty after an AI edit", () => {
+  const saved = {
+    startNodeId: "start",
+    nodes: [
+      { id: "start", type: "start" as const },
+      { id: "end", type: "end" as const },
+    ],
+    edges: [{ from: "start", to: "end" }],
+  };
+  // What an AI edit produces: the saved graph plus the branch the user asked for.
+  const edited = {
+    startNodeId: "start",
+    nodes: [
+      { id: "start", type: "start" as const },
+      { id: "hasincidents", type: "if" as const },
+      { id: "end", type: "end" as const },
+    ],
+    edges: [
+      { from: "start", to: "hasincidents" },
+      { from: "hasincidents", to: "end" },
+    ],
+  };
+
+  it("is DIRTY when the AI added a node the saved graph lacks", () => {
+    expect(
+      isCanvasDirty({
+        graph: edited as never,
+        name: "Triage",
+        baseline: { graph: saved as never, name: "Triage" },
+      }),
+    ).toBe(true);
+  });
+
+  it("would be CLEAN if the AI's own output were baselined — the bug, pinned", () => {
+    // Re-baselining to the edited graph is what made Test silently target the old version.
+    expect(
+      isCanvasDirty({
+        graph: edited as never,
+        name: "Triage",
+        baseline: { graph: edited as never, name: "Triage" },
+      }),
+    ).toBe(false);
+  });
+});

@@ -219,13 +219,15 @@ export function useAiBuilder({
       setNodes(toFlowNodes(positions.settle(cn)));
       setEdges(toFlowEdges(ce));
       setName(genName);
-      // A completed generation PRESENTS a graph rather than editing one, so it becomes the
-      // unsaved-changes guard's new baseline. Here — on the SUCCESS path, after the reconcile —
-      // and not on the falling edge of `generating`: a generation that dies mid-stream leaves a
-      // half-drawn graph on the canvas, and baselining THAT would mark the user's real unsaved
-      // edits clean and let them be discarded without a prompt.
-      onGraphPresented();
       if (editing) {
+        // DO NOT baseline an EDIT. An edit produces unsaved changes to a workflow that is already
+        // saved, which is precisely what the guard exists to catch — and baselining made the
+        // canvas read CLEAN while diverging from the stored version. Reported as an `if` node
+        // 404ing on Test: the node was on screen and absent from the saved graph, `dirty` was
+        // false, so Test never offered to save and silently ran against the old version.
+        //
+        // The original reasoning ("a generation PRESENTS a graph") holds only for a CREATE, where
+        // there is no saved workflow to diverge from. On the edit path the opposite is true.
         // Keep workflowKey + version: this is the SAME workflow, so Save writes its next
         // version. Blanking them (what the create path does) forks a copy and orphans the
         // original — the run history, schedules and webhook URLs all stay behind on it.
@@ -234,6 +236,11 @@ export function useAiBuilder({
         setWorkflowKey(""); // now a NEW unsaved draft (only after a successful generation)
         setVersion(null);
         if (keyParam || templateParam) setSearchParams({}, { replace: true });
+        // Baseline only the CREATE path — see the edit branch above for why not both. Placed on
+        // the SUCCESS path after the reconcile, not on the falling edge of `generating`: a
+        // generation that dies mid-stream leaves a half-drawn graph, and baselining THAT would
+        // mark the user's real unsaved edits clean and let them be discarded without a prompt.
+        onGraphPresented();
         setStatus("Generated — review, edit, and Save to keep it.");
         // The canvas was already compilable before this, so the canEdit effect won't refire
         // and the mode would stay "create" — making the natural follow-up ("now add an
