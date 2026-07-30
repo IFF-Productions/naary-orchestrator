@@ -1,6 +1,6 @@
 {
   "name": "@naary/dsl",
-  "version": "0.0.49",
+  "version": "0.0.50",
   "private": true,
   "description": "Platform-agnostic graph DSL: node/edge/graph types and deterministic traversal. No Temporal, no I/O.",
   "main": "dist/index.js",
