@@ -1,0 +1,140 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Contacts",
+    "version": "v3"
+  },
+  "x-naary": {
+    "provider": "hubspot",
+    "pathPrefix": "",
+    "source": "https://api.hubapi.com/public/api/spec/v2/specs/release/22150/version/3",
+    "fetchedAt": "2026-07-30",
+    "note": "PRUNED snapshot — see packages/dsl/scripts/extract-openapi-fixtures.mjs. Do not hand-edit."
+  },
+  "paths": {
+    "/crm/v3/objects/contacts/{contactId}": {
+      "get": {
+        "operationId": "get-/crm/v3/objects/contacts/{contactId}_getById",
+        "parameters": [
+          {
+            "name": "contactId",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "archived",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "associations",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "idProperty",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "properties",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "propertiesWithHistory",
+            "in": "query",
+            "required": false
+          }
+        ]
+      },
+      "patch": {
+        "operationId": "patch-/crm/v3/objects/contacts/{contactId}_update",
+        "parameters": [
+          {
+            "name": "contactId",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "idProperty",
+            "in": "query",
+            "required": false
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "properties"
+                ],
+                "properties": {
+                  "properties": {
+                    "x-freeform": true
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/crm/v3/objects/contacts": {
+      "post": {
+        "operationId": "post-/crm/v3/objects/contacts_create",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "associations",
+                  "properties"
+                ],
+                "properties": {
+                  "associations": {
+                    "type": "array",
+                    "items": {
+                      "required": [
+                        "to",
+                        "types"
+                      ],
+                      "properties": {
+                        "to": {
+                          "required": [
+                            "id"
+                          ],
+                          "properties": {
+                            "id": {}
+                          }
+                        },
+                        "types": {
+                          "type": "array",
+                          "items": {
+                            "required": [
+                              "associationCategory",
+                              "associationTypeId"
+                            ],
+                            "properties": {
+                              "associationCategory": {},
+                              "associationTypeId": {}
+                            }
+                          }
+                        }
+                      }
+                    }
+                  },
+                  "properties": {
+                    "x-freeform": true
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -8,7 +8,7 @@
     "provider": "github",
     "pathPrefix": "",
     "source": "https://raw.githubusercontent.com/github/rest-api-description/main/descriptions/api.github.com/api.github.com.json",
-    "fetchedAt": "2026-07-29",
+    "fetchedAt": "2026-07-30",
     "note": "PRUNED snapshot — see packages/dsl/scripts/extract-openapi-fixtures.mjs. Do not hand-edit."
   },
   "paths": {

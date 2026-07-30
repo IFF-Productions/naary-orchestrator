@@ -1,0 +1,120 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Todoist API",
+    "version": "1"
+  },
+  "x-naary": {
+    "provider": "todoist",
+    "pathPrefix": "/api/v1",
+    "source": "https://developer.todoist.com/openapi.json",
+    "fetchedAt": "2026-07-30",
+    "note": "PRUNED snapshot — see packages/dsl/scripts/extract-openapi-fixtures.mjs. Do not hand-edit."
+  },
+  "paths": {
+    "/api/v1/tasks": {
+      "get": {
+        "operationId": "get_tasks_api_v1_tasks_get",
+        "parameters": [
+          {
+            "name": "project_id",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "section_id",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "parent_id",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "label",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "ids",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false
+          }
+        ]
+      },
+      "post": {
+        "operationId": "create_task_api_v1_tasks_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "content"
+                ],
+                "properties": {
+                  "content": {},
+                  "description": {},
+                  "project_id": {},
+                  "section_id": {},
+                  "parent_id": {},
+                  "order": {},
+                  "labels": {},
+                  "priority": {},
+                  "assignee_id": {},
+                  "due_string": {},
+                  "due_date": {},
+                  "due_datetime": {},
+                  "due_lang": {},
+                  "duration": {},
+                  "duration_unit": {},
+                  "deadline_date": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/tasks/{task_id}": {
+      "get": {
+        "operationId": "get_task_api_v1_tasks__task_id__get",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "public_key",
+            "in": "query",
+            "required": false
+          }
+        ]
+      }
+    },
+    "/api/v1/tasks/{task_id}/close": {
+      "post": {
+        "operationId": "close_task_api_v1_tasks__task_id__close_post",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true
+          }
+        ]
+      }
+    }
+  }
+}

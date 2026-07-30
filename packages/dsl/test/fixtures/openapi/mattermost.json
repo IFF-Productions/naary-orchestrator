@@ -1,0 +1,155 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Mattermost API",
+    "version": "4.0.0"
+  },
+  "x-naary": {
+    "provider": "mattermost",
+    "pathPrefix": "",
+    "source": "https://developers.mattermost.com/mattermost-openapi-v4.yaml",
+    "fetchedAt": "2026-07-30",
+    "note": "PRUNED snapshot — see packages/dsl/scripts/extract-openapi-fixtures.mjs. Do not hand-edit."
+  },
+  "paths": {
+    "/api/v4/posts": {
+      "post": {
+        "operationId": "CreatePost",
+        "parameters": [
+          {
+            "name": "set_online",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "silent",
+            "in": "query",
+            "required": false
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "channel_id",
+                  "message"
+                ],
+                "properties": {
+                  "channel_id": {},
+                  "message": {},
+                  "root_id": {},
+                  "file_ids": {},
+                  "props": {},
+                  "metadata": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v4/teams/name/{team_name}/channels/name/{channel_name}": {
+      "get": {
+        "operationId": "GetChannelByNameForTeamName",
+        "parameters": [
+          {
+            "name": "team_name",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "channel_name",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "include_deleted",
+            "in": "query",
+            "required": false
+          }
+        ]
+      }
+    },
+    "/api/v4/channels/{channel_id}/posts": {
+      "get": {
+        "operationId": "GetPostsForChannel",
+        "parameters": [
+          {
+            "name": "channel_id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "per_page",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "include_deleted",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "required": false
+          }
+        ]
+      }
+    },
+    "/api/v4/reactions": {
+      "post": {
+        "operationId": "SaveReaction",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "user_id": {},
+                  "post_id": {},
+                  "emoji_name": {},
+                  "create_at": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v4/users/username/{username}": {
+      "get": {
+        "operationId": "GetUserByUsername",
+        "parameters": [
+          {
+            "name": "username",
+            "in": "path",
+            "required": true
+          }
+        ]
+      }
+    }
+  }
+}

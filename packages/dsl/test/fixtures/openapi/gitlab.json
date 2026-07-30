@@ -1,14 +1,14 @@
 {
   "openapi": "3.0.3",
   "info": {
-    "title": "GitLab API",
-    "version": "v4"
+    "title": "GitLab REST API",
+    "version": "19.3.0-pre"
   },
   "x-naary": {
     "provider": "gitlab",
     "pathPrefix": "/api/v4",
-    "source": "https://gitlab.com/gitlab-org/gitlab/-/raw/master/doc/api/openapi/openapi_v2.yaml",
-    "fetchedAt": "2026-07-29",
+    "source": "https://gitlab.com/gitlab-org/gitlab/-/raw/master/doc/api/openapi/openapi_v3.yaml",
+    "fetchedAt": "2026-07-30",
     "note": "PRUNED snapshot — see packages/dsl/scripts/extract-openapi-fixtures.mjs. Do not hand-edit."
   },
   "paths": {
@@ -140,6 +140,11 @@
           },
           {
             "name": "updated_before",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "not",
             "in": "query",
             "required": false
           },
@@ -300,6 +305,47 @@
             }
           }
         }
+      }
+    },
+    "/api/v4/projects/{id}/issues/{noteable_id}/notes": {
+      "post": {
+        "operationId": "postApiV4ProjectsIdIssuesNoteableIdNotes",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "noteable_id",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "body"
+                ],
+                "properties": {
+                  "body": {},
+                  "confidential": {},
+                  "internal": {},
+                  "created_at": {},
+                  "merge_request_diff_head_sha": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v4/user": {
+      "get": {
+        "operationId": "getApiV4User"
       }
     }
   }

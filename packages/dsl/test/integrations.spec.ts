@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  INTEGRATION_CATALOG,
   INTEGRATION_PROVIDERS,
   buildIntegrationRequest,
   getIntegrationAction,
@@ -324,6 +325,49 @@ describe("integration catalog — request construction", () => {
     });
     expect(req.method).toBe("GET");
     expect(req.path).toBe("/tasks?project_id=2203306141");
+  });
+
+  it("Todoist is on /api/v1 — /rest/v2 answers 410 Gone, so every action was dead", () => {
+    // Measured 2026-07-29: `GET https://api.todoist.com/rest/v2/tasks` → 410 with and without a
+    // token, `GET /api/v1/tasks` → 401. 410 is "permanently removed", not "deprecated" — no
+    // credential could have made the old base URL work, so this pins the one thing that decides
+    // whether any Todoist action can succeed at all. The paths and the create-task body keys are
+    // unchanged between the two, which is why the fix is a base URL and not four rewrites.
+    expect(INTEGRATION_CATALOG.todoist.baseUrl).toBe(
+      "https://api.todoist.com/api/v1",
+    );
+    expect(INTEGRATION_CATALOG.todoist.baseUrl).not.toContain("rest/v2");
+    // `filter` went with v2: v1 serves filter queries from `GET /api/v1/tasks/filter?query=…`, a
+    // different operation. Leaving the field in place would have shipped a parameter the API drops.
+    const listTasks = INTEGRATION_CATALOG.todoist.actions.find(
+      (a) => a.key === "list_tasks",
+    );
+    expect(listTasks?.fields.map((f) => f.key)).toEqual(["project_id"]);
+  });
+
+  it("ClickUp create_comment always sends notify_all — upstream marks it required", () => {
+    // ClickUp's own OpenAPI has `required: ["comment_text", "notify_all"]` for this operation and
+    // the catalog sent only `comment_text` (#813 follow-up). `false` is the no-op value: ClickUp's
+    // description says the flag decides only whether the comment's OWN author is notified, since
+    // "other assignees and watchers on the task are always notified regardless of this setting".
+    const req = buildIntegrationRequest("clickup", "create_comment", {
+      taskId: "abc123",
+      comment_text: "Deployed by naary",
+    });
+    expect(req.method).toBe("POST");
+    expect(req.path).toBe("/task/abc123/comment");
+    expect(req.body).toEqual({
+      comment_text: "Deployed by naary",
+      notify_all: false,
+    });
+    // A `const` is not author-overridable — that is the point of using one here.
+    expect(
+      buildIntegrationRequest("clickup", "create_comment", {
+        taskId: "abc123",
+        comment_text: "hi",
+        notify_all: true,
+      }).body,
+    ).toEqual({ comment_text: "hi", notify_all: false });
   });
 
   it("Calendly get_event → GET, uuid in path, no body", () => {
@@ -1168,7 +1212,12 @@ describe("integration catalog — request construction", () => {
     });
     expect(req.method).toBe("POST");
     expect(req.path).toBe("/task/abc123/comment");
-    expect(req.body).toEqual({ comment_text: "looks good" });
+    // `notify_all` rides along as a catalog `const` — upstream marks it required; see the
+    // "always sends notify_all" test for why the value is false.
+    expect(req.body).toEqual({
+      comment_text: "looks good",
+      notify_all: false,
+    });
   });
 
   it("Monday create_item → POST /v2 with a GraphQL query + variables in the body", () => {

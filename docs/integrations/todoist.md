@@ -25,7 +25,7 @@ Create, list and close Todoist tasks from a workflow.
 
 - **You need:** an API token.
 - **How the token is sent:** A standard `Authorization: Bearer <token>` header. Paste only the token.
-- **Server URL:** not needed — Naary always calls `https://api.todoist.com/rest/v2`.
+- **Server URL:** not needed — Naary always calls `https://api.todoist.com/api/v1`.
 
 ## Get your credentials
 
@@ -51,7 +51,7 @@ Either way, the definitive check is **single-node Test** on the canvas: drop a *
 
 | Action | Method | Endpoint | Required fields | Optional fields |
 | --- | --- | --- | --- | --- |
-| List tasks | `GET` | `/tasks` | — | `project_id`, `filter` |
+| List tasks | `GET` | `/tasks` | — | `project_id` |
 | Get task | `GET` | `/tasks/{taskId}` | `taskId` | — |
 | **Create task** (write) | `POST` | `/tasks` | `content` | `description`, `projectId`, `dueString`, `priority` |
 | **Close task** (write) | `POST` | `/tasks/{taskId}/close` | `taskId` | — |

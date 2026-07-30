@@ -1,0 +1,270 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Mailchimp Marketing API",
+    "version": "3.0.91"
+  },
+  "x-naary": {
+    "provider": "mailchimp",
+    "pathPrefix": "",
+    "source": "https://api.mailchimp.com/schema/3.0/Swagger.json?expand",
+    "fetchedAt": "2026-07-30",
+    "note": "PRUNED snapshot — see packages/dsl/scripts/extract-openapi-fixtures.mjs. Do not hand-edit."
+  },
+  "paths": {
+    "/lists/{list_id}/members": {
+      "post": {
+        "operationId": "postListsIdMembers",
+        "parameters": [
+          {
+            "name": "list_id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "skip_merge_validation",
+            "in": "query",
+            "required": false
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "email_address",
+                  "status"
+                ],
+                "properties": {
+                  "email_address": {},
+                  "email_type": {},
+                  "status": {},
+                  "merge_fields": {},
+                  "interests": {},
+                  "language": {},
+                  "vip": {},
+                  "location": {},
+                  "marketing_permissions": {},
+                  "ip_signup": {},
+                  "timestamp_signup": {},
+                  "ip_opt": {},
+                  "timestamp_opt": {},
+                  "tags": {}
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "operationId": "getListsIdMembers",
+        "parameters": [
+          {
+            "name": "fields",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "exclude_fields",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "count",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "list_id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "email_type",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "since_timestamp_opt",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "before_timestamp_opt",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "since_last_changed",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "before_last_changed",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "unique_email_id",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "vip_only",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "interest_category_id",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "interest_ids",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "interest_match",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "sort_field",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "sort_dir",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "since_last_campaign",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "unsubscribed_since",
+            "in": "query",
+            "required": false
+          }
+        ]
+      }
+    },
+    "/lists/{list_id}/members/{subscriber_hash}": {
+      "get": {
+        "operationId": "getListsIdMembersId",
+        "parameters": [
+          {
+            "name": "fields",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "exclude_fields",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "list_id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "subscriber_hash",
+            "in": "path",
+            "required": true
+          }
+        ]
+      },
+      "patch": {
+        "operationId": "patchListsIdMembersId",
+        "parameters": [
+          {
+            "name": "list_id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "subscriber_hash",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "skip_merge_validation",
+            "in": "query",
+            "required": false
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "email_address": {},
+                  "email_type": {},
+                  "status": {},
+                  "merge_fields": {},
+                  "interests": {},
+                  "language": {},
+                  "vip": {},
+                  "location": {},
+                  "marketing_permissions": {},
+                  "ip_signup": {},
+                  "timestamp_signup": {},
+                  "ip_opt": {},
+                  "timestamp_opt": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/campaigns": {
+      "post": {
+        "operationId": "postCampaigns",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "type"
+                ],
+                "properties": {
+                  "type": {},
+                  "recipients": {},
+                  "settings": {},
+                  "variate_settings": {},
+                  "tracking": {},
+                  "rss_opts": {},
+                  "social_card": {},
+                  "content_type": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ping": {
+      "get": {
+        "operationId": "getPing"
+      }
+    }
+  }
+}

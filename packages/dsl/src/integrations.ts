@@ -1205,15 +1205,20 @@ const ASANA: IntegrationProvider = {
 const TODOIST: IntegrationProvider = {
   key: "todoist",
   label: "Todoist",
-  baseUrl: "https://api.todoist.com/rest/v2",
+  // Was `https://api.todoist.com/rest/v2`, which Todoist has REMOVED — not deprecated. Measured
+  // 2026-07-29: `GET /rest/v2/tasks` → **410 Gone** (with or without a token), `GET /api/v1/tasks`
+  // → 401. A 410 is the server saying the resource is permanently gone, so every Todoist action in
+  // this catalog failed for every user, and no credential could have made it work. The unified v1
+  // API takes the same task paths and the same create-task body keys, so this is a base-URL move;
+  // the one casualty is `list_tasks`' `filter`, which v1 serves from a separate endpoint.
+  baseUrl: "https://api.todoist.com/api/v1",
   description: "Manage Todoist tasks — list, get, create, and close.",
   auth: "A custom connection whose token is a Todoist API token.",
   actions: [
     {
       key: "list_tasks",
       label: "List tasks",
-      description:
-        "List active tasks, optionally filtered by project or query.",
+      description: "List active tasks, optionally filtered by project.",
       method: "GET",
       pathTemplate: "/tasks",
       write: false,
@@ -1227,7 +1232,9 @@ const TODOIST: IntegrationProvider = {
           required: false,
           hint: "filter by project",
         },
-        { key: "filter", label: "Filter", in: "query", required: false },
+        // `filter` is GONE with `/rest/v2`: v1 declares only project_id/section_id/parent_id/label/
+        // ids/cursor/limit here and serves filter queries from `GET /api/v1/tasks/filter?query=…`,
+        // a different operation. Kept out rather than left in place as a parameter the API ignores.
       ],
     },
     {
@@ -3526,6 +3533,21 @@ const CLICKUP: IntegrationProvider = {
           label: "Comment",
           in: "body",
           required: true,
+        },
+        {
+          // ClickUp's own OpenAPI puts `notify_all` in `required` for this operation, and we were
+          // not sending it (#813 follow-up). Supplied as a `const` rather than a field, because
+          // the flag only decides whether the comment's OWN AUTHOR is also notified — ClickUp's
+          // description: "Other assignees and watchers on the task are always notified regardless
+          // of this setting." `false` is therefore both the no-op value and the sane default for
+          // an automated comment, so this cannot change behaviour where ClickUp treats the key as
+          // optional, and fixes the call where it does not.
+          key: "notify_all",
+          label: "Notify all",
+          in: "body",
+          required: false,
+          type: "boolean",
+          const: false,
         },
       ],
     },

@@ -132,38 +132,141 @@ const SOURCES = {
     external: true,
   },
   gitlab: {
-    // GitLab generates this from Grape at release time; it is SWAGGER 2.0 and PARTIAL — the Notes
-    // API and `/user` are simply not in it (see UNSPECIFIED in the drift spec). `openapi.yaml`,
-    // the hand-written one #813 looked at, is gone; this is the generated document that replaced it.
-    url: "https://gitlab.com/gitlab-org/gitlab/-/raw/master/doc/api/openapi/openapi_v2.yaml",
+    // NAMING TRAP: `_v2`/`_v3` here mean SWAGGER 2.0 vs OPENAPI 3, not GitLab API versions — both
+    // describe API v4. Take the OpenAPI 3 one: it has 1,247 paths to the Swagger file's 863, and
+    // the extra 384 include both routes we would otherwise have had to excuse (`/user` and the
+    // issue Notes API). `openapi.yaml`, the hand-written file #813 looked at, no longer exists.
+    url: "https://gitlab.com/gitlab-org/gitlab/-/raw/master/doc/api/openapi/openapi_v3.yaml",
     pathPrefix: "/api/v4",
     format: "yaml",
+  },
+  jira: {
+    // NAMING TRAP, the other way round: `swagger-v3.v3.json` is the API-v3 document, while
+    // `swagger.v3.json` — this one — is the API-v2 document expressed in OpenAPI 3. Our actions
+    // target `/rest/api/2` deliberately (v3 takes Atlassian Document Format where v2 takes a plain
+    // string), and #813 recorded "v3 spec only" because of the filename. There IS a v2 document.
+    url: "https://developer.atlassian.com/cloud/jira/platform/swagger.v3.json",
+    pathPrefix: "",
+    format: "json",
+  },
+  msgraph: {
+    // 38MB, and vendored anyway: it parses in ~4s and prunes to a few KB, so the cost lands on
+    // whoever runs the refresh, not on CI. The per-workload slices in msgraph-sdk-powershell are
+    // 21× smaller but spell the action path differently (`/users/{user-id}/microsoft.graph.sendMail`),
+    // so they would compare our request against a path we do not call.
+    url: "https://raw.githubusercontent.com/microsoftgraph/msgraph-metadata/master/openapi/v1.0/openapi.yaml",
+    pathPrefix: "",
+  },
+  mattermost: {
+    // The BUNDLED artifact, published by Mattermost on their docs host. The source repo
+    // (mattermost/mattermost-api-reference) holds 39 split fragments that its Makefile `cat`s
+    // together and validates; only this URL is pre-bundled, so vendoring the repo would mean
+    // reimplementing their build.
+    url: "https://developers.mattermost.com/mattermost-openapi-v4.yaml",
+    pathPrefix: "",
+  },
+  mailchimp: {
+    // `?expand` is LOAD-BEARING. Without it the document is 74KB of external `$ref`s pointing at
+    // `https://us22.api.mailchimp.com/…` — one datacenter's hostname baked into every ref, which
+    // would pin us to somebody else's account region. `?expand` returns the same spec inlined.
+    url: "https://api.mailchimp.com/schema/3.0/Swagger.json?expand",
+    pathPrefix: "",
+    format: "json",
+  },
+  hubspot: {
+    // HubSpot serves ONE document per API from its own catalog; the release id is opaque and not
+    // guessable — list them with `GET https://api.hubapi.com/public/api/spec/v1/specs` to find a
+    // newer one. This is the CRM Contacts v3 document. Deals is deliberately absent: see
+    // UNSPECIFIED for hubspot.create_deal.
+    url: "https://api.hubapi.com/public/api/spec/v2/specs/release/22150/version/3",
+    pathPrefix: "",
+    format: "json",
+  },
+  clickup: {
+    // ClickUp's ReadMe project serves their own document from their own docs host. The `/v2` lives
+    // in the PATH here and in our `baseUrl`, hence the prefix.
+    url: "https://developer.clickup.com/openapi/clickup-api-v2-reference.json",
+    pathPrefix: "/v2",
+  },
+  webflow: {
+    // The Fern SDK input, in Webflow's own org (`x-fern-sdk-method-name` extensions are the tell).
+    url: "https://raw.githubusercontent.com/webflow/openapi-spec/main/openapi/v2.yml",
+    pathPrefix: "",
+  },
+  todoist: {
+    // Todoist's own document, and the reason the catalog's base URL moved: it describes ONLY
+    // `/api/v1` paths, because `/rest/v2` now answers 410 Gone. Pinning it is what stops the
+    // catalog drifting back.
+    url: "https://developer.todoist.com/openapi.json",
+    pathPrefix: "/api/v1",
+    format: "json",
+  },
+  calendly: {
+    // Calendly's docs are a Stoplight project and this file is NOT linked from any page; it was
+    // found by following a Gatsby chunk → Stoplight projectId `cHJqOjY4NTM` (base64 `prj:6853`) →
+    // the project's table-of-contents API → the node uri. Recorded because it is not re-derivable
+    // by guessing, and two shapes of 404 are waiting: the workspace host is load-bearing (the same
+    // path on `stoplight.io` returns "Not found"), and the uri carries a DIRECTORY segment
+    // (`reference/calendly-api/openapi.yaml`, not `reference/calendly-api.yaml`). A 404 whose body
+    // is `{"statusCode":404,…,"message":"'/…' not found."}` means the project resolved and only the
+    // path is wrong — look the uri up again rather than guessing another one.
+    url: "https://calendly.stoplight.io/api/v1/projects/calendly/api-docs/nodes/reference/calendly-api/openapi.yaml",
+    pathPrefix: "",
+    format: "yaml",
+  },
+  zoom: {
+    // Zoom's API Hub serves one document per PRODUCT, and no single one covers all five actions:
+    // four are in `meetings`, the user read is in `users`. The array is a search path (first match
+    // wins), which is exactly the shape this needs.
+    url: [
+      "https://developers.zoom.us/api-hub/meetings/methods/endpoints.json",
+      "https://developers.zoom.us/api-hub/users/methods/endpoints.json",
+    ],
+    pathPrefix: "",
   },
 };
 
 /**
- * Providers deliberately NOT vendored, and why. Kept next to SOURCES so "why isn't X here?" has an
- * answer that survives the person who checked. `docs/integrations/VERIFICATION.md` §2.5 carries the
- * same list for readers who never open this script.
+ * Providers deliberately NOT vendored, and why — WITH where we looked, so nobody repeats a search
+ * that already came back empty. Kept next to SOURCES so "why isn't X here?" has an answer that
+ * survives the person who checked; `docs/integrations/VERIFICATION.md` §2.5 carries the same list
+ * for readers who never open this script.
  *
- *   pipedrive  — the published v1 spec no longer documents `POST /deals`, `POST /persons` or
- *                `GET/PUT /deals/{id}`; that CRUD moved to the v2 API (a different base path from
- *                the one our catalog uses). Vendoring v2 would compare our requests against
- *                endpoints we don't call.
- *   sentry     — the spec documents only the org-scoped `/api/0/organizations/{org}/issues/{id}/`;
- *                our `/api/0/issues/{id}/` is the legacy un-scoped route, which still works but is
- *                not in the published document.
- *   zendesk    — the spec is real and fetchable (developer.zendesk.com/zendesk/oas.yaml) but
- *                canonicalises paths WITHOUT the `.json` format suffix our catalog uses
- *                (`/api/v2/tickets` vs `/tickets.json`). Matching would need a path-rewrite seam
- *                in both this script and the drift spec; worth doing when a second provider needs
- *                the same seam (Shopify's paths have the suffix too).
- *   msgraph    — 38MB of YAML with external refs; deferred on cost, not on principle.
- *   digitalocean, gitlab — split across external `$ref` files, so a single fetch can't deref.
- *   notion, airtable, dropbox, todoist, calendly, webflow, zoom, mailchimp, hubspot, clickup,
- *   mattermost, shopify, googlesheets — no official machine-readable OpenAPI document found
- *                (Google Sheets publishes a Discovery document, not OpenAPI).
- *   linear, monday — GraphQL; there are no per-operation request schemas to diff.
+ * The bar is VENDOR-AUTHORED: their GitHub org, their docs host, an endpoint their API serves, or a
+ * spec embedded in their own SDK repo. APIs.guru conversions, third-party Postman collections and
+ * anything we would transform ourselves are excluded on purpose — a fixture we authored proves our
+ * request matches our own reading, which is the mistake #813 caught one level down.
+ *
+ *   linear, monday — GraphQL. PERMANENT: the body is `{query, variables}`, correct by construction,
+ *                and the risk is inside the query string. Only introspection can check that.
+ *   googlesheets — Google publishes a DISCOVERY document (sheets.googleapis.com/$discovery/rest
+ *                ?version=v4), not OpenAPI. Checked the googleapis GitHub org for an official
+ *                conversion; the ones that exist are APIs.guru's.
+ *   dropbox    — Dropbox publishes its API in its own STONE IDL (github.com/dropbox/dropbox-api-spec,
+ *                `.stone` files). Machine-readable, not OpenAPI, and no OpenAPI build is published.
+ *   shopify    — no vendor REST document exists. The REST Admin API is legacy and Shopify publishes
+ *                only the GraphQL schema; the OpenAPI files in circulation are third-party and
+ *                stale (2020-era). Checked the Shopify GitHub org and shopify.dev.
+ *   airtable   — the spec is real and Airtable's own, but it is only available EMBEDDED in the docs
+ *                page's SSR state (an `"openApi"` key in the page JSON) with no raw URL. Scraping
+ *                HTML would put a third party's page structure in the refresh path, which is what
+ *                pinning exists to avoid.
+ *   pipedrive  — the published v1 document no longer contains `POST /deals`, `PUT /deals/{id}` or
+ *                `POST /persons`; that CRUD is v2-only, which needs a different base path, `PATCH`
+ *                instead of `PUT`, and `{id}`. Vendoring v2 would diff our requests against
+ *                endpoints we don't call. (A live probe can't settle it either: Pipedrive
+ *                authenticates before routing, so an unknown path also answers 401.)
+ *   sentry     — documents only the org-scoped `/api/0/organizations/{org}/issues/{id}/`; ours is
+ *                the legacy un-scoped `/api/0/issues/{id}/`, which works but is not in the document.
+ *   notion     — the published document is API version 2025-09-03; we pin `Notion-Version:
+ *                2022-06-28`, under which `POST /databases/{id}/query` is still valid. Diffing
+ *                across versions would report a working call as broken.
+ *   zendesk    — real and fetchable (developer.zendesk.com/zendesk/oas.yaml) but canonicalises paths
+ *                WITHOUT the `.json` suffix our catalog uses (`/api/v2/tickets` vs `/tickets.json`).
+ *                #813 deferred the rewrite seam until a second provider needed it and named Shopify
+ *                as that provider — but Shopify publishes no spec at all, so the condition can no
+ *                longer be met, and 3 actions don't justify a transform duplicated across this
+ *                script and the drift spec where a desync silently stops matching.
  */
 
 /** Placeholders differ in name between us and upstream, so match on SHAPE. */

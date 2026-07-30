@@ -1,0 +1,224 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "OData Service for namespace microsoft.graph",
+    "version": "v1.0"
+  },
+  "x-naary": {
+    "provider": "msgraph",
+    "pathPrefix": "",
+    "source": "https://raw.githubusercontent.com/microsoftgraph/msgraph-metadata/master/openapi/v1.0/openapi.yaml",
+    "fetchedAt": "2026-07-30",
+    "note": "PRUNED snapshot — see packages/dsl/scripts/extract-openapi-fixtures.mjs. Do not hand-edit."
+  },
+  "paths": {
+    "/users/{user-id}/messages": {
+      "get": {
+        "operationId": "users.ListMessages",
+        "parameters": [
+          {
+            "name": "user-id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "includeHiddenMessages",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "$top",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "$skip",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "$search",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "$filter",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "$count",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "$orderby",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "$select",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "$expand",
+            "in": "query",
+            "required": false
+          }
+        ]
+      }
+    },
+    "/users/{user-id}/sendMail": {
+      "post": {
+        "operationId": "users.user.sendMail",
+        "parameters": [
+          {
+            "name": "user-id",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "Message": {},
+                  "SaveToSentItems": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/users/{user-id}/events": {
+      "get": {
+        "operationId": "users.ListEvents",
+        "parameters": [
+          {
+            "name": "user-id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "$top",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "$skip",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "$search",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "$filter",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "$count",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "$orderby",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "$select",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "$expand",
+            "in": "query",
+            "required": false
+          }
+        ]
+      },
+      "post": {
+        "operationId": "users.CreateEvents",
+        "parameters": [
+          {
+            "name": "user-id",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "@odata.type"
+                ],
+                "properties": {
+                  "id": {},
+                  "@odata.type": {},
+                  "categories": {},
+                  "changeKey": {},
+                  "createdDateTime": {},
+                  "lastModifiedDateTime": {},
+                  "allowNewTimeProposals": {},
+                  "attendees": {},
+                  "body": {},
+                  "bodyPreview": {},
+                  "cancelledOccurrences": {},
+                  "end": {},
+                  "hasAttachments": {},
+                  "hideAttendees": {},
+                  "iCalUId": {},
+                  "importance": {},
+                  "isAllDay": {},
+                  "isCancelled": {},
+                  "isDraft": {},
+                  "isOnlineMeeting": {},
+                  "isOrganizer": {},
+                  "isReminderOn": {},
+                  "location": {},
+                  "locations": {},
+                  "onlineMeeting": {},
+                  "onlineMeetingProvider": {},
+                  "onlineMeetingUrl": {},
+                  "organizer": {},
+                  "originalEndTimeZone": {},
+                  "originalStart": {},
+                  "originalStartTimeZone": {},
+                  "recurrence": {},
+                  "reminderMinutesBeforeStart": {},
+                  "responseRequested": {},
+                  "responseStatus": {},
+                  "sensitivity": {},
+                  "seriesMasterId": {},
+                  "showAs": {},
+                  "start": {},
+                  "subject": {},
+                  "transactionId": {},
+                  "type": {},
+                  "webLink": {},
+                  "attachments": {},
+                  "calendar": {},
+                  "exceptionOccurrences": {},
+                  "extensions": {},
+                  "instances": {},
+                  "multiValueExtendedProperties": {},
+                  "singleValueExtendedProperties": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

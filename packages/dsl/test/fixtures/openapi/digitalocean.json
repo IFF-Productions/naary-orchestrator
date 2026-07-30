@@ -8,7 +8,7 @@
     "provider": "digitalocean",
     "pathPrefix": "/v2",
     "source": "https://raw.githubusercontent.com/digitalocean/openapi/main/specification/DigitalOcean-public.v2.yaml",
-    "fetchedAt": "2026-07-29",
+    "fetchedAt": "2026-07-30",
     "note": "PRUNED snapshot — see packages/dsl/scripts/extract-openapi-fixtures.mjs. Do not hand-edit."
   },
   "paths": {

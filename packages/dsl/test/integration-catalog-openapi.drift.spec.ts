@@ -175,6 +175,37 @@ const ACKNOWLEDGED: { finding: string; why: string }[] = [
     finding: 'gitlab.list_issues: path field "projectId" ↔ upstream "id"',
     why: "Deliberate rename — same reason as create_issue.",
   },
+  {
+    finding: 'gitlab.comment_issue: path field "projectId" ↔ upstream "id"',
+    why: "Deliberate rename — same reason as create_issue.",
+  },
+  {
+    finding:
+      'gitlab.comment_issue: path field "issueIid" ↔ upstream "noteable_id"',
+    why: 'GitLab shares one Notes route across issues, merge requests and snippets, so its spec names the segment generically. Ours is bound to issues, where GitLab\'s own docs call the value the "issue iid".',
+  },
+  {
+    finding:
+      'jira.add_comment: path field "issueKey" ↔ upstream "issueIdOrKey"',
+    why: 'Deliberate rename: the field hint asks for a key ("PROJ-123"). Jira accepts a numeric id there too, but offering both in a config panel invites pasting the wrong one. Substitution is positional.',
+  },
+  {
+    finding: 'jira.get_issue: path field "issueKey" ↔ upstream "issueIdOrKey"',
+    why: "Deliberate rename — same reason as add_comment.",
+  },
+  {
+    finding:
+      'jira.transition_issue: path field "issueKey" ↔ upstream "issueIdOrKey"',
+    why: "Deliberate rename — same reason as add_comment.",
+  },
+  {
+    finding: 'calendly.cancel_event: path field "eventUuid" ↔ upstream "uuid"',
+    why: 'Deliberate rename: Calendly names every path segment "uuid", and the action also reads an event, so an unqualified "uuid" says nothing about WHICH object. The field key is what authors bind expressions to, so it stays ours.',
+  },
+  {
+    finding: 'calendly.get_event: path field "eventUuid" ↔ upstream "uuid"',
+    why: "Deliberate rename — same reason as cancel_event.",
+  },
 ];
 
 /**
@@ -199,20 +230,29 @@ const UNSPECIFIED: { action: string; why: string }[] = [
       "`GET https://app.posthog.com/api/users/@me/` → 401, not 404.",
   },
   {
-    action: "gitlab.comment_issue",
+    action: "mattermost.get_me",
     why:
-      "GitLab's OpenAPI is GENERATED from its Grape routes at release time and is partial — 863 " +
-      "paths out of a much larger API. The Notes API is one of the omissions: the document has " +
-      "`/issues/{issue_iid}/award_emoji`, `/links`, `/time_estimate` but no `/notes`. Verified " +
-      "live: unauthenticated `POST https://gitlab.com/api/v4/projects/278964/issues/1/notes` → " +
-      "401 while `.../issues/1/nonsense` → 404, so the route exists.",
+      "Mattermost models the current-user read as `/users/{user_id}` with the documented magic id " +
+      "`me`, so the literal path is not a separate operation. Verified live against Mattermost's " +
+      "own community server: `GET https://community.mattermost.com/api/v4/users/me` → 401 while " +
+      "`/api/v4/nonsense` → 404.",
   },
   {
-    action: "gitlab.get_me",
+    action: "zoom.get_me",
     why:
-      "Same generator gap — `/api/v4/user` (the current-user read the connection probe uses) is " +
-      "absent from the published document, which has `/users/{id}/…` but no `/user`. Verified " +
-      "live: unauthenticated `GET https://gitlab.com/api/v4/user` → 401, `/api/v4/nonsense` → 404.",
+      "Same `me` sentinel: Zoom's `GET /users/{userId}` says outright to pass `me` in place of " +
+      "the id. Verified live: `GET https://api.zoom.us/v2/users/me` → 401, `/v2/nonsense` → 404.",
+  },
+  {
+    action: "hubspot.create_deal",
+    why:
+      "HubSpot's Deals document templates every path on the internal objectTypeId — " +
+      "`/crm/v3/objects/0-3`, never the word `deals` (which appears in the file only inside an " +
+      "`externalDocs` link). The runtime accepts the name: `POST " +
+      "https://api.hubapi.com/crm/v3/objects/deals` → 401 while `/crm/v3/nonsense-xyz` → 404. " +
+      "The generic CRM Objects document has `/crm/v3/objects/{objectType}`, but binding a LITERAL " +
+      "segment of ours to a PLACEHOLDER of theirs would make `{}` match anything and quietly " +
+      "un-check every path in this file.",
   },
 ];
 
@@ -222,7 +262,47 @@ const UNSPECIFIED: { action: string; why: string }[] = [
  * entry is a claim that the spec is wrong or incomplete about a field we send on purpose; it is
  * not a place to park a finding nobody wanted to read.
  */
-const ACKNOWLEDGED_BODY: { action: string; field: string; why: string }[] = [];
+const ACKNOWLEDGED_BODY: { action: string; field: string; why: string }[] = [
+  {
+    action: "msgraph.send_mail",
+    field: "message",
+    why:
+      "Microsoft's OpenAPI is generated from CSDL, where the action's parameters are declared " +
+      "`Message` and `SaveToSentItems`; the WIRE names are camelCase. Microsoft's own reference " +
+      "(learn.microsoft.com/graph/api/user-sendmail, Request body table + all five HTTP examples) " +
+      'documents `{"message": {…}, "saveToSentItems": "false"}`. Their docs beat their generator.',
+  },
+  {
+    action: "msgraph.send_mail",
+    field: "saveToSentItems",
+    why: "Same CSDL-PascalCase artifact as `message` — see that entry.",
+  },
+];
+
+/**
+ * Required body properties we do NOT supply, adjudicated. The sibling of ACKNOWLEDGED_BODY for
+ * check (3) rather than (5), and held to the same bar: an entry is a claim that the provider's own
+ * document contradicts ITSELF about the requirement, quoted, not a place to silence a red test.
+ * "Upstream says required and we simply don't send it" is a catalog bug — fix it (see
+ * `clickup.create_comment`'s `notify_all`, added as a `const` for exactly this reason).
+ */
+const ACKNOWLEDGED_REQUIRED_BODY: {
+  action: string;
+  path: string;
+  why: string;
+}[] = [
+  {
+    action: "hubspot.create_contact",
+    path: "associations",
+    why:
+      "HubSpot's document contradicts itself in one schema: `SimplePublicObjectInputForCreate` " +
+      'lists `required: ["associations", "properties"]` while its own `description` reads "the ' +
+      "properties to be set and OPTIONAL associations to link the new record with other CRM " +
+      "objects\". Same class as PagerDuty's readOnly-yet-required service reference (#813): the " +
+      "spec neither confirms nor denies, so it is not evidence of a catalog bug. Re-derived on " +
+      "every `pnpm refresh:openapi-fixtures`, so if HubSpot resolves it this entry stops matching.",
+  },
+];
 
 // ── helpers ─────────────────────────────────────────────────────────────────────────────────────
 
@@ -247,6 +327,15 @@ const isSupplied = (f: IntegrationField): boolean =>
 const bodyPathOf = (f: IntegrationField): string => f.bodyPath ?? f.key;
 
 /**
+ * A body key the PROTOCOL owns, not the author. `@odata.type` and its siblings are OData control
+ * annotations: Microsoft Graph's generated document marks `@odata.type` required on every entity
+ * because it is the discriminator of the CSDL base type, and no `fields[]` entry could sensibly
+ * ask a user for it. Excluded by SHAPE (`@`-prefixed) rather than by name, and only in the
+ * required walk — the same reasoning `TRANSPORT_HEADERS` applies to `content-type`.
+ */
+const isProtocolBodyKey = (name: string): boolean => name.startsWith("@");
+
+/**
  * Every dotted path upstream marks required, walking INTO required objects:
  * PagerDuty's create_incident yields `incident`, `incident.type`, `incident.title`,
  * `incident.service`. Reads the fixture's pruned schema (see the docblock on `parseOpenApi`).
@@ -262,7 +351,7 @@ function requiredBodyPaths(
   const required = Array.isArray(s.required) ? s.required : [];
   const properties = (s.properties ?? {}) as Record<string, unknown>;
   for (const name of required) {
-    if (typeof name !== "string") continue;
+    if (typeof name !== "string" || isProtocolBodyKey(name)) continue;
     const path = prefix ? `${prefix}.${name}` : name;
     out.push(path);
     if (properties[name])
@@ -829,7 +918,17 @@ for (const check of checks) {
     });
 
     it("has a field for every required body property", () => {
-      expect(check.bodyProblems, check.key).toEqual([]);
+      const excused = new Set(
+        ACKNOWLEDGED_REQUIRED_BODY.filter((a) => a.action === check.key).map(
+          (a) => a.path,
+        ),
+      );
+      expect(
+        check.bodyProblems.filter(
+          (p) => !excused.has(p.match(/body "([^"]+)"/)?.[1] ?? ""),
+        ),
+        check.key,
+      ).toEqual([]);
     });
 
     it("writes every body field to a property the spec declares", () => {
@@ -892,6 +991,19 @@ describe("advisory drift — reported, never failed", () => {
       ).toBe(true);
     }
   });
+
+  it("still finds every acknowledged MISSING required body property", () => {
+    for (const { action, path, why } of ACKNOWLEDGED_REQUIRED_BODY) {
+      const check = checks.find((c) => c.key === action);
+      expect(check, `${action} is no longer a checked action`).toBeDefined();
+      expect(
+        check?.bodyProblems.some((p) => p.includes(`body "${path}"`)),
+        `${action}: "${path}" is no longer reported as a missing required body property.\n  it ` +
+          `was acknowledged because: ${why}\n  Either the catalog now supplies it (delete the ` +
+          "entry) or upstream dropped the requirement (worth a look).",
+      ).toBe(true);
+    }
+  });
 });
 
 /**
@@ -935,11 +1047,16 @@ describe("body-encoding coverage (#813)", () => {
     const providersWithBodyWrites = new Set(
       universe.map((k) => k.split(".")[0]),
     );
+    // A `wrong` verdict still COUNTS in the total when it is acknowledged, so the table can print a
+    // non-zero `wrong` on a green build. Saying how many are adjudicated is the difference between
+    // that reading as "CI is red" and as "we looked, and wrote down why".
+    const acknowledgedWrong = ACKNOWLEDGED_BODY.length;
     process.stderr.write(
       `\n#813 spec-verified write bodies — ${writes.length} write action(s) across ` +
         `${new Set(writes.map((c) => c.provider)).size} pinned provider(s):\n` +
         `${rows.join("\n")}\n` +
-        `    ${"TOTAL body fields".padEnd(34)} ${confirmed} confirmed, ${unknowable} unknowable, ${wrong} wrong\n` +
+        `    ${"TOTAL body fields".padEnd(34)} ${confirmed} confirmed, ${unknowable} unknowable, ${wrong} wrong` +
+        `${wrong ? ` (${acknowledgedWrong} acknowledged — see ACKNOWLEDGED_BODY)` : ""}\n` +
         `\n    COVERAGE  ${covered.size} of ${universe.length} body-bearing write actions, ` +
         `${new Set([...covered].map((k) => k.split(".")[0])).size} of ` +
         `${providersWithBodyWrites.size} providers.\n` +
@@ -947,10 +1064,16 @@ describe("body-encoding coverage (#813)", () => {
           .filter((k) => !covered.has(k))
           .join(", ")}\n\n`,
     );
-    // The only assertion: the summary must be summarizing something. A fixture directory that
-    // stopped loading would otherwise print a tidy table of zeroes.
+    // The summary must be summarizing something — a fixture directory that stopped loading would
+    // otherwise print a tidy table of zeroes.
     expect(writes.length).toBeGreaterThan(0);
     expect(confirmed).toBeGreaterThan(0);
-    expect(universe.length).toBeGreaterThan(covered.size - 1);
+    // …and the numerator must be drawn from the same population as the denominator. `covered ⊆
+    // universe` is true by construction TODAY; it stops being true the moment the two `bodyBearing`
+    // computations drift apart, which is the only way this line can fail and the reason it is here.
+    for (const key of covered) expect(universe).toContain(key);
+    // Every `wrong` on a green build is adjudicated; a NEW one fails its own action's test above,
+    // so this pins the printed number to the acknowledgment list rather than to nothing.
+    expect(wrong).toBeLessThanOrEqual(acknowledgedWrong);
   });
 });

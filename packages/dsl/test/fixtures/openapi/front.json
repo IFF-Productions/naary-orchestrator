@@ -8,7 +8,7 @@
     "provider": "front",
     "pathPrefix": "",
     "source": "https://raw.githubusercontent.com/frontapp/front-api-specs/main/core-api/core-api.json",
-    "fetchedAt": "2026-07-29",
+    "fetchedAt": "2026-07-30",
     "note": "PRUNED snapshot — see packages/dsl/scripts/extract-openapi-fixtures.mjs. Do not hand-edit."
   },
   "paths": {
