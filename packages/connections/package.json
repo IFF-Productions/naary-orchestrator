@@ -9,7 +9,7 @@
     "build": "tsc -b"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@naary/db": "workspace:*",
     "@naary/secrets": "workspace:*",
     "jose": "^6.2.4",
