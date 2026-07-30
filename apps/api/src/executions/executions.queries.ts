@@ -241,6 +241,14 @@ function logQueryFailure(where: string, runId: string, e: unknown): void {
 }
 
 /**
+ * A usable ctx: a plain object, never an array. `typeof [] === "object"`, so a bare typeof test
+ * accepts an array and passes it downstream as if it were a node-id → output map.
+ */
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return v != null && typeof v === "object" && !Array.isArray(v);
+}
+
+/**
  * The `{status, ctx, currentNodeId}` a completed run returned, read straight off its history's
  * close event — the SECOND way to get the same payload `handle.result()` fetches.
  *
@@ -295,9 +303,7 @@ async function completionFromHistory(
       };
       // Require a ctx OBJECT. A close event we can decode but that carries no ctx is not a
       // recovery — falling through leaves the caller's honest "we could not read it".
-      if (r.ctx == null || typeof r.ctx !== "object" || Array.isArray(r.ctx)) {
-        continue;
-      }
+      if (!isPlainObject(r.ctx)) continue;
       return {
         status: (typeof r.status === "string"
           ? r.status
@@ -374,12 +380,16 @@ export async function queryState(
           ctx: Record<string, unknown>;
           currentNodeId?: string;
         };
-        // `handle.result()` can also SUCCEED with nothing usable in it — a decoded-but-empty
-        // payload reaches the UI as "every step produced no output", the same symptom as a
-        // throw and just as wrong. A real run's ctx always holds at least `__input`, so a
-        // missing/non-object ctx here means we didn't get the payload, not that the run was
+        // `handle.result()` can also SUCCEED with nothing usable in it — a payload that decodes
+        // but carries no ctx reaches the UI as "every step produced no output", the same symptom
+        // as a throw and just as wrong. A real run's ctx always holds at least `__input`, so an
+        // absent/wrong-shaped ctx here means we didn't get the payload, not that the run was
         // empty. Recover it from history the same way the throw path does.
-        if (r?.ctx == null || typeof r.ctx !== "object") {
+        //
+        // The shape test is the SAME one completionFromHistory applies to its own candidate —
+        // a plain object, not an array. `typeof [] === "object"`, so a bare `typeof` check would
+        // accept an array and hand it downstream as a ctx.
+        if (!isPlainObject(r?.ctx)) {
           const recovered = await completionFromHistory(deps, id);
           if (recovered) {
             logQueryFailure(
@@ -390,7 +400,14 @@ export async function queryState(
             r = recovered as typeof r;
           }
         }
-        const ctx = await resolveCtxRefs(r?.ctx ?? {});
+        // Normalize ONCE, then read only from this. Reading `r.ctx` further down would throw on
+        // a null ctx that history couldn't recover (nodeTimesFrom indexes its argument) — which
+        // lands in the catch below, re-fetches the same history a second time, and logs a second,
+        // misleading failure for what is really just "there was no ctx".
+        const rawCtx: Record<string, unknown> = isPlainObject(r?.ctx)
+          ? r.ctx
+          : {};
+        const ctx = await resolveCtxRefs(rawCtx);
         // The node the run ENDED on (the `end` passthrough on a clean completion). Without it the
         // detail view marks that terminal node "skipped" instead of "done" (it writes no ctx
         // output). New runs carry it in the result — CHEAP, read straight from the completion
@@ -398,7 +415,7 @@ export async function queryState(
         // it with a one-off query of the closed workflow (a history replay). Best-effort and gated
         // on the field being absent, so only legacy runs ever pay the replay, and it NEVER fails
         // the detail view — an unavailable/aged-out history just leaves "" (the prior behaviour).
-        let currentNodeId = r.currentNodeId ?? "";
+        let currentNodeId = r?.currentNodeId ?? "";
         if (!currentNodeId) {
           try {
             currentNodeId = (await handle.query(stateQuery)).currentNodeId;
@@ -407,12 +424,15 @@ export async function queryState(
           }
         }
         return {
-          status: r.status,
+          status: r?.status ?? "completed",
           currentNodeId,
           ctx,
-          executedNodeIds: [], // completed ctx carries every node's output
-          nodeTimes: nodeTimesFrom(r.ctx),
-          spentUsd: costUsdFrom(r.ctx),
+          // A recovered/normalized ctx carries every node's output, so the UI derives the step
+          // states from it. When there was no ctx at all, fall back to the read-model stamp
+          // rather than leaving a completed run's steps looking "skipped" (#525).
+          executedNodeIds: isPlainObject(r?.ctx) ? [] : row.executedNodeIds,
+          nodeTimes: nodeTimesFrom(rawCtx),
+          spentUsd: costUsdFrom(rawCtx),
           perExecutionCapUsd: null, // closed — no live cap to meter against
         };
       } catch (e) {
@@ -492,7 +512,7 @@ export async function queryState(
       const s = replayable
         ? await handle.query(stateQuery)
         : ({ ctx: undefined } as unknown as ExecutionState);
-      if (s.ctx && typeof s.ctx === "object" && !Array.isArray(s.ctx)) {
+      if (isPlainObject(s.ctx)) {
         return {
           ...closed,
           ctx: await resolveCtxRefs(s.ctx),

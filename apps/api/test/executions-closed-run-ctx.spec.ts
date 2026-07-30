@@ -197,4 +197,82 @@ describe("queryState — a COMPLETED run whose result() gives nothing", () => {
     expect(out.status).toBe("completed");
     expect(out.currentNodeId).toBe("end");
   });
+
+  it("recovers when result() RESOLVES with a null ctx, fetching history once", async () => {
+    // The other half of the same failure: `handle.result()` succeeding but carrying nothing
+    // usable reaches the UI identically to it throwing.
+    const fetchHistory = vi
+      .fn()
+      .mockResolvedValue(completedHistory({ pagerduty: { status: 200 } }));
+    const deps = makeDeps({ describeStatus: "COMPLETED" });
+    (
+      deps.client as unknown as { workflow: { getHandle: () => unknown } }
+    ).workflow.getHandle = () => ({
+      describe: async () => ({ status: { name: "COMPLETED" } }),
+      result: async () => ({ status: "completed", ctx: null }),
+      query: async () => {
+        throw new Error("no query");
+      },
+      fetchHistory,
+    });
+
+    const out = await queryState(deps, "wf-3", TENANT);
+    expect(out.ctx.pagerduty).toEqual({ status: 200 });
+    // ONE history read. Reading `r.ctx` downstream used to throw on the null (nodeTimesFrom
+    // indexes its argument), landing in the catch and re-fetching the same history a second
+    // time — plus logging a second, misleading failure for what is just "there was no ctx".
+    expect(fetchHistory).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not accept an ARRAY as a ctx", async () => {
+    // `typeof [] === "object"`, so a bare typeof check would hand an array downstream as if it
+    // were a node-id → output map.
+    const deps = makeDeps({ describeStatus: "COMPLETED" });
+    (
+      deps.client as unknown as { workflow: { getHandle: () => unknown } }
+    ).workflow.getHandle = () => ({
+      describe: async () => ({ status: { name: "COMPLETED" } }),
+      result: async () => ({ status: "completed", ctx: [1, 2, 3] }),
+      query: async () => {
+        throw new Error("no query");
+      },
+      fetchHistory: async () =>
+        completedHistory({ pagerduty: { status: 200 } }),
+    });
+
+    const out = await queryState(deps, "wf-4", TENANT);
+    expect(Array.isArray(out.ctx)).toBe(false);
+    expect(out.ctx.pagerduty).toEqual({ status: 200 });
+  });
+
+  it("handles an unrecoverable null ctx WITHOUT throwing into the catch", async () => {
+    // The case the normalization exists for. Reading `r.ctx` downstream throws here — the ctx is
+    // null and `nodeTimesFrom` indexes its argument — which lands in the catch, re-fetches the
+    // SAME history a second time, and logs a second misleading failure for what is really just
+    // "there was no ctx".
+    //
+    // The call count is what distinguishes the two paths: both end up returning the same view, so
+    // asserting only on the response would pass either way (it did — a mutation test caught that
+    // this assertion was missing).
+    const fetchHistory = vi.fn().mockResolvedValue({ events: [] });
+    const deps = makeDeps({ describeStatus: "COMPLETED" });
+    (
+      deps.client as unknown as { workflow: { getHandle: () => unknown } }
+    ).workflow.getHandle = () => ({
+      describe: async () => ({ status: { name: "COMPLETED" } }),
+      result: async () => ({ status: "completed", ctx: null }),
+      query: async () => {
+        throw new Error("no query");
+      },
+      fetchHistory,
+    });
+
+    const out = await queryState(deps, "wf-5", TENANT);
+    expect(fetchHistory).toHaveBeenCalledTimes(1);
+    expect(out.ctx).toEqual({});
+    // …and a completed run with no recoverable ctx keeps the read-model stamp, so its steps don't
+    // read "skipped" on top of a missing output (#525).
+    expect(out.executedNodeIds).toEqual(ROW.executedNodeIds);
+    expect(out.nodeTimes).toBeNull();
+  });
 });
