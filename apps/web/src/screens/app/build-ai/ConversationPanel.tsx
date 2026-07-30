@@ -197,7 +197,34 @@ export function ConversationPanel({
         height: compact ? "60vh" : "auto",
       }}
     >
-      {showIntro ? (
+      {showIntro && seeding ? (
+        /* The binding is still resolving, so `editing` is null — and the create intro below would
+           read "What should we automate?" at a user who just clicked "Edit with AI". Show nothing
+           that presumes either mode until we know which one this is. */
+        <div style={{ flex: 1, overflowY: "auto", padding: 22 }}>
+          <div
+            style={{
+              fontSize: 19,
+              fontWeight: "var(--weight-bold)",
+              letterSpacing: "-.01em",
+              color: "var(--ink)",
+            }}
+          >
+            Loading your workflow…
+          </div>
+          <div
+            style={{
+              fontSize: "var(--text-body)",
+              color: "var(--ink-2)",
+              marginTop: 6,
+              lineHeight: 1.55,
+            }}
+          >
+            Fetching the workflow you're editing so this chat changes it rather
+            than replacing it.
+          </div>
+        </div>
+      ) : showIntro ? (
         <div
           ref={scrollRef}
           style={{ flex: 1, overflowY: "auto", padding: 22 }}
@@ -253,9 +280,6 @@ export function ConversationPanel({
               <button
                 key={ex.label}
                 type="button"
-                // Same gate as the composer: a tapped chip is a turn, and a turn before the
-                // binding resolves is a from-scratch build of someone's existing workflow.
-                disabled={seeding}
                 onClick={() => onSend(ex.label)}
                 className="bwa-chip"
                 style={{
@@ -263,8 +287,7 @@ export function ConversationPanel({
                   background: "var(--card)",
                   borderRadius: 10,
                   padding: "10px 12px",
-                  cursor: seeding ? "wait" : "pointer",
-                  opacity: seeding ? 0.55 : 1,
+                  cursor: "pointer",
                   display: "flex",
                   alignItems: "center",
                   gap: 10,

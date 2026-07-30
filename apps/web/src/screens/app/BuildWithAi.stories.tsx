@@ -214,6 +214,22 @@ export const EditIntro: Story = {
   render: () => <BuildWithAi />,
 };
 
+/**
+ * The window between `?key=` and the binding resolving.
+ *
+ * `editing` is still null here, so the ordinary intro would read "What should we automate?" at a
+ * user who just clicked "Edit with AI" — and its example chips would each fire a from-scratch
+ * build. The composer is gated (isBindingPending) and the column says only what is true yet.
+ */
+export const EditSeeding: Story = {
+  render: () => (
+    <BuildWithAiView
+      state={{ ...INITIAL_BUILD_STATE, seeding: true }}
+      {...viewHandlers}
+    />
+  ),
+};
+
 /** An edit turn landed: the CTA publishes the workflow's NEXT VERSION, not a forked copy (#874). */
 export const EditDraftReady: Story = {
   render: () => (

@@ -355,6 +355,27 @@ export function BuildWithAi() {
         if (graph) {
           graphRef.current = { name: s.title ?? "Untitled workflow", graph };
         }
+        // Rebind BEFORE the state patch, and before any await.
+        //
+        // A resumed session carries its own binding, which may differ from the `?key=` that opened
+        // this screen. The patch below sets phase:"ready", which renders a live Save button — so
+        // any window in which `graphRef` holds THIS session's draft while `editingRef` still holds
+        // the PREVIOUS target is a window in which Save writes one workflow's draft as the next
+        // version of another. Resolving the name needs a round trip; the binding must not wait for
+        // it, so the key lands now and `getGraph` only upgrades the display name.
+        //
+        // `baseVersion` stays null either way, on purpose: the draft was seeded when the session
+        // OPENED, and nothing records which version that was, so the save path must treat it as
+        // possibly-stale rather than pretend today's version is its parent.
+        if (s.workflowKey) {
+          setEditing({
+            workflowKey: s.workflowKey,
+            name: s.workflowKey,
+            baseVersion: null,
+          });
+        } else {
+          setEditing(null);
+        }
         patch({
           phase: graph ? "ready" : "idle",
           messages: turnsToMessages(s),
@@ -364,26 +385,18 @@ export function BuildWithAi() {
           gotFrame: false,
           error: null,
           staleWarning: null,
+          editProblem: null,
         });
-        // A resumed session carries its own binding, which may differ from (or contradict) the
-        // `?key=` in the URL — adopt the session's, and rewrite the URL so a reload agrees with
-        // the screen. `baseVersion` stays null on purpose: the draft was seeded when the session
-        // OPENED, and nothing records which version that was, so the save path must treat it as
-        // possibly-stale rather than pretend today's version is its parent.
         if (s.workflowKey) {
           const key = s.workflowKey;
-          const g = await api.getGraph(key).catch(() => null);
-          setEditing({
-            workflowKey: key,
-            name: g?.name ?? key,
-            baseVersion: null,
-          });
-          patch({ editProblem: g ? null : deletedWorkflowMessage(key) });
+          // Rewrite the URL so a reload agrees with the screen.
           setSearchParams({ [EDIT_KEY_PARAM]: key }, { replace: true });
-        } else {
-          setEditing(null);
-          patch({ editProblem: null });
-          if (editKey) setSearchParams({}, { replace: true });
+          const g = await api.getGraph(key).catch(() => null);
+          if (g)
+            setEditing({ workflowKey: key, name: g.name, baseVersion: null });
+          else patch({ editProblem: deletedWorkflowMessage(key) });
+        } else if (editKey) {
+          setSearchParams({}, { replace: true });
         }
       } catch {
         patch({ error: "Couldn't resume that session." });
