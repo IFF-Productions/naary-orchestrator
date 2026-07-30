@@ -87,6 +87,9 @@ export function CanvasTopBar({
   verdictOk,
   showIssues,
   onToggleIssues,
+  canReview,
+  showReview,
+  onToggleReview,
   env,
   runCapUsd,
   status,
@@ -130,6 +133,10 @@ export function CanvasTopBar({
   verdictOk?: boolean;
   showIssues: boolean;
   onToggleIssues: () => void;
+  /** There is a baseline AND unsaved work — i.e. the review panel has something to say. */
+  canReview?: boolean;
+  showReview?: boolean;
+  onToggleReview?: () => void;
   /** The active environment (real, from the env store); omit to hide the chip. */
   env?: TopBarEnv | null;
   /** Real per-execution cap from the tenant budget policy; omit when unset. */
@@ -413,6 +420,29 @@ export function CanvasTopBar({
                 ? "✗"
                 : "✗ check failed "}
           {!phone && (showIssues ? "▲" : "▼")}
+        </button>
+      )}
+
+      {/* "Review changes" — what a save would persist, as a diff against the last saved version.
+          Sits next to the issues pill because they answer the two questions before saving: what is
+          wrong, and what is different. Shown on a phone for the same reason the issues pill is —
+          an AI edit rewrites the whole graph, and reading it back node by node is not a review. */}
+      {!generating && canReview && onToggleReview && (
+        <button
+          type="button"
+          onClick={onToggleReview}
+          title="See what changed since the last save"
+          className="pill"
+          style={{
+            border: "none",
+            cursor: "pointer",
+            flex: "none",
+            background: "var(--card)",
+            color: "var(--ink-2)",
+          }}
+        >
+          {phone ? "±" : "± changes "}
+          {!phone && (showReview ? "▲" : "▼")}
         </button>
       )}
 

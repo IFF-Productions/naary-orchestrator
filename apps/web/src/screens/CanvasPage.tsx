@@ -73,6 +73,7 @@ import { AiPromptPanel } from "./canvas/AiPromptPanel";
 import { UNTITLED_WORKFLOW } from "./canvas/canvas-dirty";
 import { CanvasInspectorDock } from "./canvas/CanvasInspectorDock";
 import { CanvasIssuesPanel } from "./canvas/CanvasIssuesPanel";
+import { ReviewChangesPanel } from "./canvas/ReviewChangesPanel";
 import { CanvasStage } from "./canvas/CanvasStage";
 import { nextNodePosition } from "./canvas/node-placement";
 import { CanvasToasts } from "./canvas/CanvasToasts";
@@ -199,11 +200,16 @@ export function CanvasPage() {
   // warning before anything discards their work. `dirty` also gates the "save before I test /
   // check this?" questions further down — the two must agree on what "unsaved" means, so they
   // read it from the same place.
-  const { dirty, markSaved, resetBaseline } = useUnsavedChanges({
+  const { dirty, baseline, markSaved, resetBaseline } = useUnsavedChanges({
     graph,
     name,
   });
   const confirm = useConfirm();
+
+  // "Review changes": the diff of the live canvas against `baseline` (see ReviewChangesPanel).
+  // Opened automatically when an AI edit lands, since that is the moment with the most to check
+  // and the least visibility into it; openable any time there is something to review.
+  const [showReview, setShowReview] = useState(false);
 
   // AI workflow builder: describe a flow → stream a draft onto the canvas, or describe a
   // change → stream it applied to what's already there.
@@ -236,6 +242,11 @@ export function CanvasPage() {
     setStatus,
     setSearchParams,
     onGraphPresented: resetBaseline,
+    // An AI EDIT just landed. This is the moment with the most to check and the least visibility
+    // into it — the graph was rewritten wholesale and the only report of what moved is the canvas
+    // — so the review opens itself rather than waiting to be found. A CREATE does not: there is
+    // no prior version to compare against, so the panel would have nothing to say.
+    onEditApplied: () => setShowReview(true),
   });
 
   const [watchState, setWatchState] = useState<ExecutionState | null>(null);
@@ -1166,6 +1177,11 @@ export function CanvasPage() {
         verdictOk={dryRun?.ok}
         showIssues={showIssues}
         onToggleIssues={() => setShowIssues((s) => !s)}
+        // Only offered when there is something to review: a baseline to compare against AND
+        // unsaved work. A control that opens a panel reading "no changes" is noise.
+        canReview={dirty && !!baseline}
+        showReview={showReview}
+        onToggleReview={() => setShowReview((s) => !s)}
         env={envChip}
         runCapUsd={budget?.perExecutionCapUsd ?? null}
         status={status}
@@ -1205,6 +1221,18 @@ export function CanvasPage() {
           issues={panelIssues}
           note={dryRun?.message}
           onSelectNode={selectNode}
+        />
+      )}
+
+      {/* Needs a baseline to compare against; there is none until the canvas has presented a
+          compilable graph (a brand-new draft has nothing to diff and says so via the button). */}
+      {showReview && baseline && (
+        <ReviewChangesPanel
+          baseline={baseline.graph}
+          baselineName={baseline.name}
+          graph={graph}
+          name={name}
+          onClose={() => setShowReview(false)}
         />
       )}
 
