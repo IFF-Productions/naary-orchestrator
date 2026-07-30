@@ -138,8 +138,18 @@ export function WorkflowPicker({
   // Nothing eligible: say WHY, and distinguish "no workflows at all" from "none of the right
   // shape" — those need different fixes, and the old copy implied the first for both.
   if (eligible.length === 0) {
+    // Carries the test id too, and `data-empty` to say WHICH state this is.
+    //
+    // #923 gave the loading branch the id so a slow list would read as "not ready" rather than
+    // "not there" — and left this branch without one, which is the same defect one branch over.
+    // An empty list then looked identical to a missing component: an e2e waited its full budget
+    // and reported `element(s) not found`, which points at the picker when the real answer is
+    // "this tenant has no eligible workflows" (in CI: seeding didn't land). A caller can now tell
+    // the two apart, and nothing has to infer absence from silence.
     return (
       <div
+        data-testid="workflow-picker-empty"
+        data-empty={workflows.length === 0 ? "no-workflows" : "none-eligible"}
         style={{
           fontSize: "var(--text-sm)",
           color: "var(--ink-2)",

@@ -19,7 +19,21 @@ import { expect, type Page } from "@playwright/test";
  */
 async function readyPicker(page: Page) {
   const picker = page.getByTestId("workflow-picker");
-  await expect(picker).toBeVisible({ timeout: 20_000 });
+  const empty = page.getByTestId("workflow-picker-empty");
+
+  // Wait for EITHER outcome, then say which. The picker renders as the control (loading or
+  // ready) or as an empty-state div — never both. Asserting only on the control meant an empty
+  // list burned the whole budget and failed with `element(s) not found`, which reads as "the
+  // picker is broken" when the truth is "this workspace has no eligible workflows" — in CI,
+  // that the seed didn't land. Racing them turns a 20s mystery into a one-line answer.
+  await expect(picker.or(empty)).toBeVisible({ timeout: 20_000 });
+  if (await empty.isVisible()) {
+    throw new Error(
+      `The workflow picker rendered its EMPTY state (${await empty.getAttribute("data-empty")}), ` +
+        "so there was nothing to choose. The picker itself is fine — the workspace has no " +
+        `eligible workflows. Check the e2e seed. Copy: "${(await empty.innerText()).trim()}"`,
+    );
+  }
   await expect(picker).toBeEnabled({ timeout: 20_000 });
   return picker;
 }
