@@ -12,11 +12,19 @@
  * options (#487): tapping one becomes the next turn (or, for the accept option,
  * opens the draft in canvas). See ConversationPanel for the chip rendering.
  *
+ * A chat can also EDIT an existing workflow: arriving with `?key=<workflowKey>`
+ * (from Workflow detail → "Edit with AI") binds the session to that workflow —
+ * the stage opens showing its saved graph, the session is opened with
+ * `workflowKey` so the server seeds the working draft from it, every turn is an
+ * edit of THAT graph, and saving publishes the next VERSION of it rather than
+ * forking a copy (#874). All of the decisions that follow from the binding live
+ * in ./build-ai/edit-target.
+ *
  * This module is the route container (session lifecycle + turn SSE); the
  * presentational shell lives in ./build-ai/BuildWithAiView.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import type { GraphDef } from "@naary/dsl";
 import { api } from "../../lib/api";
 import { builderApi, type BuilderSession } from "../../lib/api/builder";
@@ -26,7 +34,19 @@ import {
   INITIAL_BUILD_STATE,
 } from "./build-ai/BuildWithAiView";
 import type { ChatMsg } from "./build-ai/ConversationPanel";
-import { asEdgeDef, asNodeDef, slugifyName } from "./build-ai/model";
+import {
+  deletedWorkflowMessage,
+  EDIT_KEY_PARAM,
+  type EditTarget,
+  isBindingPending,
+  loadFailureMessage,
+  openArgsFor,
+  parseEditKey,
+  saveTargetFor,
+  seedMissingMessage,
+  staleWarning,
+} from "./build-ai/edit-target";
+import { asEdgeDef, asNodeDef } from "./build-ai/model";
 import {
   type AiBuilderProvider,
   providerOptions,
@@ -85,6 +105,73 @@ export function BuildWithAi() {
   }, []);
 
   /**
+   * The workflow this chat edits, if any. Mirrored in a ref for the same reason `provider` is:
+   * `send`/`openInCanvas` are useCallbacks that would otherwise close over a stale value, and
+   * "which workflow am I about to overwrite?" is the last question you want answered stalely.
+   */
+  const editingRef = useRef<EditTarget | null>(null);
+  const setEditing = useCallback(
+    (next: EditTarget | null) => {
+      editingRef.current = next;
+      patch({ editing: next });
+    },
+    [patch],
+  );
+
+  /**
+   * Draw the bound workflow's SAVED graph on the stage, and record the version the coming draft
+   * descends from. Deliberately a read only — the session itself is opened lazily on the first
+   * turn (below), so merely visiting this URL and leaving never leaves a phantom empty session in
+   * anyone's resume list.
+   *
+   * A failure still keeps the binding: the workflow may exist and the read may simply have failed,
+   * and dropping the binding would silently turn an edit into a from-scratch build. `baseVersion`
+   * stays null, which makes the save path treat it as possibly-stale.
+   */
+  const seedFromWorkflow = useCallback(
+    async (workflowKey: string) => {
+      try {
+        const g = await api.getGraph(workflowKey);
+        // A session started while this read was in flight (the user resumed one, or sent the first
+        // turn) — its draft owns the stage now, and painting the saved graph over it would look
+        // exactly like the work being thrown away.
+        if (sessionRef.current) return;
+        setEditing({
+          workflowKey: g.workflowKey,
+          name: g.name,
+          baseVersion: g.version,
+        });
+        patch({
+          name: g.name,
+          streamNodes: g.graph.nodes,
+          streamEdges: g.graph.edges,
+          editProblem: null,
+        });
+      } catch {
+        if (sessionRef.current) return;
+        setEditing({ workflowKey, name: workflowKey, baseVersion: null });
+        patch({ editProblem: loadFailureMessage(workflowKey) });
+      }
+    },
+    [patch, setEditing],
+  );
+
+  const [searchParams, setSearchParams] = useSearchParams();
+  const editKey = parseEditKey(searchParams);
+  // Mirrored for the async paths, like providerRef above. The UI disables the composer while the
+  // binding resolves; this is the same invariant enforced where it actually matters, because an
+  // unbound session opened in that window is a CREATE, and its save a forked copy.
+  const editKeyRef = useRef<string | null>(null);
+  editKeyRef.current = editKey;
+  useEffect(() => {
+    if (!editKey) return;
+    // A resumed session's draft is already on the stage; re-seeding would replace it with the
+    // saved graph and throw away the conversation's work.
+    if (sessionRef.current) return;
+    void seedFromWorkflow(editKey);
+  }, [editKey, seedFromWorkflow]);
+
+  /**
    * Which model/agent to generate with. `null` = Auto, i.e. send no provider and let the server apply
    * its own precedence (first VALID credential, API models before claude-code) — exactly what happened
    * before this picker existed, so the default behaviour is unchanged.
@@ -118,10 +205,7 @@ export function BuildWithAi() {
         setCredentials(rows);
         // Restore the remembered choice only if it's still usable.
         setProvider(
-          resolveStoredProvider(
-            readStoredProvider(),
-            providerOptions(rows),
-          ),
+          resolveStoredProvider(readStoredProvider(), providerOptions(rows)),
         );
       })
       // A failed credential list must not block generating: Auto still works, and the server returns
@@ -160,7 +244,29 @@ export function BuildWithAi() {
       try {
         let sid = sessionRef.current;
         if (!sid) {
-          sid = (await builderApi.openBuilderSession()).id;
+          // `openArgsFor(null)` is undefined, so a from-scratch build sends the same empty body
+          // it always has. With a target it sends `workflowKey`, which is what makes the server
+          // seed the working draft from that workflow's latest saved graph.
+          const target = editingRef.current;
+          if (editKeyRef.current && !target) {
+            throw new Error(
+              "Still loading the workflow you're editing — try that again in a moment.",
+            );
+          }
+          const opened = await builderApi.openBuilderSession(
+            openArgsFor(target),
+          );
+          // The seed is a SEPARATE server-side read from the one that drew the stage, and it
+          // returns null on a miss. An empty draft would make this first turn a CREATE — the
+          // model would invent a workflow and the bound save path would publish the invention
+          // as the next version of a real one. Refuse, and don't leave the empty session behind.
+          if (target && !opened.currentGraph) {
+            await builderApi
+              .closeBuilderSession(opened.id, "done")
+              .catch(() => undefined);
+            throw new Error(seedMissingMessage(target));
+          }
+          sid = opened.id;
           sessionRef.current = sid;
         }
         // The server streams the WHOLE edited graph each turn — the first frame
@@ -174,34 +280,39 @@ export function BuildWithAi() {
           first = false;
           return was;
         };
-        const result = await builderApi.sendBuilderTurn(sid, text, providerRef.current ?? undefined, {
-          onMeta: (name) => patch({ name }),
-          onNode: (raw) => {
-            const n = asNodeDef(raw);
-            if (!n || !aliveRef.current || seen.has(n.id)) return;
-            seen.add(n.id);
-            const reset = takeFirst();
-            setState((s) => ({
-              ...s,
-              typing: false,
-              gotFrame: true,
-              streamNodes: reset ? [n] : [...s.streamNodes, n],
-              streamEdges: reset ? [] : s.streamEdges,
-            }));
+        const result = await builderApi.sendBuilderTurn(
+          sid,
+          text,
+          providerRef.current ?? undefined,
+          {
+            onMeta: (name) => patch({ name }),
+            onNode: (raw) => {
+              const n = asNodeDef(raw);
+              if (!n || !aliveRef.current || seen.has(n.id)) return;
+              seen.add(n.id);
+              const reset = takeFirst();
+              setState((s) => ({
+                ...s,
+                typing: false,
+                gotFrame: true,
+                streamNodes: reset ? [n] : [...s.streamNodes, n],
+                streamEdges: reset ? [] : s.streamEdges,
+              }));
+            },
+            onEdge: (raw) => {
+              const e = asEdgeDef(raw);
+              if (!e || !aliveRef.current) return;
+              const reset = takeFirst();
+              setState((s) => ({
+                ...s,
+                typing: false,
+                gotFrame: true,
+                streamNodes: reset ? [] : s.streamNodes,
+                streamEdges: reset ? [e] : [...s.streamEdges, e],
+              }));
+            },
           },
-          onEdge: (raw) => {
-            const e = asEdgeDef(raw);
-            if (!e || !aliveRef.current) return;
-            const reset = takeFirst();
-            setState((s) => ({
-              ...s,
-              typing: false,
-              gotFrame: true,
-              streamNodes: reset ? [] : s.streamNodes,
-              streamEdges: reset ? [e] : [...s.streamEdges, e],
-            }));
-          },
-        });
+        );
         graphRef.current = result;
         // Reconcile the stage to the authoritative validated graph, and pull the
         // persisted turns (incl. the server-written assistant change-summary).
@@ -244,6 +355,27 @@ export function BuildWithAi() {
         if (graph) {
           graphRef.current = { name: s.title ?? "Untitled workflow", graph };
         }
+        // Rebind BEFORE the state patch, and before any await.
+        //
+        // A resumed session carries its own binding, which may differ from the `?key=` that opened
+        // this screen. The patch below sets phase:"ready", which renders a live Save button — so
+        // any window in which `graphRef` holds THIS session's draft while `editingRef` still holds
+        // the PREVIOUS target is a window in which Save writes one workflow's draft as the next
+        // version of another. Resolving the name needs a round trip; the binding must not wait for
+        // it, so the key lands now and `getGraph` only upgrades the display name.
+        //
+        // `baseVersion` stays null either way, on purpose: the draft was seeded when the session
+        // OPENED, and nothing records which version that was, so the save path must treat it as
+        // possibly-stale rather than pretend today's version is its parent.
+        if (s.workflowKey) {
+          setEditing({
+            workflowKey: s.workflowKey,
+            name: s.workflowKey,
+            baseVersion: null,
+          });
+        } else {
+          setEditing(null);
+        }
         patch({
           phase: graph ? "ready" : "idle",
           messages: turnsToMessages(s),
@@ -252,51 +384,102 @@ export function BuildWithAi() {
           streamEdges: graph?.edges ?? [],
           gotFrame: false,
           error: null,
+          staleWarning: null,
+          editProblem: null,
         });
+        if (s.workflowKey) {
+          const key = s.workflowKey;
+          // Rewrite the URL so a reload agrees with the screen.
+          setSearchParams({ [EDIT_KEY_PARAM]: key }, { replace: true });
+          const g = await api.getGraph(key).catch(() => null);
+          if (g)
+            setEditing({ workflowKey: key, name: g.name, baseVersion: null });
+          else patch({ editProblem: deletedWorkflowMessage(key) });
+        } else if (editKey) {
+          setSearchParams({}, { replace: true });
+        }
       } catch {
         patch({ error: "Couldn't resume that session." });
       }
     },
-    [patch],
+    [editKey, patch, setEditing, setSearchParams],
   );
 
-  const openInCanvas = useCallback(async () => {
-    const draft = graphRef.current;
-    if (!draft) return;
-    patch({ opening: true });
-    try {
-      const key = slugifyName(draft.name);
-      await api.saveGraph(key, draft.name, draft.graph);
-      const sid = sessionRef.current;
-      if (sid) {
-        await builderApi.closeBuilderSession(sid, "saved").catch(() => {
-          /* the draft is saved either way; the session reaper handles leftovers */
+  /**
+   * Save the draft and open it in the canvas.
+   *
+   * Bound to a workflow, this is the #874 path: the save must use the workflow's OWN key so it
+   * lands as its next version — slugifying the draft name would fork a copy and leave the run
+   * history, schedules and webhook URLs behind on the original.
+   *
+   * `force` is the answer to a stale-draft warning. Without it, a bound save first re-reads the
+   * workflow and refuses when the draft can no longer be shown to descend from what's saved now.
+   */
+  const openInCanvas = useCallback(
+    async (force = false) => {
+      const draft = graphRef.current;
+      if (!draft) return;
+      const target = editingRef.current;
+      patch({ opening: true, staleWarning: null });
+      try {
+        if (target && !force) {
+          const latest = await api
+            .getGraph(target.workflowKey)
+            .catch(() => null);
+          const warning = staleWarning(target, latest);
+          if (warning) {
+            patch({ opening: false, staleWarning: warning });
+            return;
+          }
+        }
+        const save = saveTargetFor(target, draft);
+        await api.saveGraph(save.workflowKey, save.name, draft.graph);
+        const sid = sessionRef.current;
+        if (sid) {
+          await builderApi.closeBuilderSession(sid, "saved").catch(() => {
+            /* the draft is saved either way; the session reaper handles leftovers */
+          });
+        }
+        navigate(`/app/canvas?key=${encodeURIComponent(save.workflowKey)}`);
+      } catch (e) {
+        patch({
+          opening: false,
+          error:
+            e instanceof Error
+              ? e.message
+              : "Couldn't save the draft workflow.",
         });
       }
-      navigate(`/app/canvas?key=${encodeURIComponent(key)}`);
-    } catch (e) {
-      patch({
-        opening: false,
-        error:
-          e instanceof Error ? e.message : "Couldn't save the draft workflow.",
-      });
-    }
-  }, [navigate, patch]);
+    },
+    [navigate, patch],
+  );
 
   const reset = useCallback(() => {
     // Leave the old session open server-side (resumable); start fresh here.
     sessionRef.current = null;
     graphRef.current = null;
-    setState((s) => ({ ...INITIAL_BUILD_STATE, resumables: s.resumables }));
+    setState((s) => ({
+      ...INITIAL_BUILD_STATE,
+      resumables: s.resumables,
+      editing: editingRef.current,
+    }));
+    // Still bound to a workflow? "New chat" restarts the CONVERSATION, not the binding — re-read
+    // the workflow so the stage and `baseVersion` reflect what's saved right now.
+    const key = editingRef.current?.workflowKey;
+    if (key) void seedFromWorkflow(key);
     builderApi
       .listBuilderSessions()
       .then((rows) => patch({ resumables: rows }))
       .catch(() => undefined);
-  }, [patch]);
+  }, [patch, seedFromWorkflow]);
+
+  // Derived rather than stored, so it is correct from the very first render — before any effect
+  // has run and could have opened the gate a frame too late. See isBindingPending.
+  const seeding = isBindingPending(editKey, state.editing, state.editProblem);
 
   return (
     <BuildWithAiView
-      state={state}
+      state={{ ...state, seeding }}
       onSend={(t) => void send(t)}
       providerOptions={options}
       provider={provider}
@@ -304,6 +487,8 @@ export function BuildWithAi() {
       providerHint={providerSetupHint(options)}
       onResume={(id) => void resume(id)}
       onOpenInCanvas={() => void openInCanvas()}
+      onConfirmStale={() => void openInCanvas(true)}
+      onDismissStale={() => patch({ staleWarning: null })}
       onReset={reset}
     />
   );

@@ -5,6 +5,7 @@ import { ModeProvider } from "../../mode";
 import {
   type BuildWithAiState,
   BuildWithAiView,
+  INITIAL_BUILD_STATE,
 } from "./build-ai/BuildWithAiView";
 import { BuildWithAi } from "./BuildWithAi";
 import { providerOptions } from "./build-ai/providers";
@@ -23,6 +24,15 @@ const SESSIONS = [
     workflowKey: null,
     title: "Refund approval flow",
     updatedAt: new Date("2026-07-16T09:05:00Z").toISOString(),
+  },
+  // A session BOUND to a workflow — the resume list has to say so, because resuming this one
+  // means picking up an edit of a live workflow rather than a scratch draft.
+  {
+    id: "bs-2",
+    status: "open",
+    workflowKey: "nightly-report",
+    title: "Nightly report",
+    updatedAt: new Date("2026-07-15T18:20:00Z").toISOString(),
   },
 ];
 
@@ -83,6 +93,17 @@ const BUILDING: BuildWithAiState = {
   error: null,
   resumables: [],
   opening: false,
+  editing: null,
+  seeding: false,
+  editProblem: null,
+  staleWarning: null,
+};
+
+/** The workflow an edit chat is bound to (`?key=nightly-report`). */
+const EDITING = {
+  workflowKey: "nightly-report",
+  name: "Nightly report",
+  baseVersion: 3,
 };
 
 const READY: BuildWithAiState = {
@@ -124,6 +145,8 @@ const viewHandlers = {
   onSend: noop,
   onResume: noop,
   onOpenInCanvas: noop,
+  onConfirmStale: noop,
+  onDismissStale: noop,
   onReset: noop,
   providerOptions: PROVIDER_OPTIONS,
   provider: null,
@@ -159,6 +182,111 @@ export const Intro: Story = {
   render: () => <BuildWithAi />,
 };
 
+/**
+ * EDIT mode, real screen: `/app/build-ai?key=nightly-report`.
+ *
+ * `openBuilderSession({ workflowKey })` has always seeded a session's working draft from a
+ * workflow's latest saved graph — no UI ever passed a key, so it was unreachable. Arriving with
+ * `?key=` binds the chat: the saved graph is already on the stage, the banner names the workflow
+ * and the version a Save will publish, and the column asks what to CHANGE rather than what to build.
+ */
+export const EditIntro: Story = {
+  parameters: {
+    router: { initialEntries: ["/app/build-ai?key=nightly-report"] },
+    msw: {
+      handlers: [
+        http.get("*/api/builder/sessions", () => HttpResponse.json(SESSIONS)),
+        http.get("*/api/graphs/nightly-report", () =>
+          HttpResponse.json({
+            workflowKey: "nightly-report",
+            name: "Nightly report",
+            version: 3,
+            graph: {
+              startNodeId: NODES[0].id,
+              nodes: NODES,
+              edges: EDGES,
+            },
+          }),
+        ),
+      ],
+    },
+  },
+  render: () => <BuildWithAi />,
+};
+
+/**
+ * The window between `?key=` and the binding resolving.
+ *
+ * `editing` is still null here, so the ordinary intro would read "What should we automate?" at a
+ * user who just clicked "Edit with AI" — and its example chips would each fire a from-scratch
+ * build. The composer is gated (isBindingPending) and the column says only what is true yet.
+ */
+export const EditSeeding: Story = {
+  render: () => (
+    <BuildWithAiView
+      state={{ ...INITIAL_BUILD_STATE, seeding: true }}
+      {...viewHandlers}
+    />
+  ),
+};
+
+/** An edit turn landed: the CTA publishes the workflow's NEXT VERSION, not a forked copy (#874). */
+export const EditDraftReady: Story = {
+  render: () => (
+    <BuildWithAiView
+      state={{ ...READY, editing: EDITING, name: "Nightly report" }}
+      {...viewHandlers}
+    />
+  ),
+};
+
+/**
+ * The draft renamed the workflow. The edit prompt tells the model to preserve the name, but the
+ * save path is what would actually apply a drifted one — so the banner says it before Save does it.
+ */
+export const EditRenames: Story = {
+  render: () => (
+    <BuildWithAiView
+      state={{ ...READY, editing: EDITING, name: "Nightly digest" }}
+      {...viewHandlers}
+    />
+  ),
+};
+
+/**
+ * Someone saved the workflow while this chat was open. Publishing the draft would drop their
+ * change, so the Save is refused and named — the only confirm on this path.
+ */
+export const EditStaleDraft: Story = {
+  render: () => (
+    <BuildWithAiView
+      state={{
+        ...READY,
+        editing: EDITING,
+        name: "Nightly report",
+        staleWarning:
+          "“Nightly report” has been saved since this chat started (v3 → v5). Saving publishes this draft as v6, dropping those changes.",
+      }}
+      {...viewHandlers}
+    />
+  ),
+};
+
+/** `?key=` pointed at a workflow we couldn't read — say so, rather than imply an edit is bound. */
+export const EditWorkflowUnavailable: Story = {
+  render: () => (
+    <BuildWithAiView
+      state={{
+        ...INITIAL_BUILD_STATE,
+        editing: { ...EDITING, baseVersion: null },
+        editProblem:
+          "Couldn't load “nightly-report” — it may have been deleted, or belong to a different environment. Check before you save.",
+      }}
+      {...viewHandlers}
+    />
+  ),
+};
+
 /** Turn accepted, first frame not in yet — typing dots, pill = Building. */
 export const Thinking: Story = {
   render: () => <BuildWithAiView state={TYPING} {...viewHandlers} />,
@@ -192,11 +320,7 @@ export const ProviderAuto: Story = {
 /** An explicit choice — the hint names the model that will actually run. */
 export const ProviderClaudeCode: Story = {
   render: () => (
-    <BuildWithAiView
-      state={READY}
-      {...viewHandlers}
-      provider="claude-code"
-    />
+    <BuildWithAiView state={READY} {...viewHandlers} provider="claude-code" />
   ),
 };
 
