@@ -18,7 +18,7 @@
  * version, `drift` says so — the diagnosis may name a node that has since changed, and quietly
  * diffing against a version nobody is running would be worse than saying it plainly.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { buildFixInstruction, type GraphDef } from "@naary/dsl";
 import { api } from "../../lib/api";
 import { historyTimes } from "../app/run-detail/run-view-model";
@@ -37,6 +37,27 @@ interface FetchedFix {
   runVersion: number | null;
   includedNodeIds: string[];
   error: string | null;
+}
+
+/**
+ * Could the run's step outputs be READ — as distinct from the run having produced none?
+ *
+ * This conflation has now had to be fixed twice: once inside `buildFixInstruction`, which grew a
+ * `ctxAvailable` flag precisely so the caller answers it honestly, and once here, where the first
+ * version answered it with `Object.keys(ctx).length > 0` and so called every genuinely-empty run
+ * unreadable.
+ *
+ * An empty ctx means the read FAILED only when the read model says steps actually ran.
+ * `executedNodeIds` is non-empty exactly when `queryState` fell back to that stamp because it
+ * could not recover the ctx (#525) — so empty ctx + steps stamped = we lost it, while empty ctx +
+ * nothing stamped = a run that failed on its first step and legitimately produced nothing.
+ */
+export function ctxWasReadable(
+  ctx: Record<string, unknown> | undefined,
+  executedNodeIds: string[] | undefined,
+): boolean {
+  if (Object.keys(ctx ?? {}).length > 0) return true;
+  return (executedNodeIds?.length ?? 0) === 0;
 }
 
 /**
@@ -65,25 +86,35 @@ export function driftBetween(
  * `currentVersion` is the version the canvas has LOADED (null on an unsaved draft) — used only to
  * report drift, never to choose what to edit.
  *
- * DRIFT IS DERIVED AT RENDER, not captured in the effect. The effect runs on `fixRunId` alone —
- * re-running it on `currentVersion` would overwrite a prompt the user has started editing, the
- * moment the workflow finishes loading — so anything it closed over would be the value from the
- * FIRST render, when the workflow is still loading and `version` is still null. Drift would then
+ * DRIFT IS DERIVED AT RENDER, not captured in the effect. The effect must be free to re-run as
+ * the canvas loads (it waits for `currentGraph`), while a `builtFor` ref stops it rebuilding over
+ * a prompt the user has begun editing. Anything the effect closed over would therefore be a value
+ * from an early render — `currentVersion` still null, the workflow still loading — and drift would
  * never fire, which is the one case the banner exists for.
  */
 export function useFixFromRun({
   fixRunId,
+  currentGraph,
   currentVersion,
   setAiPrompt,
   setAiMode,
   setShowAi,
 }: {
   fixRunId: string | null;
+  /**
+   * The LIVE compiled canvas — the graph the fix will actually change. Undefined until the
+   * workflow has loaded and compiled, which is why the build below waits for it.
+   */
+  currentGraph: GraphDef | undefined;
   currentVersion: number | null;
   setAiPrompt: (v: string) => void;
   setAiMode: (m: "edit" | "create") => void;
   setShowAi: (v: boolean) => void;
 }): FixFromRun {
+  // The instruction is built ONCE per run, but not until `currentGraph` exists — so the effect
+  // must be allowed to re-run as the canvas loads while never rebuilding over a prompt the user
+  // has begun editing. A ref, not a dep-list omission, is what expresses that.
+  const builtFor = useRef<string | null>(null);
   const [fetched, setFetched] = useState<FetchedFix>({
     runVersion: null,
     includedNodeIds: [],
@@ -92,6 +123,13 @@ export function useFixFromRun({
 
   useEffect(() => {
     if (!fixRunId) return;
+    // Wait for the canvas to have compiled. The fix targets the CURRENT graph (decision 1), so
+    // building the description before it exists would describe the failing step as the RUN saw
+    // it — which is the stale snapshot this whole path exists to avoid editing.
+    if (!currentGraph) return;
+    // Already described this run: never rebuild over a prompt the user may have edited.
+    if (builtFor.current === fixRunId) return;
+    builtFor.current = fixRunId;
     let live = true;
 
     void (async () => {
@@ -123,20 +161,19 @@ export function useFixFromRun({
         const { errorDetail, errorHttp } = historyTimes(events);
 
         const { instruction, includedNodeIds } = buildFixInstruction({
-          // The graph to FIX is the workflow's current version — which the canvas has already
-          // loaded and compiled — not the snapshot the run executed.
-          graph: (runGraph?.graph ?? {
-            nodes: [],
-            edges: [],
-            startNodeId: "",
-          }) as GraphDef,
+          // The CURRENT canvas graph, not `runGraph.graph`. `getRunGraph` returns the SNAPSHOT the
+          // run executed, and describing the failing step from that would tell the model about a
+          // configuration that may no longer exist — while the banner claims the fix applies to
+          // the current version. The two must agree, and the current version is the one a save
+          // writes (decision 1). `runGraph` is still fetched, for its VERSION, which is what the
+          // drift warning compares.
+          graph: currentGraph,
           failedNodeId,
           error: errorDetail,
           http: errorHttp,
           ctx: runState.ctx,
-          // A closed run whose ctx we couldn't recover answers `{}`. Saying "reads no data" there
-          // would be a confident falsehood about the workflow rather than about our read.
-          ctxAvailable: Object.keys(runState.ctx ?? {}).length > 0,
+          // "Could not read the ctx" is not "the run produced no output" — see ctxWasReadable.
+          ctxAvailable: ctxWasReadable(runState.ctx, runState.executedNodeIds),
         });
 
         setAiPrompt(instruction);
@@ -162,10 +199,7 @@ export function useFixFromRun({
     return () => {
       live = false;
     };
-    // Built ONCE per run. Re-running on `currentVersion` would overwrite a prompt the user has
-    // started editing the moment the canvas finishes loading its version.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fixRunId]);
+  }, [fixRunId, currentGraph]);
 
   // Derived HERE, against the version the canvas has now — see the header. A run that executed
   // v3 of a workflow that is now v7 is the case the banner exists for, and it is only knowable

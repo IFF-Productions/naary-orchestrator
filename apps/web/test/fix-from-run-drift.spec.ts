@@ -6,7 +6,37 @@
 // be captured from the FIRST render — null, because the workflow is still loading — and the
 // warning would simply never appear. Nothing would look broken. Hence a pure function with tests.
 import { describe, expect, it } from "vitest";
-import { driftBetween } from "../src/screens/canvas/useFixFromRun";
+import {
+  ctxWasReadable,
+  driftBetween,
+} from "../src/screens/canvas/useFixFromRun";
+
+// "Could not read the run's outputs" vs "the run produced none". Getting this wrong tells the
+// model a confident falsehood about the workflow — and it has now had to be fixed twice: once
+// inside buildFixInstruction (which grew the flag for exactly this reason), and once at this call
+// site, where the first version answered it with `Object.keys(ctx).length > 0`.
+describe("ctxWasReadable", () => {
+  it("is readable when the ctx has anything in it", () => {
+    expect(ctxWasReadable({ pagerduty: { status: 200 } }, [])).toBe(true);
+  });
+
+  it("is NOT readable when the ctx is empty but steps are stamped as executed", () => {
+    // queryState falls back to the read-model stamp exactly when it could not recover the ctx
+    // (#525), so this combination is the signature of a failed read.
+    expect(ctxWasReadable({}, ["schedule", "pagerduty"])).toBe(false);
+  });
+
+  it("IS readable when nothing ran — an empty run produced nothing, and that is a fact", () => {
+    // The regression the first version had: a run that failed on its very first step has an
+    // empty ctx legitimately, and must not be described as unreadable.
+    expect(ctxWasReadable({}, [])).toBe(true);
+  });
+
+  it("survives missing fields", () => {
+    expect(ctxWasReadable(undefined, undefined)).toBe(true);
+    expect(ctxWasReadable({}, undefined)).toBe(true);
+  });
+});
 
 describe("driftBetween", () => {
   it("reports drift when the run's version differs from the canvas's", () => {

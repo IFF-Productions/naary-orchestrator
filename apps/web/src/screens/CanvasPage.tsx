@@ -258,6 +258,8 @@ export function CanvasPage() {
   // reads what the model will be told about their run and presses Generate themselves.
   const fixFromRun = useFixFromRun({
     fixRunId,
+    // The graph the fix will CHANGE — the live canvas, not the snapshot the run executed.
+    currentGraph: graph,
     currentVersion: version,
     setAiPrompt,
     setAiMode,

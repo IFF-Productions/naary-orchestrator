@@ -23,7 +23,7 @@ import {
 import { api, type ExecutionState, UnauthorizedError } from "../../lib/api";
 import { ACCENT, nodeDisplayLabel, nodeSubtitle } from "../../lib/graph-model";
 import { canDo } from "../../lib/permissions-logic";
-import { isFailure, isTerminal, runStatusUi } from "../../lib/run-status";
+import { isSystemFailure, isTerminal, runStatusUi } from "../../lib/run-status";
 import { useActiveEnvironment } from "../../lib/useActiveEnvironment";
 import {
   BELOW_DRAWER_QUERY,
@@ -766,7 +766,11 @@ function RunView({ id }: { id: string }) {
                 Needs a failed node to talk about: `currentNodeId` is the read model's
                 `failedNodeId` on a failed run (#525), and without it there is nothing to diagnose. */}
             {status &&
-              isFailure(status) &&
+              // isSystemFailure, NOT isFailure. `isFailure` is the aggregate "didn't succeed"
+              // bucket and includes `rejected` — a human declining at an approval gate, where the
+              // system did exactly what it was asked. Offering to fix a workflow because someone
+              // said no is nonsense, and the prefill would read "(no error message was recorded)".
+              isSystemFailure(status) &&
               runWorkflowKey &&
               state?.currentNodeId &&
               mayEdit && (
