@@ -49,6 +49,7 @@ import {
   nodeTimeOf,
   stepCostText,
   stepOrder,
+  stepOutputView,
   stepTokensText,
 } from "./run-detail/run-view-model";
 import { SectionTitle } from "./run-detail/shared";
@@ -484,11 +485,11 @@ function RunView({ id }: { id: string }) {
     if (!n) return null;
     const st = states[selectedId] ?? "pending";
     const sub = nodeSubtitle(n.type, n.config);
-    const hasOwnOutput = selectedId in state.ctx;
-    const isTriggerInput =
-      !hasOwnOutput &&
-      selectedId === graph?.startNodeId &&
-      state.ctx.__input !== undefined;
+    const { output, isTriggerInput, hasCtxOutput } = stepOutputView(
+      selectedId,
+      graph?.startNodeId,
+      state.ctx,
+    );
     // Slice 2: real per-step duration/cost/tokens (worker-stamped times + the node
     // output's own metered figures); pre-feature runs keep "—".
     const t = nodeTimeOf(state.nodeTimes, selectedId);
@@ -502,12 +503,9 @@ function RunView({ id }: { id: string }) {
       duration: st === "waiting" ? waitingAge : t ? fmtStepDuration(t) : null,
       cost: stepCostText(state.ctx[selectedId]),
       tokens: stepTokensText(state.ctx[selectedId]),
-      output: hasOwnOutput
-        ? state.ctx[selectedId]
-        : isTriggerInput
-          ? state.ctx.__input
-          : undefined,
+      output,
       isTriggerInput,
+      hasCtxOutput,
       // Lets the card tell a node that has no output BY DESIGN (`end`) from one whose output is
       // simply missing — see noOutputReason.
       nodeType: n.type,

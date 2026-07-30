@@ -333,3 +333,39 @@ export function edgeConditionLabel(c: EdgeCondition): string {
     return `${c.path} ${c.op}`;
   return `${c.path} ${sym}${value}`;
 }
+
+/**
+ * What the step-detail panel shows as a step's output, and how to label it.
+ *
+ * Extracted from RunDetail so it can be tested in a second rather than only through a 6-minute
+ * Playwright run — which is how the previous regression here was caught. `start` began publishing
+ * its input like every other entry node, and the old rule ("this is the trigger payload only when
+ * the node wrote NO output of its own") silently flipped the entry step's label to "Output".
+ *
+ * The two questions are genuinely separate, and conflating them is what broke:
+ *  - `isTriggerInput` — is this the ENTRY node, so its output IS the run's trigger payload? Labels
+ *    the panel. True regardless of where the value was read from.
+ *  - `hasCtxOutput` — did the value come from this node's own ctx entry? Only then is it
+ *    addressable as `<runId>/<nodeId>`.
+ */
+export function stepOutputView(
+  selectedId: string,
+  startNodeId: string | undefined,
+  ctx: Record<string, unknown>,
+): { output: unknown; isTriggerInput: boolean; hasCtxOutput: boolean } {
+  const hasCtxOutput = selectedId in ctx;
+  const isEntry = selectedId === startNodeId;
+  const isTriggerInput =
+    isEntry && (hasCtxOutput || ctx.__input !== undefined);
+  return {
+    // A node's own ctx entry wins; the entry node falls back to the run input for older runs,
+    // recorded before `start` published anything.
+    output: hasCtxOutput
+      ? ctx[selectedId]
+      : isTriggerInput
+        ? ctx.__input
+        : undefined,
+    isTriggerInput,
+    hasCtxOutput,
+  };
+}

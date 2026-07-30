@@ -46,8 +46,16 @@ export interface StepDetail {
   tokens?: string | null;
   /** The step's output from the run ctx (undefined = none yet). */
   output: unknown;
-  /** True when `output` is the run's trigger payload (the entry node). */
+  /** True when `output` is the run's trigger payload — i.e. this is the ENTRY node. Drives the
+   *  panel's label; says nothing about where the value was read from (see hasCtxOutput). */
   isTriggerInput: boolean;
+  /**
+   * Whether `output` is this node's own ctx entry, as opposed to the run's `__input` standing in
+   * for a node that wrote none. Only the former is addressable as `<runId>/<nodeId>` (the audio
+   * fetch). Undefined ⇒ assume it is a real node output (the long-standing default for every
+   * non-entry step, and what stories/fixtures get).
+   */
+  hasCtxOutput?: boolean;
   /**
    * The node's type — used ONLY to tell a node that STRUCTURALLY has no output (`end`) from one
    * whose output we expected and don't have. Deliberately not widened to "output is undefined":
@@ -275,8 +283,11 @@ export function StepDetailCard({
           <NodeOutputBody
             output={step.output}
             runId={runId}
-            // The trigger-input pseudo-step's id isn't a graph node, so don't claim it is one.
-            nodeId={step.isTriggerInput ? undefined : step.id}
+            // Only claim a node id when the output really came from that node's ctx entry.
+            // Deliberately NOT keyed on isTriggerInput any more: that now marks the ENTRY node
+            // (whose output IS the trigger payload, and IS a genuine ctx entry), so keying on it
+            // would withhold the id from a real node output.
+            nodeId={step.hasCtxOutput === false ? undefined : step.id}
           />
         )}
       </div>

@@ -102,8 +102,8 @@ test("run detail: the 'Run input' panel shows the payload that started the run",
   });
 
   // Explicitly select the Start (trigger) step. Its panel shows the entry payload as
-  // "Trigger input" — the start node writes no ctx output of its own, so the run's
-  // ctx.__input surfaces here. (Deterministic: not a race on which node is current.)
+  // "Trigger input" — the start node PUBLISHES the run input as its own output, like every
+  // other entry node. (Deterministic: not a race on which node is current.)
   await page.getByRole("button", { name: /Start/ }).click();
 
   // The redesigned run detail shows the entry payload as the trigger step's "Trigger input".
