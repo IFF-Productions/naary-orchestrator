@@ -1,4 +1,4 @@
-import { NotFoundException } from "@nestjs/common";
+import { Logger, NotFoundException } from "@nestjs/common";
 import {
   type Client,
   defaultPayloadConverter,
@@ -222,6 +222,24 @@ async function workflowNames(
  * expired object) must never 500 the run detail — fall back to the raw ctx, which the UI renders
  * gracefully (the reference stays visible as an "offloaded" marker).
  */
+/**
+ * Say WHY a run-detail read degraded, instead of degrading silently.
+ *
+ * These paths must never fail the request — a run detail that 500s is worse than one missing a
+ * figure. But "never fail" had become "never mention", and a swallowed reason is how a completed
+ * run reports every step as having produced no output while the real cause (an unreadable
+ * completion payload) leaves no trace anywhere.
+ *
+ * Kept to Nest's logger with the run id and the error only — never ctx, which holds node output.
+ */
+function logQueryFailure(where: string, runId: string, e: unknown): void {
+  new Logger("ExecutionsQueries").warn(
+    `run-detail read degraded (${where}) for ${runId}: ${
+      e instanceof Error ? e.message : String(e)
+    }`,
+  );
+}
+
 async function resolveCtxRefs(
   ctx: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
@@ -308,12 +326,25 @@ export async function queryState(
           spentUsd: costUsdFrom(r.ctx),
           perExecutionCapUsd: null, // closed — no live cap to meter against
         };
-      } catch {
+      } catch (e) {
+        // A COMPLETED run whose result we could not read. This branch used to swallow the reason
+        // and answer `ctx: {}` — indistinguishable from "the run produced no output", which is
+        // how a completed run's steps all read "No output was recorded for this step" with
+        // nothing anywhere saying why. Reported exactly that way.
+        //
+        // `handle.result()` is what fails here: the ctx IS in the completion payload (runGraph
+        // returns it), so an empty one means we could not fetch or decode that payload — history
+        // aged out past retention, a payload/codec error, a transient Temporal fault. The run
+        // detail must still render, so this stays non-fatal, but it no longer lies about why.
+        logQueryFailure("state:completed", id, e);
         return {
           status: "completed",
           currentNodeId: "",
           ctx: {},
-          executedNodeIds: [],
+          // Same recovery the Temporal-failure branch below uses (#525): the interpreter stamped
+          // which nodes ran on the read model, so the timeline still shows them DONE rather than
+          // adding a wrong "skipped" to a missing output.
+          executedNodeIds: row.executedNodeIds,
           nodeTimes: null,
           spentUsd: null,
           perExecutionCapUsd: null,
