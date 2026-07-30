@@ -262,7 +262,7 @@ silently rot.
 **Ordering note:** an `unknown` answer comes *before* the missing-Server-URL check — telling someone to
 fill in a Server URL for a provider we can't probe at all would send them to fix the wrong thing.
 
-### 2.5 Which write bodies a SPEC can vouch for — 51 of 76 (#813)
+### 2.5 Which write bodies a SPEC can vouch for — 53 of 76 (#813)
 
 A third evidence tier, between "unit-tested" and "run live": the request body an action builds,
 diffed against the provider's own OpenAPI document. `packages/dsl/test/integration-catalog-openapi.drift.spec.ts`
@@ -276,10 +276,10 @@ This does **not** replace the `Live proof` column. A spec proves the shape is *s
 anyone has ever sent it. It does close the specific hole #707 and #811 came out of: an action whose
 body could never be accepted, shipped looking exactly as trustworthy as one that works.
 
-**Spec-verified — 25 providers, 51 of the 76 body-bearing write actions:** `asana` · `box` ·
+**Spec-verified — 26 providers, 53 of the 76 body-bearing write actions:** `asana` · `box` ·
 `calendly` · `clickup` · `cloudflare` · `digitalocean` · `discord` · `front` · `github` · `gitlab` ·
 `hubspot` · `intercom` · `jira` · `mailchimp` · `mattermost` · `msgraph` · `pagerduty` · `posthog` ·
-`sendgrid` · `slack` · `stripe` · `todoist` · `twilio` · `webflow` · `zoom` — **125 body fields
+`notion` · `sendgrid` · `slack` · `stripe` · `todoist` · `twilio` · `webflow` · `zoom` — **128 body fields
 confirmed, 8 unknowable, 2 wrong (both adjudicated).**
 
 - The **8 unknowable** break down as: **5 are all of `jira.create_issue`**, whose every field lands
@@ -297,9 +297,9 @@ confirmed, 8 unknowable, 2 wrong (both adjudicated).**
   evidence, and each must STILL be produced or the test fails — an acknowledgment that stops
   matching is either a fixed catalog or a changed spec, and both deserve a look.
 
-**Not spec-verified — 10 providers plus one action of an 11th, 25 actions in total.** (`hubspot` is
-in both lists: 2 of its 3 writes are verified, `create_deal` is not — which is why 25 + 10 lands on
-35.) Grouped by why, because "we didn't check", "there is nothing to check against", and "the check
+**Not spec-verified — 9 providers plus one action of a 10th, 23 actions in total.** (`hubspot` is
+in both lists: 2 of its 3 writes are verified, `create_deal` is not — which is why 23 + 10 lands on
+33, against 26 verified providers.) Grouped by why, because "we didn't check", "there is nothing to check against", and "the check
 would lie" are three different claims:
 
 Three catalog providers send a provider-wide header that pins an API version: `notion`
@@ -339,7 +339,6 @@ the live status code, before "the spec doesn't have it" becomes "it's broken".
 | Vendor publishes **no** machine-readable REST document. Shopify's REST Admin API is legacy and only the GraphQL schema is published; the OpenAPI documents in circulation are third-party and years stale | `shopify` (3) |
 | Spec exists but is **not a fetchable document** — Airtable's is embedded in its docs page's SSR state under an `"openApi"` key, with no raw URL. Scraping HTML into a fixture would put a third party's page structure in the refresh path, which is the one thing the pinning design exists to prevent | `airtable` (2) |
 | Spec exists and documents **different endpoints than we call** | `pipedrive` (3 — the v1 document no longer contains `POST /deals`, `PUT /deals/{id}` or `POST /persons`; v2 needs a different base path, `PATCH`, and `{id}`), `sentry` (1 — only the org-scoped issue route; ours is the legacy un-scoped one) |
-| Spec exists but describes a **different API version than we pin**, so diffing it would report a working call as broken | `notion` (2 — we send `Notion-Version: 2022-06-28`; the published document is 2025-09-03, where `POST /databases/{id}/query` is superseded by data sources) |
 | Spec exists; matching needs a **path-rewrite seam** we chose not to build | `zendesk` (3 — canonicalises without the `.json` suffix our paths use). #813 set the bar at "worth doing when a second provider needs the same seam (Shopify's paths have the suffix too)"; Shopify turns out to publish no spec at all, so that bar can no longer be met and 3 actions do not justify a transform duplicated across the extractor and the drift spec, where a desync silently stops matching |
 | One action, not a provider: `hubspot.create_deal`. HubSpot's Deals document templates every path on the internal objectTypeId `0-3` and never the word `deals`. The generic Objects document has `/crm/v3/objects/{objectType}`, but binding a literal segment of ours to a placeholder of theirs would make `{}` match anything and quietly un-check every path in the file | `hubspot` (1 of 3) |
 
