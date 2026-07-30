@@ -52,6 +52,42 @@
   width: 100%;
 }
 
+/* Split button: a primary action joined to a caret that opens more options (the Re-run
+   control). Reported as "the Re-run button looks odd on mobile" — the two were two separate
+   fully-rounded pills with a hairline of background between them, which reads as a layout bug
+   rather than as one control. Nothing was mobile-specific about it; a phone just puts them
+   under a wide, sparse action row where the seam is obvious.
+
+   Joined by collapsing the inner radii and overlapping the shared border by exactly 1px, so
+   the pair has one continuous outline. `position: relative` + a raised z-index on hover/focus
+   keeps the active half's border on top, otherwise the overlap clips whichever renders second. */
+.btn-split {
+  display: inline-flex;
+}
+.btn-split > .btn:not(:last-child) {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.btn-split > .btn:not(:first-child) {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  margin-left: -1px;
+}
+.btn-split > .btn {
+  position: relative;
+}
+.btn-split > .btn:hover:not(:disabled),
+.btn-split > .btn:focus-visible {
+  z-index: 1;
+}
+/* `:active` nudges a .btn down 1px; on a split pair that shears the seam. Move as one. */
+.btn-split > .btn:active:not(:disabled) {
+  transform: none;
+}
+.btn-split:has(> .btn:active:not(:disabled)) {
+  transform: translateY(1px);
+}
+
 /* Touch targets on the wrapped context bar (<= 1024): every icon button in the bar
    gets a >= 44px hit area (hamburger, theme toggle, notifications, primary CTA). */
 @media (max-width: 1024px) {

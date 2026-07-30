@@ -365,8 +365,21 @@ export function CanvasTopBar({
       )}
       {/* `hasVerdict` is why this isn't just `issuesCount > 0`: a CLEAN dry run has no issues but
           does have something to say (what it verified, and what it couldn't — #835). Gating on the
-          count alone let the user collapse that panel and left them no control to reopen it. */}
-      {!phone && !generating && (issuesCount > 0 || hasVerdict) && (
+          count alone let the user collapse that panel and left them no control to reopen it.
+
+          SHOWN ON A PHONE TOO, unlike its neighbours. Reported as: a run failed on an unresolved
+          input, the run detail named the node and the field — and the canvas offered no way to see
+          or fix it. The lint had found it; every surface for it was just unreachable on a phone.
+          The pill was hidden here, the node's ⚠ carries its text in a `title` (a hover tooltip, so
+          nothing on touch), and the dock banner that DOES spell it out is reached by selecting the
+          node — which is what this panel's rows do. So one hidden control was hiding the whole
+          path. The neighbours stay hidden because they have another surface: validity re-appears
+          as a toast on save, and the env is on the app shell's own chip. A broken reference has
+          none, and it is the single most likely reason a saved workflow fails at run time.
+
+          It keeps the bar to one row by shrinking rather than by disappearing: `⚠ 3` on a phone
+          against "⚠ 3 issues ▼" elsewhere. */}
+      {!generating && (issuesCount > 0 || hasVerdict) && (
         <button
           type="button"
           onClick={onToggleIssues}
@@ -389,11 +402,17 @@ export function CanvasTopBar({
           style={{ border: "none", cursor: "pointer", flex: "none" }}
         >
           {issuesCount > 0
-            ? `⚠ ${issuesCount} issue${issuesCount > 1 ? "s" : ""} `
+            ? phone
+              ? `⚠ ${issuesCount}`
+              : `⚠ ${issuesCount} issue${issuesCount > 1 ? "s" : ""} `
             : verdictOk
-              ? "✓ checked "
-              : "✗ check failed "}
-          {showIssues ? "▲" : "▼"}
+              ? phone
+                ? "✓"
+                : "✓ checked "
+              : phone
+                ? "✗"
+                : "✗ check failed "}
+          {!phone && (showIssues ? "▲" : "▼")}
         </button>
       )}
 
