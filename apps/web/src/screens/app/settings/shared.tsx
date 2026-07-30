@@ -5,12 +5,18 @@ import {
   type CSSProperties,
   type ReactNode,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
 } from "react";
 import { createPortal } from "react-dom";
 import { Button } from "../../../components";
 import type { Environment } from "../../../lib/api";
+import {
+  type FixedPlacement,
+  naturalSize,
+  placeFixedPopover,
+} from "../../../lib/popoverPlacement";
 import { envAccent } from "../../../workspace/EnvironmentSwitcher";
 
 /* ---------------- Row action menu ---------------- */
@@ -29,6 +35,21 @@ export interface RowMenuItem {
  * corners) which otherwise CLIPS an in-flow absolutely-positioned menu — the bug where "Update value…"
  * was cut off inside the row on mobile. Closes on outside-click, Escape, or scroll/resize (so it can't
  * float detached from its row).
+ *
+ * ## Placement is clamped to the viewport, not just derived from the anchor (#511)
+ *
+ * `top: anchor.bottom + 4` with no clamp put the menu off the BOTTOM of a phone screen for any row
+ * near the fold — and a settings list is as long as the workspace's secret count. Measured at
+ * 390×844 on a 16-row list: menu bottom **885 / 844**, "Delete" **36px below the fold**. `fixed`
+ * does not move with page scroll, and the listener below closes on scroll, so the one gesture that
+ * would bring it into view destroyed it instead: the row's actions were unreachable, and the kebab
+ * looked broken rather than obstructed.
+ *
+ * `placeFixedPopover` now flips the menu above the row when there is no room below and clamps to
+ * every edge. It needs the menu's real height, so placement happens in a layout effect AFTER the
+ * first paint (the old code computed it inside `toggle()`, before the menu existed — where a 2-item
+ * and a 5-item menu are indistinguishable). The pre-placement frame is hidden with
+ * `visibility: hidden` so nothing is ever painted at the unclamped position.
  */
 export function RowMenu({
   label,
@@ -40,15 +61,27 @@ export function RowMenu({
   disabled?: boolean;
 }) {
   const anchorRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState<{ top: number; right: number }>({
-    top: 0,
-    right: 0,
-  });
+  const [pos, setPos] = useState<FixedPlacement | null>(null);
 
   useEffect(() => {
     if (!open) return;
-    const close = () => setOpen(false);
+    /**
+     * Scrolling INSIDE the menu must not close it. The listener is on `window` in capture phase, so
+     * it sees scroll from every descendant — and now that a tall menu gets `maxHeight` +
+     * `overflow-y: auto`, scrolling its own list would otherwise dismiss it. Same origin-guard shape
+     * as the keydown fix in #936: react only to events this element did not produce.
+     */
+    const close = (e: Event) => {
+      if (
+        e.type === "scroll" &&
+        e.target instanceof Node &&
+        menuRef.current?.contains(e.target)
+      )
+        return;
+      setOpen(false);
+    };
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
     // Capture scroll from any ancestor; close so the fixed menu can't drift off its row.
     window.addEventListener("scroll", close, true);
@@ -61,18 +94,27 @@ export function RowMenu({
     };
   }, [open]);
 
+  // Measure the RENDERED menu, then clamp. Runs before the browser paints, so the unplaced frame
+  // (still `visibility: hidden`) is never visible.
+  useLayoutEffect(() => {
+    if (!open) return;
+    const anchor = anchorRef.current?.getBoundingClientRect();
+    const menu = menuRef.current;
+    if (!anchor || !menu) return;
+    setPos(
+      placeFixedPopover(anchor, naturalSize(menu), {
+        width: window.innerWidth,
+        height: window.innerHeight,
+      }),
+    );
+  }, [open, items.length]);
+
   function toggle() {
     if (open) {
       setOpen(false);
       return;
     }
-    const r = anchorRef.current?.getBoundingClientRect();
-    if (r) {
-      setPos({
-        top: r.bottom + 4,
-        right: Math.max(8, window.innerWidth - r.right),
-      });
-    }
+    setPos(null);
     setOpen(true);
   }
 
@@ -96,11 +138,16 @@ export function RowMenu({
               onClick={() => setOpen(false)}
             />
             <div
+              ref={menuRef}
               className="menu-pop"
               style={{
                 position: "fixed",
-                top: pos.top,
-                right: pos.right,
+                top: pos?.top ?? 0,
+                left: pos?.left ?? 0,
+                visibility: pos ? "visible" : "hidden",
+                maxHeight: pos?.maxHeight,
+                maxWidth: pos?.maxWidth,
+                overflowY: "auto",
                 zIndex: 41,
                 minWidth: 150,
                 background: "var(--card)",

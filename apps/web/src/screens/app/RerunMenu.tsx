@@ -1,11 +1,13 @@
 import {
   type MouseEvent as ReactMouseEvent,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
 } from "react";
 import { Button, Icon } from "../../components";
 import { api, type GraphVersion } from "../../lib/api";
+import { shiftIntoView } from "../../lib/popoverPlacement";
 
 /** Compact relative time from an ISO timestamp (no date lib). Mirrors Runs.tsx's `ago`. */
 function ago(iso: string): string {
@@ -60,6 +62,63 @@ export function RerunMenu({
   const [busy, setBusy] = useState(false);
   const [versions, setVersions] = useState<GraphVersion[] | null>(null);
   const wrap = useRef<HTMLSpanElement>(null);
+  const menu = useRef<HTMLDivElement>(null);
+  /**
+   * Horizontal correction so the popover can't grow off the LEFT edge (#511).
+   *
+   * The menu is `right: 0` at a fixed `minWidth: 272`, which is fine wherever the anchor sits near
+   * the right of the screen — the Runs list, and every non-failed run. But a FAILED run also renders
+   * "Resume", the action row wraps on a phone, and the Re-run group ends up mid-row: measured on
+   * `screens-rundetail--failed` at 390×844, the menu landed at **left: −121**. `global.css` clamps
+   * the root with `overflow-x: hidden`, so those 121px cannot be scrolled to — the debug item and
+   * every version row lost their left third, "v4 / latest / this run" labels included. Identical at
+   * 375; fine at 1440 (left: 1140), so it is the anchor's x, not the content.
+   *
+   * A translate, not a switch to `position: fixed`: this popover lives in a scrolling list and gets
+   * row-tracking for free from being in flow. Fixed would need a scroll listener, and "closes on
+   * scroll" is the bug being fixed in `settings/shared.tsx` in the same pass.
+   */
+  const [shift, setShift] = useState(0);
+  useLayoutEffect(() => {
+    if (!open) {
+      setShift(0);
+      return;
+    }
+    const fit = () => {
+      const el = menu.current;
+      const anchor = wrap.current;
+      if (!el || !anchor) return;
+      /**
+       * Derive the UNTRANSLATED box from the anchor, never from the menu's own rect.
+       *
+       * Two wrong versions preceded this one, and both are instructive:
+       *
+       *  1. `el.style.transform = ""` then measure. That writes to the DOM behind React's back, and
+       *     when the recomputed shift equals the current one `setShift` skips the re-render — so the
+       *     correction stayed erased. The menu measured left −121 again with the fix in place.
+       *  2. Measure `el` and subtract the applied `shift`. Arithmetically sound, but it needs `shift`
+       *     in the dependency list, and the menu's rect is not a fixed function of it — translating
+       *     the menu changes an ancestor's scrollable width, which nudges layout, which yields a new
+       *     shift. Infinite loop (React error #185), and the story rendered nothing at all.
+       *
+       * The menu is `right: 0` inside `wrap`, so its untranslated right edge IS the anchor's right
+       * edge and its width is `offsetWidth` (a transform does not change either). That reads only
+       * transform-independent values, so the effect is idempotent and needs no `shift` dependency.
+       */
+      const a = anchor.getBoundingClientRect();
+      const width = el.offsetWidth;
+      setShift(
+        shiftIntoView(
+          { left: a.right - width, right: a.right },
+          { width: document.documentElement.clientWidth },
+        ),
+      );
+    };
+    fit();
+    window.addEventListener("resize", fit);
+    return () => window.removeEventListener("resize", fit);
+    // `versions` is a dependency because the list arrives async and changes the menu's size.
+  }, [open, versions]);
 
   // Close on an outside click / Escape while the menu is open.
   useEffect(() => {
@@ -153,6 +212,7 @@ export function RerunMenu({
 
       {open && (
         <div
+          ref={menu}
           role="menu"
           className="menu-pop"
           onClick={(e) => e.stopPropagation()}
@@ -160,7 +220,11 @@ export function RerunMenu({
             position: "absolute",
             top: "calc(100% + 4px)",
             right: 0,
+            transform: shift ? `translateX(${shift}px)` : undefined,
             zIndex: 30,
+            // Paired with the translate: on a viewport narrower than the menu, shifting alone can't
+            // make it fit, so cap the width too. 272px + two 8px gutters needs 288px of viewport.
+            maxWidth: "calc(100vw - 16px)",
             // Wide enough that the debug item's explanation reads as a sentence rather than a
             // column of two-word lines (the version rows never needed the room).
             minWidth: 272,
