@@ -48,6 +48,14 @@ export interface StepDetail {
   output: unknown;
   /** True when `output` is the run's trigger payload (the entry node). */
   isTriggerInput: boolean;
+  /**
+   * The node's type — used ONLY to tell a node that STRUCTURALLY has no output (`end`) from one
+   * whose output we expected and don't have. Deliberately not widened to "output is undefined":
+   * that condition is also how a run whose ctx we failed to read presents, and relabelling it
+   * "this step has no output by design" would hide a real data-loss bug behind a reassuring
+   * sentence. See the `state:completed` branch in executions.queries.ts.
+   */
+  nodeType?: string;
   /** The failure message when the run died on THIS node (#525); null otherwise. */
   error?: string | null;
   /**
@@ -56,6 +64,32 @@ export interface StepDetail {
    * call has nothing to show, and we render nothing rather than an empty shell.
    */
   http?: HttpFailure | null;
+}
+
+/**
+ * Why this step shows no output — the most specific true reason we have.
+ *
+ * The last branch is deliberately the vague one. Every case ABOVE it explains something we
+ * actually know (the branch wasn't taken, the step hasn't run, it failed first, the node has no
+ * output by design). "No output was recorded" is the honest wording for the case we cannot
+ * explain, and it must stay reachable: it is exactly what a run whose ctx we failed to read looks
+ * like, and dressing that up as a normal state would bury the bug.
+ */
+export function noOutputReason(step: StepDetail): string {
+  if (step.state === "skipped")
+    return "This step did not run — its branch was not taken.";
+  if (step.state === "pending") return "No output yet — this step hasn't run.";
+  if (step.state === "waiting")
+    return "No output yet — the run resumes here once a decision arrives.";
+  if (step.state === "error")
+    return step.http
+      ? "This step failed before producing an output — the error and the request/response it made are above."
+      : "This step failed before producing an output — see the error above and the run's Execution log.";
+  // `end` is the terminal passthrough: it has no output of its own and never will, so saying
+  // "none was recorded" reads as data loss on every single successful run.
+  if (step.nodeType === "end")
+    return "This is the end of the workflow — it produces no output of its own.";
+  return "No output was recorded for this step.";
 }
 
 /** `runId` is optional so a caller without one (stories/fixtures) still renders; it's only used
@@ -235,17 +269,7 @@ export function StepDetailCard({
         </MonoLabel>
         {step.output === undefined ? (
           <div style={{ fontSize: "var(--text-sm)", color: "var(--ink-3)" }}>
-            {step.state === "skipped"
-              ? "This step did not run — its branch was not taken."
-              : step.state === "pending"
-                ? "No output yet — this step hasn't run."
-                : step.state === "waiting"
-                  ? "No output yet — the run resumes here once a decision arrives."
-                  : step.state === "error"
-                    ? step.http
-                      ? "This step failed before producing an output — the error and the request/response it made are above."
-                      : "This step failed before producing an output — see the error above and the run's Execution log."
-                    : "No output was recorded for this step."}
+            {noOutputReason(step)}
           </div>
         ) : (
           <NodeOutputBody

@@ -8,6 +8,7 @@ import type { NodeDef } from "@naary/dsl";
 import type { NodeHandler } from "./contract";
 import {
   handlePassthroughNull,
+  handleStart,
   handleWebhookTrigger,
   handleScheduleTrigger,
   handleFormTrigger,
@@ -58,7 +59,9 @@ import { handleSendEmail, handleCode } from "./comms";
 
 export const NODE_HANDLERS: Partial<Record<NodeDef["type"], NodeHandler>> = {
   // passthrough / entry nodes
-  start: handlePassthroughNull,
+  // `start` publishes the run input as its output, like every other entry node — that is what
+  // a sub-workflow's child graph binds to. `end` is the one true no-op.
+  start: handleStart,
   end: handlePassthroughNull,
   webhookTrigger: handleWebhookTrigger,
   scheduleTrigger: handleScheduleTrigger,

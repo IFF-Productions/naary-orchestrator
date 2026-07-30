@@ -508,6 +508,9 @@ function RunView({ id }: { id: string }) {
           ? state.ctx.__input
           : undefined,
       isTriggerInput,
+      // Lets the card tell a node that has no output BY DESIGN (`end`) from one whose output is
+      // simply missing — see noOutputReason.
+      nodeType: n.type,
       // The failed node carries the run's failure detail (#525): the run died HERE, so this
       // is the node's error. Other nodes have none.
       error: st === "error" ? errorDetail : null,
