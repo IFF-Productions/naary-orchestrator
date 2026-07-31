@@ -1,9 +1,37 @@
 import type { ArgBinding } from "./core";
 
-/** Start node: an optional sample trigger input used for manual/test runs. */
-export interface StartNodeConfig {
+/**
+ * The sample trigger input every ENTRY node may declare — the payload a manual run uses when the
+ * caller supplies none (`body.input → sampleInput → {}`).
+ *
+ * It used to live on `start` alone, which meant a webhook/form/chat graph had no way to say what
+ * its real trigger sends: #982 removed the hardcoded demo payload manual runs fell back to (right —
+ * it was data no real trigger ever sent, #979), leaving those graphs with `{}` on "Run now" and no
+ * way to declare anything better (#983). One shared shape rather than a per-node copy, so a trigger
+ * added later inherits the field instead of silently missing it.
+ *
+ * Deliberately NOT on `scheduleTrigger`/`pollTrigger`. Their real trigger genuinely passes `{}`, so
+ * there is nothing to be faithful TO — and a sample there would be honored unevenly: a schedule made
+ * by `POST /schedules` reads `startSampleInput`, while the one `syncCronSchedule`/`syncPollSchedule`
+ * auto-create on save passes a literal `{}`. Offering a field that one of a graph's two schedules
+ * ignores would re-create #979's "manual run ≠ real trigger" divergence by hand. The FALLBACK rule
+ * stays uniform for every node type; schedule/poll simply never carry a sample.
+ */
+export interface TriggerSampleInputConfig {
+  /** Test payload for a manual run. The real trigger's data always wins when there is any. */
   sampleInput?: Record<string, unknown>;
 }
+
+/** Start node: the manual/API entry point — carries only the shared sample input. */
+export type StartNodeConfig = TriggerSampleInputConfig;
+
+/** Webhook trigger — the inbound request body IS its output; `sampleInput` stands in for that
+ *  body on a manual run (the case #983 was filed for). */
+export type WebhookTriggerNodeConfig = TriggerSampleInputConfig;
+
+/** Error trigger — the failing run's context (`{ failedWorkflowId, workflowKey, status, error }`)
+ *  IS its output; `sampleInput` stands in for it on a manual run. */
+export type ErrorTriggerNodeConfig = TriggerSampleInputConfig;
 
 /**
  * Schedule Trigger — an ENTRY node that makes the graph run on a cron schedule (n8n's
@@ -88,7 +116,7 @@ export interface FormBrandingConfig {
   logoAlt?: string;
 }
 
-export interface FormTriggerNodeConfig {
+export interface FormTriggerNodeConfig extends TriggerSampleInputConfig {
   title?: string;
   description?: string;
   /** Submit-button label (default "Submit"). */
@@ -112,7 +140,7 @@ export interface FormTriggerNodeConfig {
  * IS the submitted fields). The public chat page + durable per-session workflow are later slices;
  * this is just the node + its widget presentation.
  */
-export interface ChatTriggerNodeConfig {
+export interface ChatTriggerNodeConfig extends TriggerSampleInputConfig {
   /** Widget heading. */
   title?: string;
   /** Sub-heading shown under the title. */
@@ -138,7 +166,7 @@ export interface ChatTriggerNodeConfig {
  * as the graph's entry is the opt-in: without it, a workflow is NOT advertised as a per-workflow
  * MCP tool (it is still runnable via the generic `run_workflow` operator tool).
  */
-export interface McpServerTriggerNodeConfig {
+export interface McpServerTriggerNodeConfig extends TriggerSampleInputConfig {
   /**
    * The MCP tool name external agents call (sanitized to [A-Za-z0-9_-] and de-collided on the
    * server). Omitted ⇒ the server derives `run_<workflowKey>` — the same default flavor B used

@@ -15,8 +15,9 @@
  * API, the generator, activities, and tests import this file (directly or via a subpath). The
  * interpreter consumes the erased TYPES only (`import type`), never these schema VALUES.
  *
- * Coverage: every config-bearing node type has a concrete schema; the three config-less entry/exit
- * nodes (webhookTrigger, errorTrigger, end) use the permissive fallback. Each concrete schema is a
+ * Coverage: every config-bearing node type has a concrete schema; the remaining config-less
+ * structural nodes (end, noOp, retryEnd) use the permissive fallback. `webhookTrigger`/`errorTrigger`
+ * were on that fallback until #983 gave every entry node a `sampleInput`. Each concrete schema is a
  * faithful port of its interface, enforced at build time by the `Exact<…>` parity guards at the
  * bottom — a drift makes the guard resolve to `never` and fails `tsc -b`, naming the culprit.
  */
@@ -37,6 +38,7 @@ import type {
   CsvNodeConfig,
   DateTimeNodeConfig,
   EncodeNodeConfig,
+  ErrorTriggerNodeConfig,
   ExecuteSubWorkflowNodeConfig,
   FilterNodeConfig,
   ForEachNodeConfig,
@@ -81,6 +83,7 @@ import type {
   TextToSpeechNodeConfig,
   TotpNodeConfig,
   WaitNodeConfig,
+  WebhookTriggerNodeConfig,
   XmlNodeConfig,
 } from "./types";
 
@@ -167,6 +170,15 @@ const htmlExtraction = z.object({
 });
 
 /**
+ * The shared ENTRY-node sample input (zod mirror of `TriggerSampleInputConfig` — see it for why
+ * schedule/poll are excluded). Spread into each entry schema rather than copied, so the six
+ * declarations can't drift into six slightly different rules (#983, #805).
+ */
+const triggerSampleInput = {
+  sampleInput: z.record(z.string(), z.unknown()).optional(),
+};
+
+/**
  * Concrete config schema per node type. Each mirrors its hand-written `*NodeConfig` interface
  * (agent has none today — it's the flagship node whose config was fully untyped, so this is the
  * first type it gets). Enum operations use inline literal arrays so `z.enum` preserves the exact
@@ -174,11 +186,12 @@ const htmlExtraction = z.object({
  */
 const CONFIG_SCHEMAS = {
   // --- Triggers / entry ---
-  start: z.object({
-    sampleInput: z.record(z.string(), z.unknown()).optional(),
-  }),
+  start: z.object({ ...triggerSampleInput }),
+  webhookTrigger: z.object({ ...triggerSampleInput }),
+  errorTrigger: z.object({ ...triggerSampleInput }),
   scheduleTrigger: z.object({ cron: z.string() }),
   formTrigger: z.object({
+    ...triggerSampleInput,
     title: z.string().optional(),
     description: z.string().optional(),
     submitLabel: z.string().optional(),
@@ -253,6 +266,7 @@ const CONFIG_SCHEMAS = {
       .optional(),
   }),
   chatTrigger: z.object({
+    ...triggerSampleInput,
     title: z.string().optional(),
     description: z.string().optional(),
     placeholder: z.string().optional(),
@@ -261,6 +275,7 @@ const CONFIG_SCHEMAS = {
     durableSession: z.boolean().optional(),
   }),
   mcpServerTrigger: z.object({
+    ...triggerSampleInput,
     toolName: z.string().optional(),
     description: z.string().optional(),
   }),
@@ -761,8 +776,8 @@ const CONFIG_SCHEMAS = {
 } satisfies Partial<Record<NodeType, z.ZodTypeAny>>;
 
 /**
- * Fallback for the config-less nodes (webhookTrigger, errorTrigger, end): any object of config
- * keys. Keeps the schema total over NodeType so `nodeConfigSchema` never returns undefined.
+ * Fallback for the config-less structural nodes (end, noOp, retryEnd): any object of config keys.
+ * Keeps the schema total over NodeType so `nodeConfigSchema` never returns undefined.
  */
 const PERMISSIVE_CONFIG = z.record(z.string(), z.unknown());
 
@@ -894,6 +909,10 @@ export function nodeConfigJsonSchema(type: NodeType): Record<string, unknown> {
 
 // --- Derived TS types (Phase 2 points the interpreter's *NodeConfig at these) ------------------
 export type StartConfig = z.infer<typeof CONFIG_SCHEMAS.start>;
+export type WebhookTriggerConfig = z.infer<
+  typeof CONFIG_SCHEMAS.webhookTrigger
+>;
+export type ErrorTriggerConfig = z.infer<typeof CONFIG_SCHEMAS.errorTrigger>;
 export type FormTriggerConfig = z.infer<typeof CONFIG_SCHEMAS.formTrigger>;
 export type ChatTriggerConfig = z.infer<typeof CONFIG_SCHEMAS.chatTrigger>;
 export type McpServerTriggerConfig = z.infer<
@@ -965,6 +984,8 @@ type Exact<A, B> = [A] extends [B] ? ([B] extends [A] ? true : never) : never;
 
 const _configParity: {
   start: Exact<StartConfig, StartNodeConfig>;
+  webhookTrigger: Exact<WebhookTriggerConfig, WebhookTriggerNodeConfig>;
+  errorTrigger: Exact<ErrorTriggerConfig, ErrorTriggerNodeConfig>;
   scheduleTrigger: Exact<ScheduleTriggerConfig, ScheduleTriggerNodeConfig>;
   formTrigger: Exact<FormTriggerConfig, FormTriggerNodeConfig>;
   chatTrigger: Exact<ChatTriggerConfig, ChatTriggerNodeConfig>;
@@ -1020,6 +1041,8 @@ const _configParity: {
   stopAndError: Exact<StopAndErrorConfig, StopAndErrorNodeConfig>;
 } = {
   start: true,
+  webhookTrigger: true,
+  errorTrigger: true,
   scheduleTrigger: true,
   formTrigger: true,
   chatTrigger: true,

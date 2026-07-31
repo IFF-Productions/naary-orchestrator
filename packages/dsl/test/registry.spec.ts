@@ -21,8 +21,8 @@ describe("node config registry (TYPED-DSL Phase 1)", () => {
     // every config-bearing node type now has a concrete, parity-guarded schema
     for (const t of NODE_TYPES) {
       const configLess =
-        t === "webhookTrigger" ||
-        t === "errorTrigger" ||
+        // webhookTrigger/errorTrigger used to be here. #983 gave every entry node a `sampleInput`,
+        // so they now carry real (if small) config and must be schema-checked like any other.
         t === "end" ||
         t === "noOp" ||
         // `retryEnd` closes a retry region and carries nothing of its own — the attempt policy
