@@ -16,7 +16,19 @@ export type NotificationKind =
   /** A workflow definition was promoted into an environment (redesign Slice 4). Not a run
    *  event — `workflowId` carries the WORKFLOW KEY (there is no run). Sent API-side from
    *  the promote path to the TARGET env's channels; channels opt in via `onPromotion`. */
-  | "promotion";
+  | "promotion"
+  /**
+   * A self-healing FIX PROPOSAL is waiting for a decision (Phase 2). Not a run outcome — the run
+   * has already failed and reported that separately; this says a CHANGE to the workflow has been
+   * drafted and needs a human.
+   *
+   * It reuses the `onApprovalPending` channel toggle rather than introducing one, for the same
+   * reason the approval FLAVORS do: it is the same conversation — "someone has to decide
+   * something" — retold about a workflow instead of a run. Self-healing is already opt-in per
+   * workflow and off by default, so a tenant only ever receives these for a workflow they
+   * deliberately switched on.
+   */
+  | "fix_proposal";
 
 /** Sub-flavor of an `approval_pending` notification (REDESIGN-FUNCTIONALITY-GAPS.md Slice 1):
  *  undefined = the initial pause; "reminder" = a scheduled (or manual "Remind now") nudge;
@@ -106,6 +118,10 @@ export function notificationHeader(input: NotificationInput): string {
       ? `🚀 Workflow promoted to ${input.toEnv}`
       : "🚀 Workflow promoted";
   }
+  if (input.kind === "fix_proposal") {
+    // Says what it IS, not that an AI made it: the reader's decision is about the change.
+    return "🛠 A fix is proposed for a failing workflow";
+  }
   if (input.kind !== "approval_pending") return "❌ Run failed";
   if (input.flavor === "reminder") {
     return input.reminderIndex
@@ -151,6 +167,16 @@ export function notificationActions(
       actions.push({ label: "View workflow", url: links.workflowUrl });
     return actions;
   }
+  if (input.kind === "fix_proposal") {
+    // NO approve/reject buttons, deliberately — unlike a run approval. Approving writes a new
+    // version of a production workflow, and that decision is made against the DIFF, which a chat
+    // message cannot show. The one action is to go and look at it.
+    if (links.approvalUrl)
+      actions.push({ label: "Review the proposed fix", url: links.approvalUrl });
+    else if (links.workflowUrl)
+      actions.push({ label: "View workflow", url: links.workflowUrl });
+    return actions;
+  }
   if (links.runUrl) actions.push({ label: "View run", url: links.runUrl });
   return actions;
 }
@@ -191,6 +217,13 @@ export function notificationText(
     const ver = input.version !== undefined ? ` (v${input.version})` : "";
     const view = links.workflowUrl ? ` View: ${links.workflowUrl}` : "";
     return `🚀 ${wf} promoted${envs}${ver}.${view}`;
+  }
+  if (input.kind === "fix_proposal") {
+    const why = input.title ? ` after ${slackEscape(input.title)}` : "";
+    const review = links.approvalUrl ? ` Review: ${links.approvalUrl}` : "";
+    // States the guarantee in the message itself. Someone reading this in Slack should not have
+    // to wonder whether their workflow has already been changed.
+    return `🛠 A fix is proposed for ${wf}${why}. Nothing is applied until you approve it.${review}`;
   }
   const runId = slackEscape(input.workflowId);
   if (input.kind === "approval_pending") {

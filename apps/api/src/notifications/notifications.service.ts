@@ -525,6 +525,56 @@ export class NotificationsService {
     }
   }
 
+  /**
+   * Tell the tenant a self-healing fix is waiting for a decision (Phase 2).
+   *
+   * Reuses the `onApprovalPending` toggle rather than adding one, for the reason the approval
+   * FLAVORS already give: it is the same conversation — someone has to decide something — retold
+   * about a workflow instead of a run. Self-healing is opt-in per workflow and off by default, so
+   * a tenant only receives these for a workflow they deliberately switched on.
+   *
+   * BEST-EFFORT throughout. A proposal nobody was told about is still in the inbox; discarding a
+   * generated fix the tenant already paid for because Slack was down would be the wrong trade.
+   */
+  async sendFixProposal(
+    tenantId: string,
+    environmentId: string,
+    info: { workflowKey: string; failureSummary: string; proposalId: string },
+  ): Promise<{ sent: number }> {
+    try {
+      const rows = await getPrisma().notificationChannel.findMany({
+        where: {
+          tenantId,
+          environmentId,
+          enabled: true,
+          onApprovalPending: true,
+        },
+        orderBy: [{ type: "asc" }, { createdAt: "asc" }, { id: "asc" }],
+        select: { type: true, webhookUrl: true, config: true },
+      });
+      const base = resolveAppBaseUrl();
+      const links: NotificationLinks = {
+        // The INBOX, not an approve/reject link. Approving writes a new version of a production
+        // workflow and that decision is made against the diff — which a chat message can't show.
+        approvalUrl: base ? `${base}/app/fix-proposals` : undefined,
+        workflowUrl: base
+          ? `${base}/app/workflows/${encodeURIComponent(info.workflowKey)}`
+          : undefined,
+      };
+      const input: NotificationInput = {
+        kind: "fix_proposal",
+        // No run to point at — the failure was reported separately. `workflowId` carries the key,
+        // the same contract `promotion` uses.
+        workflowId: info.workflowKey,
+        workflowKey: info.workflowKey,
+        title: info.failureSummary,
+      };
+      return await this.fanOut(tenantId, rows, input, links);
+    } catch {
+      return { sent: 0 };
+    }
+  }
+
   /** Best-effort fan-out of ONE formatted notification to a set of channel rows —
    *  webhook POST or SMTP email per row, each isolated (one failure never stops the
    *  rest; mirrors the worker's posture). Returns how many channels actually sent. */
