@@ -124,7 +124,7 @@ export function buildNodeLogRows({
     )
     .map((s) => {
       const t: NodeTime | null = nodeTimeOf(nodeTimes, s.id);
-      const { output } = stepOutputView(s.id, startNodeId, ctx);
+      const { output, hasCtxOutput } = stepOutputView(s.id, startNodeId, ctx);
       const parts = [
         `${s.label} (${s.id})`,
         ...(s.duration ? [s.duration] : []),
@@ -138,6 +138,10 @@ export function buildNodeLogRows({
         nodeId: s.id,
         input: resolvedInput(nodes?.get(s.id), ctx),
         output,
+        // Only a node's OWN ctx entry is addressable as `<runId>/<nodeId>` — the entry step's
+        // fallback to the run input is not — and that address is what a textToSpeech step's audio
+        // fetch needs. Same distinction StepDetailCard draws, for the same reason.
+        hasCtxOutput,
         // A step that ran more than once (a loop iteration, a retry attempt) leaves only its LAST
         // values in ctx, so that is what both panels below show. Said plainly on the row rather
         // than presented as though it were the values for this line's timestamp.
