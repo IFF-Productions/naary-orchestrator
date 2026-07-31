@@ -123,6 +123,14 @@ export { resolveRenameKeys } from "./rename-keys";
 // Rename a node's ID, moving every reference with it (#833) — pure, so it's testable against the
 // full enumeration of reference kinds rather than spot-checked on a canvas.
 export {
+  computeRetryRegions,
+  retryBackoffMs,
+  unsafeNodeReason,
+  type ResolvedRetryPolicy,
+  type RetryRegion,
+  type RetryRegionResult,
+} from "./retry-region";
+export {
   referencedNodeIds,
   renameNode,
   type RenameNodeResult,

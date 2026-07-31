@@ -24,7 +24,11 @@ describe("node config registry (TYPED-DSL Phase 1)", () => {
         t === "webhookTrigger" ||
         t === "errorTrigger" ||
         t === "end" ||
-        t === "noOp";
+        t === "noOp" ||
+        // `retryEnd` closes a retry region and carries nothing of its own — the attempt policy
+        // lives on the `retry` node that opens it. Registering an empty schema for it would be a
+        // thing to keep in step with nothing, so it joins `end`/`noOp` on the fallback.
+        t === "retryEnd";
       expect(hasConcreteConfig(t), t).toBe(!configLess);
     }
   });

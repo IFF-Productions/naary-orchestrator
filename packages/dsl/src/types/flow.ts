@@ -62,6 +62,29 @@ export interface ExecuteSubWorkflowNodeConfig {
 /** splitOut (items model) — opens a per-item region over an upstream ARRAY. On iteration `i` the
  *  node's output IS `array[i]`; the linear region between it and its `loopEnd` runs once per item.
  *  See docs/design/ITEMS-MODEL-CURRENT-ITEM.md §0.2. */
+/**
+ * `retry` — opens a RETRY REGION. Nodes from here to its `retryEnd` repeat as a unit until an
+ * attempt completes without throwing, or `maxAttempts` is reached (then the run fails with the
+ * node's own error, never a wrapper).
+ *
+ * The field names are `NodeRetryPolicy`'s verbatim: two retry features with two vocabularies for
+ * the same four numbers would be a needless thing to learn twice.
+ */
+export interface RetryNodeConfig {
+  /** Total attempts including the first (default 3, hard ceiling 25). */
+  maxAttempts?: number;
+  /** Wait before the 2nd attempt, in seconds (default 1). */
+  initialIntervalSeconds?: number;
+  /** Multiplier applied to the wait each attempt (default 2 = exponential). */
+  backoffCoefficient?: number;
+  /** Cap on any single wait, in seconds. */
+  maxIntervalSeconds?: number;
+}
+
+/* `retryEnd` closes a retry region and carries NO config — the policy lives on the `retry` node.
+   Like `end` and `noOp` it therefore has no schema and no entry in the registry's drift map; an
+   empty schema would be a thing to keep in step with nothing. */
+
 export interface SplitOutNodeConfig {
   /** Upstream node id whose output holds (or contains, via `path`) the array to split. */
   from: string;

@@ -46,6 +46,7 @@ import type {
   MarkdownNodeConfig,
   VectorUpsertNodeConfig,
   VectorQueryNodeConfig,
+  RetryNodeConfig,
   SplitOutNodeConfig,
   LoopEndNodeConfig,
   CodeAgentNodeConfig,
@@ -579,6 +580,12 @@ const CONFIG_SCHEMAS = {
     path: z.string().optional(),
     topK: z.number().optional(),
   }),
+  retry: z.object({
+    maxAttempts: z.number().optional(),
+    initialIntervalSeconds: z.number().optional(),
+    backoffCoefficient: z.number().optional(),
+    maxIntervalSeconds: z.number().optional(),
+  }),
   splitOut: z.object({
     from: z.string(),
     path: z.string().optional(),
@@ -920,6 +927,7 @@ export type HtmlExtractConfig = z.infer<typeof CONFIG_SCHEMAS.htmlExtract>;
 export type MarkdownConfig = z.infer<typeof CONFIG_SCHEMAS.markdown>;
 export type VectorUpsertConfig = z.infer<typeof CONFIG_SCHEMAS.vectorUpsert>;
 export type VectorQueryConfig = z.infer<typeof CONFIG_SCHEMAS.vectorQuery>;
+export type RetryConfig = z.infer<typeof CONFIG_SCHEMAS.retry>;
 export type SplitOutConfig = z.infer<typeof CONFIG_SCHEMAS.splitOut>;
 export type LoopEndConfig = z.infer<typeof CONFIG_SCHEMAS.loopEnd>;
 export type CsvConfig = z.infer<typeof CONFIG_SCHEMAS.csv>;
@@ -983,6 +991,7 @@ const _configParity: {
   markdown: Exact<MarkdownConfig, MarkdownNodeConfig>;
   vectorUpsert: Exact<VectorUpsertConfig, VectorUpsertNodeConfig>;
   vectorQuery: Exact<VectorQueryConfig, VectorQueryNodeConfig>;
+  retry: Exact<RetryConfig, RetryNodeConfig>;
   splitOut: Exact<SplitOutConfig, SplitOutNodeConfig>;
   loopEnd: Exact<LoopEndConfig, LoopEndNodeConfig>;
   csv: Exact<CsvConfig, CsvNodeConfig>;
@@ -1037,6 +1046,7 @@ const _configParity: {
   markdown: true,
   vectorUpsert: true,
   vectorQuery: true,
+  retry: true,
   splitOut: true,
   loopEnd: true,
   csv: true,
