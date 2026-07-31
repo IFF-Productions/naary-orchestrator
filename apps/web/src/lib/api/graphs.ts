@@ -16,6 +16,7 @@ import {
 } from "./http";
 import type {
   DryRunResult,
+  FixProposal,
   GraphSummary,
   GraphVersion,
   N8nImportResult,
@@ -319,6 +320,43 @@ export const graphsApi = {
     return http(`/graphs/${encodeURIComponent(workflowKey)}/error-handler`, {
       method: "PUT",
       body: JSON.stringify({ errorWorkflowKey }),
+    });
+  },
+  /** Proposed fixes awaiting review (self-healing). Env-scoped like everything else. */
+  listFixProposals(status = "pending"): Promise<FixProposal[]> {
+    return http(`/fix-proposals?status=${encodeURIComponent(status)}`);
+  },
+  /** One proposal WITH the graph it proposes — the reviewer needs it to see the diff. */
+  getFixProposal(
+    id: string,
+  ): Promise<FixProposal & { proposedGraph: Record<string, unknown> }> {
+    return http(`/fix-proposals/${encodeURIComponent(id)}`);
+  },
+  /** Approve = WRITE a new workflow version. Refused if the workflow moved on since. */
+  approveFixProposal(
+    id: string,
+  ): Promise<{ status: string; appliedVersion?: number }> {
+    return http(`/fix-proposals/${encodeURIComponent(id)}/approve`, {
+      method: "POST",
+    });
+  },
+  rejectFixProposal(id: string): Promise<{ status: string }> {
+    return http(`/fix-proposals/${encodeURIComponent(id)}/reject`, {
+      method: "POST",
+    });
+  },
+  /** Is self-healing on for this workflow? Default OFF — see the SelfHealSetting schema. */
+  getSelfHeal(workflowKey: string): Promise<{ enabled: boolean }> {
+    return http(`/graphs/${encodeURIComponent(workflowKey)}/self-heal`);
+  },
+  /** Turn self-healing on/off. Requires `edit` on the workflow (enforced server-side). */
+  setSelfHeal(
+    workflowKey: string,
+    enabled: boolean,
+  ): Promise<{ enabled: boolean }> {
+    return http(`/graphs/${encodeURIComponent(workflowKey)}/self-heal`, {
+      method: "PUT",
+      body: JSON.stringify({ enabled }),
     });
   },
   // Save a compiled graph under a workflowKey (versioned + content-hashed server-side).

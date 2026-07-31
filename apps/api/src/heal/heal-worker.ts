@@ -47,6 +47,8 @@ export async function startHealWorker(deps: {
   graphs: GraphsService;
   generator: GraphGeneratorService;
   client: Client;
+  /** Tell the tenant a proposal is waiting. Optional so a test can start a worker without one. */
+  notify?: (proposalId: string) => Promise<void>;
 }): Promise<HealWorkerHandle | null> {
   if (!enabled()) {
     log.log("self-heal worker disabled (SELF_HEAL_WORKER=off)");

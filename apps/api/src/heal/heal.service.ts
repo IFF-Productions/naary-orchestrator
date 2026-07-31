@@ -29,6 +29,7 @@ import type { Principal } from "../auth/tenant.decorator";
 import { GraphsService } from "../graphs/graphs.service";
 import { GraphGeneratorService } from "../graphs/graph-generator.service";
 import { PermissionsService } from "../permissions/permissions.service";
+import { NotificationsService } from "../notifications/notifications.service";
 import { startHealWorker, type HealWorkerHandle } from "./heal-worker";
 
 export interface FixProposalView {
@@ -53,6 +54,7 @@ export class HealService implements OnModuleInit, OnModuleDestroy {
     private readonly graphs: GraphsService,
     private readonly generator: GraphGeneratorService,
     private readonly perms: PermissionsService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -65,6 +67,30 @@ export class HealService implements OnModuleInit, OnModuleDestroy {
       graphs: this.graphs,
       generator: this.generator,
       client,
+      // The real notifier. Until this was wired, `notifyProposal` only logged — so a proposal
+      // was discoverable solely by visiting the inbox, which is a poor property for a feature
+      // whose whole premise is telling you something broke.
+      notify: async (proposalId) => {
+        const row = await getPrisma().workflowFixProposal.findUnique({
+          where: { id: proposalId },
+          select: {
+            tenantId: true,
+            environmentId: true,
+            workflowKey: true,
+            failureSummary: true,
+          },
+        });
+        if (!row) return;
+        await this.notifications.sendFixProposal(
+          row.tenantId,
+          row.environmentId,
+          {
+            workflowKey: row.workflowKey,
+            failureSummary: row.failureSummary,
+            proposalId,
+          },
+        );
+      },
     });
   }
 

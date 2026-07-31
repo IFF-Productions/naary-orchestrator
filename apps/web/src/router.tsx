@@ -186,6 +186,13 @@ export const router = createRouter([
                 ...lazy(() => import("./screens/app/Approvals"), "Approvals"),
               },
               {
+                path: "fix-proposals",
+                ...lazy(
+                  () => import("./screens/app/FixProposals"),
+                  "FixProposals",
+                ),
+              },
+              {
                 path: "schedules",
                 ...lazy(() => import("./screens/app/Schedules"), "Schedules"),
               },
