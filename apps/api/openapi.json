@@ -4993,6 +4993,443 @@
         ]
       }
     },
+    "/graphs/{workflowKey}/self-heal": {
+      "get": {
+        "operationId": "HealController_get",
+        "parameters": [
+          {
+            "name": "workflowKey",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SelfHealSettingResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Is self-healing enabled for this workflow?",
+        "tags": [
+          "Heal"
+        ]
+      },
+      "put": {
+        "operationId": "HealController_set",
+        "parameters": [
+          {
+            "name": "workflowKey",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetSelfHealDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SelfHealSettingResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Turn self-healing on or off for a workflow",
+        "tags": [
+          "Heal"
+        ]
+      }
+    },
+    "/fix-proposals": {
+      "get": {
+        "operationId": "HealController_list",
+        "parameters": [
+          {
+            "name": "status",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/FixProposalResponse"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "summary": "List proposed fixes awaiting review",
+        "tags": [
+          "Heal"
+        ]
+      }
+    },
+    "/fix-proposals/{id}": {
+      "get": {
+        "operationId": "HealController_detail",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FixProposalDetailResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "summary": "One proposed fix, with the graph it proposes",
+        "tags": [
+          "Heal"
+        ]
+      }
+    },
+    "/fix-proposals/{id}/approve": {
+      "post": {
+        "operationId": "HealController_approve",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FixProposalResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Approve a proposed fix (writes a new workflow version)",
+        "tags": [
+          "Heal"
+        ]
+      }
+    },
+    "/fix-proposals/{id}/reject": {
+      "post": {
+        "operationId": "HealController_reject",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FixProposalResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Reject a proposed fix",
+        "tags": [
+          "Heal"
+        ]
+      }
+    },
     "/graphs/{workflowKey}/nodes/{nodeId}/test": {
       "post": {
         "operationId": "PinsController_test",
@@ -18691,6 +19128,174 @@
         },
         "required": [
           "policy"
+        ]
+      },
+      "SelfHealSettingResponse": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "example": false,
+            "description": "Whether a failed run of this workflow proposes a fix. Default OFF — an automatic edit to a production workflow is opt-in per workflow, per environment."
+          }
+        },
+        "required": [
+          "enabled"
+        ]
+      },
+      "SetSelfHealDto": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "example": true,
+            "description": "Turn self-healing on or off for this workflow in this environment. Requires `edit` on the workflow: it changes what happens when the workflow fails, and authorizes spending the workspace's model budget on it."
+          }
+        },
+        "required": [
+          "enabled"
+        ]
+      },
+      "FixDiffSummary": {
+        "type": "object",
+        "properties": {
+          "add": {
+            "type": "number",
+            "example": 1
+          },
+          "chg": {
+            "type": "number",
+            "example": 1
+          },
+          "del": {
+            "type": "number",
+            "example": 0
+          },
+          "total": {
+            "type": "number",
+            "example": 2
+          }
+        },
+        "required": [
+          "add",
+          "chg",
+          "del",
+          "total"
+        ]
+      },
+      "FixProposalResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "workflowKey": {
+            "type": "string",
+            "example": "pagerduty-incident-triage"
+          },
+          "runId": {
+            "type": "string",
+            "example": "exec-t-demo-ce20c38b",
+            "description": "The failed run this fix was proposed for."
+          },
+          "failureSummary": {
+            "type": "string",
+            "example": "pagerduty: Missing required header 'From'",
+            "description": "The failing step and its error. Never node OUTPUT content — that is not stored here."
+          },
+          "baseVersion": {
+            "type": "number",
+            "example": 7,
+            "description": "The version this fix was written against. Approving refuses if the workflow has moved on."
+          },
+          "diffSummary": {
+            "$ref": "#/components/schemas/FixDiffSummary"
+          },
+          "status": {
+            "type": "string",
+            "example": "pending",
+            "description": "pending | approved | rejected | applied | stale | expired"
+          },
+          "appliedVersion": {
+            "type": "number",
+            "nullable": true,
+            "example": 8
+          },
+          "createdAt": {
+            "type": "string",
+            "example": "2026-07-30T14:33:02.511Z"
+          }
+        },
+        "required": [
+          "id",
+          "workflowKey",
+          "runId",
+          "failureSummary",
+          "baseVersion",
+          "diffSummary",
+          "status",
+          "appliedVersion",
+          "createdAt"
+        ]
+      },
+      "FixProposalDetailResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "workflowKey": {
+            "type": "string",
+            "example": "pagerduty-incident-triage"
+          },
+          "runId": {
+            "type": "string",
+            "example": "exec-t-demo-ce20c38b",
+            "description": "The failed run this fix was proposed for."
+          },
+          "failureSummary": {
+            "type": "string",
+            "example": "pagerduty: Missing required header 'From'",
+            "description": "The failing step and its error. Never node OUTPUT content — that is not stored here."
+          },
+          "baseVersion": {
+            "type": "number",
+            "example": 7,
+            "description": "The version this fix was written against. Approving refuses if the workflow has moved on."
+          },
+          "diffSummary": {
+            "$ref": "#/components/schemas/FixDiffSummary"
+          },
+          "status": {
+            "type": "string",
+            "example": "pending",
+            "description": "pending | approved | rejected | applied | stale | expired"
+          },
+          "appliedVersion": {
+            "type": "number",
+            "nullable": true,
+            "example": 8
+          },
+          "createdAt": {
+            "type": "string",
+            "example": "2026-07-30T14:33:02.511Z"
+          },
+          "proposedGraph": {
+            "type": "object",
+            "description": "The graph this fix proposes, exactly as approving would save it — so a reviewer can diff it against the current version before deciding."
+          }
+        },
+        "required": [
+          "id",
+          "workflowKey",
+          "runId",
+          "failureSummary",
+          "baseVersion",
+          "diffSummary",
+          "status",
+          "appliedVersion",
+          "createdAt",
+          "proposedGraph"
         ]
       },
       "StartExecutionDto": {
