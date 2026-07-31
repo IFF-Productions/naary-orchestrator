@@ -103,6 +103,38 @@ describe("approve — the happy path", () => {
   });
 });
 
+describe("approve — the CONCURRENT case", () => {
+  it("refuses when another reviewer has already claimed the proposal", async () => {
+    // The race review caught. Both callers read `status === "pending"`, so the read-then-write
+    // check passes for both — and one proposal produced TWO workflow versions. The claim is a
+    // compare-and-set (`updateMany … where status:'pending'`), so exactly one caller can win, and
+    // `count` is how it knows. My original test only covered the SEQUENTIAL case, which says
+    // nothing about this.
+    updateMany.mockResolvedValueOnce({ count: 0 }); // someone else claimed it first
+    const { svc, upsert } = makeService({ latestVersion: 7 });
+
+    await expect(svc.approve(TENANT, "p-1")).rejects.toBeInstanceOf(
+      ConflictException,
+    );
+    expect(upsert).not.toHaveBeenCalled();
+  });
+
+  it("hands the proposal back when the save is REFUSED", async () => {
+    // Most often by the `edit` gate — which is the point of routing through it. The row must not
+    // be stranded in `applying`, or the proposal becomes permanently un-actionable.
+    const upsert = vi.fn().mockRejectedValue(new Error("forbidden"));
+    const { svc } = makeService({ latestVersion: 7, upsert });
+
+    await expect(svc.approve(TENANT, "p-1")).rejects.toThrow("forbidden");
+    expect(updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "p-1", status: "applying" },
+        data: { status: "pending" },
+      }),
+    );
+  });
+});
+
 describe("approve — what must NOT write", () => {
   it("refuses when the workflow has moved on, and marks the proposal stale", async () => {
     // The core safety property. Someone edited the workflow to v9 while the proposal sat.

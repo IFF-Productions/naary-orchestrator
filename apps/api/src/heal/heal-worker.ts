@@ -74,7 +74,14 @@ export async function startHealWorker(deps: {
       maxConcurrentActivityTaskExecutions: 2,
       maxConcurrentWorkflowTaskExecutions: 4,
     });
-    void worker.run().catch((err: unknown) => {
+    // KEEP the run promise. `Worker.shutdown()` returns void — it only SIGNALS shutdown — and
+    // `run()` is what resolves once the worker has actually drained. Discarding it (the first
+    // version did) meant `shutdown()` closed the connection while the worker could still be
+    // polling on it, which is a shutdown-time error for something that had nothing wrong with it.
+    //
+    // (Review flagged this as "shutdown() returns a promise you didn't await". It doesn't — the
+    // SDK types it `shutdown(): void`. The concern was right and the fix is a different one.)
+    const running = worker.run().catch((err: unknown) => {
       log.error(
         `self-heal worker stopped: ${err instanceof Error ? err.message : String(err)}`,
       );
@@ -83,6 +90,7 @@ export async function startHealWorker(deps: {
     return {
       async shutdown() {
         worker.shutdown();
+        await running;
         await connection.close().catch(() => undefined);
       },
     };

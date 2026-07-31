@@ -206,19 +206,52 @@ export class HealService implements OnModuleInit, OnModuleDestroy {
       select: { name: true },
     });
 
+    // CLAIM THE PROPOSAL BEFORE WRITING ANYTHING.
+    //
+    // The first version read `status === "pending"`, wrote the version, and only THEN recorded the
+    // decision — so two reviewers clicking at once both read pending, both called upsert(), and one
+    // proposal produced two workflow versions. My own test covered "already decided is refused",
+    // which is the sequential case and says nothing about the concurrent one; review caught it.
+    //
+    // `updateMany` with `status: "pending"` in the WHERE is a compare-and-set: exactly one caller
+    // can transition the row, and `count` says whether it was us. The intermediate `applying` state
+    // exists so a crash between here and the save leaves a row that is visibly stuck rather than
+    // one that looks decided.
+    const claimed = await getPrisma().workflowFixProposal.updateMany({
+      where: { id, status: "pending" },
+      data: { status: "applying" },
+    });
+    if (claimed.count !== 1) {
+      throw new ConflictException(
+        "Someone else is deciding this proposal right now — reload to see the outcome.",
+      );
+    }
+
     // The real save path: `edit` gate, content hash, version increment, savedBy. Nothing about
     // authorization is decided here — it is decided there, by the same code a manual save uses.
-    const saved = await this.graphs.upsert(
-      tenantId,
-      row.environmentId,
-      row.workflowKey,
-      named?.name ?? row.workflowKey,
-      row.proposedGraph as unknown as GraphDef,
-      actor,
-      `Self-healing fix for run ${row.runId}`,
-    );
+    let saved: { version: number };
+    try {
+      saved = await this.graphs.upsert(
+        tenantId,
+        row.environmentId,
+        row.workflowKey,
+        named?.name ?? row.workflowKey,
+        row.proposedGraph as unknown as GraphDef,
+        actor,
+        `Self-healing fix for run ${row.runId}`,
+      );
+    } catch (err) {
+      // The save was refused — most often by the `edit` gate, which is the point of routing
+      // through it. Hand the row back so the proposal stays actionable instead of stranded in
+      // `applying` forever.
+      await getPrisma().workflowFixProposal.updateMany({
+        where: { id, status: "applying" },
+        data: { status: "pending" },
+      });
+      throw err;
+    }
 
-    await this.close(id, "applied", actor, saved.version);
+    await this.finalize(id, "applied", actor, saved.version);
     await this.signal(healWorkflowId(row.runId), {
       approved: true,
       by: actorName(actor),
@@ -256,6 +289,24 @@ export class HealService implements OnModuleInit, OnModuleDestroy {
       throw new NotFoundException("Proposal not found");
     }
     return row;
+  }
+
+  /** Record the outcome of a proposal this caller has already CLAIMED (status `applying`). */
+  private async finalize(
+    id: string,
+    status: string,
+    actor?: Principal,
+    appliedVersion?: number,
+  ): Promise<void> {
+    await getPrisma().workflowFixProposal.updateMany({
+      where: { id, status: "applying" },
+      data: {
+        status,
+        decidedBy: actorName(actor),
+        decidedAt: new Date(),
+        ...(appliedVersion !== undefined ? { appliedVersion } : {}),
+      },
+    });
   }
 
   private async close(

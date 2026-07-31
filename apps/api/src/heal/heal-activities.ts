@@ -79,14 +79,35 @@ export function makeHealActivities(deps: {
       const { tenantId, environmentId, workflowKey, runId } = input;
       if (!environmentId || !workflowKey) return null;
 
-      // DEDUPE FIRST, before spending anything. The unique index makes this authoritative rather
-      // than advisory, but checking here means the common case (a schedule failing every 5
-      // minutes) never reaches the model at all.
       const signature = healFailureSignature({
         failedNodeId: input.failedNodeId,
         failureKind: input.failureKind,
         message: input.failureMessage ?? null,
       });
+
+      // DEDUPE BEFORE SPENDING ANYTHING. The partial unique index is the authority — it is what
+      // makes the guarantee hold under a race — but relying on it alone means every duplicate
+      // failure still pays for a model call and only gets rejected at INSERT. For a workflow
+      // failing every 5 minutes that is the entire cost the dedupe exists to avoid.
+      //
+      // (The first version had this comment above the signature and no query beneath it, so it
+      // described behaviour the code did not have. Review caught it.)
+      const open = await getPrisma().workflowFixProposal.findFirst({
+        where: {
+          tenantId,
+          environmentId,
+          workflowKey,
+          failureSignature: signature,
+          status: { in: ["pending", "applying"] },
+        },
+        select: { id: true },
+      });
+      if (open) {
+        log.log(
+          `heal: ${workflowKey} already has an open proposal for this failure; not generating another`,
+        );
+        return null;
+      }
 
       const current = await graphs.getLatest(
         tenantId,
@@ -161,13 +182,17 @@ export function makeHealActivities(deps: {
         });
         return { id: row.id };
       } catch (err) {
-        // The partial unique index refused a second PENDING proposal for this signature — which is
-        // the dedupe working, not an error. Another failure of the same kind raced us here.
-        log.log(
-          `heal: a pending proposal already exists for ${workflowKey} (${signature.slice(0, 60)}…)`,
-        );
-        void err;
-        return null;
+        // ONLY a unique-constraint violation means "the dedupe raced us", and only that is safe to
+        // treat as success. Swallowing every error here would turn a DB outage into a silent
+        // "nothing to propose" — a generated fix the tenant already paid for, dropped without a
+        // trace. Anything else rethrows so the activity retries and the failure is visible.
+        if ((err as { code?: string }).code === "P2002") {
+          log.log(
+            `heal: a pending proposal already exists for ${workflowKey} (${signature.slice(0, 60)}…)`,
+          );
+          return null;
+        }
+        throw err;
       }
     },
 
