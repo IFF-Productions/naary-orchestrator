@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { pickWorkflow } from "./workflow-picker";
+import { openDialogWith, pickWorkflow } from "./workflow-picker";
 
 // After registering a webhook, the Integrations screen shows the one-time secret
 // AND a ready-to-run signed curl (Slice: in-UI "how to trigger" docs).
@@ -7,7 +7,8 @@ test("registering a webhook shows a copy-run signed curl", async ({ page }) => {
   await page.goto("/app/integrations?tab=webhooks");
 
   // The registration form lives in a dialog now — "New webhook" opens it ("Register a webhook").
-  await page.getByRole("button", { name: "New webhook" }).click();
+  // Opened through the helper because a click can land before React binds the handler; see there.
+  await openDialogWith(page, "New webhook", "Register a webhook");
 
   // register against the seeded "default" workflow — CHOSEN from the picker of saved workflows
   // (no more typing a raw key). The picker is a filterable combobox, so this also can't collide

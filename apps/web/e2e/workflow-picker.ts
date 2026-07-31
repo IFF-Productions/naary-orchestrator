@@ -59,3 +59,34 @@ export async function expectWorkflowOffered(page: Page, workflowKey: string) {
     page.locator(`[role="option"][data-workflow-key="${workflowKey}"]`),
   ).toHaveCount(1);
 }
+
+/**
+ * Open a dialog that CONTAINS a workflow picker, and don't continue until it is actually open.
+ *
+ * `click()` waits for actionability — visible, stable, receives events — but not for React to have
+ * BOUND a handler to the button. A click that lands in that window is a silent no-op: the dialog
+ * never opens, and the next assertion waits its full budget for a picker that was never mounted.
+ * It fails with `element(s) not found`, which points at the picker; the picker is fine.
+ *
+ * That is exactly how it presented on main: `webhook-howto` failed and `session-fixes` was FLAKY —
+ * same helper, same symptom, one of them passing on retry. 60 other specs passed, so nothing was
+ * broken; the click was simply early.
+ *
+ * So: click, confirm the dialog, and click ONCE more if it didn't open. A retry rather than a
+ * longer timeout, because waiting longer does not deliver a click that never registered.
+ */
+export async function openDialogWith(
+  page: Page,
+  trigger: string,
+  dialogTitle: string,
+): Promise<void> {
+  const title = page.getByText(dialogTitle, { exact: true });
+  await page.getByRole("button", { name: trigger }).click();
+  try {
+    await expect(title).toBeVisible({ timeout: 5_000 });
+  } catch {
+    // The first click was swallowed. One retry, then let the assertion speak for itself.
+    await page.getByRole("button", { name: trigger }).click();
+    await expect(title).toBeVisible({ timeout: 10_000 });
+  }
+}
