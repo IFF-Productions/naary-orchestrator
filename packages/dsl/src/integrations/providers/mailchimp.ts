@@ -1,0 +1,171 @@
+// ── Mailchimp (base = the CONNECTION's serverUrl, i.e. https://{dc}.api.mailchimp.com/3.0
+//    for the API key's datacenter; auth = the API key as a Bearer. `ping` is the probe) ─
+import type { IntegrationProvider } from "../types";
+
+export const MAILCHIMP: IntegrationProvider = {
+  key: "mailchimp",
+  label: "Mailchimp",
+  baseUrlFromConnection: true,
+  authScheme: "bearer",
+  description:
+    "Manage Mailchimp audiences — add/get/update list members, list members, create a campaign.",
+  auth: "A custom connection whose Server URL is https://{dc}.api.mailchimp.com/3.0 (dc = the datacenter suffix of your API key, e.g. us19) and whose token is your Mailchimp API key (sent as a Bearer token).",
+  actions: [
+    {
+      key: "add_member",
+      label: "Add member",
+      description: "Add a member to a list (audience).",
+      method: "POST",
+      pathTemplate: "/lists/{listId}/members",
+      write: true,
+      fields: [
+        {
+          key: "listId",
+          label: "List id",
+          in: "path",
+          required: true,
+          hint: "the audience/list id",
+        },
+        {
+          key: "email_address",
+          label: "Email address",
+          in: "body",
+          required: true,
+        },
+        {
+          key: "status",
+          label: "Status",
+          in: "body",
+          required: true,
+          hint: "subscribed | pending | unsubscribed | cleaned",
+        },
+        {
+          key: "merge_fields",
+          label: "Merge fields (JSON)",
+          in: "body",
+          required: false,
+          type: "json",
+          hint: "merge tag values, e.g. { FNAME, LNAME }",
+        },
+      ],
+    },
+    {
+      key: "get_member",
+      label: "Get member",
+      description: "Fetch a single list member by subscriber hash.",
+      method: "GET",
+      pathTemplate: "/lists/{listId}/members/{subscriberHash}",
+      write: false,
+      fields: [
+        { key: "listId", label: "List id", in: "path", required: true },
+        {
+          key: "subscriberHash",
+          label: "Subscriber hash",
+          in: "path",
+          required: true,
+          hint: "MD5 hash of the lowercase email address",
+        },
+      ],
+    },
+    {
+      key: "update_member",
+      label: "Update member",
+      description: "Update a list member's status or merge fields.",
+      method: "PATCH",
+      pathTemplate: "/lists/{listId}/members/{subscriberHash}",
+      write: true,
+      fields: [
+        { key: "listId", label: "List id", in: "path", required: true },
+        {
+          key: "subscriberHash",
+          label: "Subscriber hash",
+          in: "path",
+          required: true,
+        },
+        {
+          key: "status",
+          label: "Status",
+          in: "body",
+          required: false,
+          hint: "subscribed | pending | unsubscribed | cleaned",
+        },
+        {
+          key: "merge_fields",
+          label: "Merge fields (JSON)",
+          in: "body",
+          required: false,
+          type: "json",
+        },
+      ],
+    },
+    {
+      key: "list_members",
+      label: "List members",
+      description: "List members of a list, optionally filtered by status.",
+      method: "GET",
+      pathTemplate: "/lists/{listId}/members",
+      write: false,
+      fields: [
+        { key: "listId", label: "List id", in: "path", required: true },
+        {
+          key: "status",
+          label: "Status",
+          in: "query",
+          required: false,
+          hint: "subscribed | pending | unsubscribed | cleaned",
+        },
+        {
+          key: "count",
+          label: "Count",
+          in: "query",
+          required: false,
+          type: "number",
+        },
+      ],
+    },
+    {
+      key: "create_campaign",
+      label: "Create campaign",
+      description: "Create a new campaign.",
+      method: "POST",
+      pathTemplate: "/campaigns",
+      write: true,
+      fields: [
+        {
+          key: "type",
+          label: "Type",
+          in: "body",
+          required: true,
+          hint: "regular | plaintext | rss | variate",
+        },
+        {
+          key: "recipients",
+          label: "Recipients (JSON)",
+          in: "body",
+          required: false,
+          type: "json",
+          hint: '{ "list_id": "…" }',
+        },
+        {
+          key: "settings",
+          label: "Settings (JSON)",
+          in: "body",
+          required: false,
+          type: "json",
+          hint: "{ subject_line, from_name, reply_to, … }",
+        },
+      ],
+    },
+    {
+      key: "ping",
+      label: "Ping (health check)",
+      description:
+        "Mailchimp's own API health check. Needs no arguments, so it is the connection check — and it also proves the data-centre Server URL is the right one.",
+      method: "GET",
+      pathTemplate: "/ping",
+      write: false,
+      probe: true,
+      fields: [],
+    },
+  ],
+};

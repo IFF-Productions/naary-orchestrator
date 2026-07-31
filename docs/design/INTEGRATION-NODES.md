@@ -57,7 +57,7 @@ Fields are resolved in the **workflow** (graph-traversal, deterministic) exactly
 key with `getByPath(ctx[from], path)`. The activity receives a plain resolved-fields object —
 no ctx, no secrets.
 
-## 2. The catalog (`packages/dsl/src/integrations.ts`)
+## 2. The catalog (`packages/dsl/src/integrations/`, re-exported by `integrations.ts`)
 
 ```ts
 interface IntegrationField {

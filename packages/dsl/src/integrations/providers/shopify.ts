@@ -1,0 +1,156 @@
+// ── Shopify (base = the CONNECTION's serverUrl, i.e. the store's Admin API base; auth =
+//    the raw token in an `X-Shopify-Access-Token` header, not a Bearer (#655)) ─────────
+import type { IntegrationProvider } from "../types";
+
+export const SHOPIFY: IntegrationProvider = {
+  key: "shopify",
+  label: "Shopify",
+  baseUrlFromConnection: true,
+  authScheme: { header: "X-Shopify-Access-Token" },
+  description:
+    "Manage a Shopify store's Admin API — read/create/update products and create orders.",
+  auth: "A custom connection whose Server URL is your store's Admin API base (https://{shop}.myshopify.com/admin/api/2024-01) and whose token is a Shopify Admin API access token — sent as the `X-Shopify-Access-Token` header (#655).",
+  actions: [
+    {
+      key: "get_product",
+      label: "Get product",
+      description: "Fetch a single product by id.",
+      method: "GET",
+      pathTemplate: "/products/{productId}.json",
+      write: false,
+      fields: [
+        { key: "productId", label: "Product id", in: "path", required: true },
+      ],
+    },
+    {
+      key: "list_products",
+      label: "List products",
+      description: "List products, optionally filtered by vendor or limited.",
+      method: "GET",
+      pathTemplate: "/products.json",
+      write: false,
+      fields: [
+        {
+          key: "limit",
+          label: "Limit",
+          in: "query",
+          required: false,
+          type: "number",
+          hint: "max products to return (default 50, max 250)",
+        },
+        { key: "vendor", label: "Vendor", in: "query", required: false },
+      ],
+    },
+    {
+      key: "create_product",
+      label: "Create product",
+      description: "Create a new product (wrapped in the product envelope).",
+      method: "POST",
+      pathTemplate: "/products.json",
+      write: true,
+      fields: [
+        {
+          key: "title",
+          label: "Title",
+          in: "body",
+          required: true,
+          bodyPath: "product.title",
+        },
+        {
+          key: "bodyHtml",
+          label: "Description (HTML)",
+          in: "body",
+          required: false,
+          bodyPath: "product.body_html",
+        },
+        {
+          key: "vendor",
+          label: "Vendor",
+          in: "body",
+          required: false,
+          bodyPath: "product.vendor",
+        },
+        {
+          key: "productType",
+          label: "Product type",
+          in: "body",
+          required: false,
+          bodyPath: "product.product_type",
+        },
+      ],
+    },
+    {
+      key: "update_product",
+      label: "Update product",
+      description: "Update an existing product by id (product envelope).",
+      method: "PUT",
+      pathTemplate: "/products/{productId}.json",
+      write: true,
+      fields: [
+        { key: "productId", label: "Product id", in: "path", required: true },
+        {
+          key: "title",
+          label: "Title",
+          in: "body",
+          required: false,
+          bodyPath: "product.title",
+        },
+        {
+          key: "bodyHtml",
+          label: "Description (HTML)",
+          in: "body",
+          required: false,
+          bodyPath: "product.body_html",
+        },
+        {
+          key: "vendor",
+          label: "Vendor",
+          in: "body",
+          required: false,
+          bodyPath: "product.vendor",
+        },
+        {
+          key: "productType",
+          label: "Product type",
+          in: "body",
+          required: false,
+          bodyPath: "product.product_type",
+        },
+      ],
+    },
+    {
+      key: "create_order",
+      label: "Create order",
+      description: "Create a new order (wrapped in the order envelope).",
+      method: "POST",
+      pathTemplate: "/orders.json",
+      write: true,
+      fields: [
+        {
+          key: "lineItems",
+          label: "Line items (JSON)",
+          in: "body",
+          required: true,
+          type: "json",
+          bodyPath: "order.line_items",
+          hint: "array of { variant_id, quantity } or { title, price, quantity }",
+        },
+        {
+          key: "email",
+          label: "Customer email",
+          in: "body",
+          required: false,
+          bodyPath: "order.email",
+        },
+        {
+          key: "financialStatus",
+          label: "Financial status",
+          in: "body",
+          required: false,
+          bodyPath: "order.financial_status",
+          hint: "e.g. paid | pending",
+        },
+      ],
+    },
+  ],
+};

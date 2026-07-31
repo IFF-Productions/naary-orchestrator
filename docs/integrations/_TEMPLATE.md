@@ -17,7 +17,7 @@ from what the `integration` node actually sends over the wire.
 
 | Section | Source | Hand-editable |
 | --- | --- | --- |
-| Frontmatter | `packages/dsl/src/integrations.ts` + prose | no |
+| Frontmatter | `packages/dsl/src/integrations/` + prose | no |
 | `# Title` + lede | prose `tagline` | via prose |
 | **Before you start** | prose (`credentialName`, `scopes`) + catalog (`authScheme`, `baseUrl`) | partly |
 | **Get your credentials** | prose `steps` | via prose |
@@ -79,7 +79,10 @@ emits those and will keep them correct. If a gotcha is really a catalog bug, fix
 
 ## Adding a provider
 
-1. Add the provider to `packages/dsl/src/integrations.ts` (actions, fields, `write` flags, auth).
+1. Add `packages/dsl/src/integrations/providers/{provider}.ts` (actions, fields, `write` flags,
+   auth) and list it in `packages/dsl/src/integrations/catalog.ts` — where it goes in that object
+   literal is where its tile lands in the palette and its row in the README index, so place it
+   deliberately rather than sorting.
 2. Add an `INTEGRATION_PROSE` entry — the generator **fails** without one, on the grounds that an
    integration nobody can set up is not shipped.
 3. Run `pnpm gen:integration-docs`. It writes the page and updates the README index.
