@@ -50,21 +50,38 @@ function embed(v: unknown): string {
 export function resolveTemplateString(
   s: string,
   ctx: Record<string, unknown>,
+  keepLiteral?: KeepLiteral,
 ): unknown {
   if (!s.includes("{{")) return s; // fast path: no tokens
+  const keep = (ref: string) =>
+    isSecretRef(ref) || (keepLiteral?.(ref) ?? false);
   const whole = WHOLE_RE.exec(s);
   if (whole) {
     const path = whole[1].trim();
     // Leave a whole-string `{{ $secrets.NAME }}` LITERAL — the activity resolves it in-memory.
-    return isSecretRef(path) ? s : getByPath(ctx, path);
+    return keep(path) ? s : getByPath(ctx, path);
   }
   return s.replace(EMBED_RE, (match, path?: string) => {
     if (match === "\\{{") return "{{";
     const ref = (path ?? "").trim();
     // Preserve embedded `{{ $secrets.NAME }}` verbatim (only the activity may resolve it).
-    return isSecretRef(ref) ? match : embed(getByPath(ctx, ref));
+    return keep(ref) ? match : embed(getByPath(ctx, ref));
   });
 }
+
+/**
+ * "Leave this reference alone" — an OPT-IN extension of the `$secrets` rule above.
+ *
+ * `$secrets` is unconditional: the runtime never resolves it, so neither does this. A caller may
+ * additionally decline to resolve other references, and the distinction that matters is between
+ * "resolved to nothing" and "not resolved at all". Blanking a reference the caller simply chose not
+ * to disclose would show an empty value where a real one existed — a confident falsehood about the
+ * run. Keeping the token literal says what is true: this was not filled in here.
+ *
+ * The one caller today is the fix diagnosis (`run-diagnosis.ts`), which resolves a failing step's
+ * config for a model but declines `$vars` and run bookkeeping.
+ */
+export type KeepLiteral = (ref: string) => boolean;
 
 /** A located `{{ path }}` token — for AUTHORING tools (syntax highlighting / autocomplete). */
 export interface TemplateToken {
@@ -105,17 +122,23 @@ export function templateTokens(s: string): TemplateToken[] {
 export function resolveTemplates<T>(
   config: T,
   ctx: Record<string, unknown>,
+  /** Optional extra "don't resolve this" rule — see {@link KeepLiteral}. */
+  keepLiteral?: KeepLiteral,
 ): T {
-  return walk(config, ctx) as T;
+  return walk(config, ctx, keepLiteral) as T;
 }
 
-function walk(v: unknown, ctx: Record<string, unknown>): unknown {
-  if (typeof v === "string") return resolveTemplateString(v, ctx);
-  if (Array.isArray(v)) return v.map((x) => walk(x, ctx));
+function walk(
+  v: unknown,
+  ctx: Record<string, unknown>,
+  keepLiteral?: KeepLiteral,
+): unknown {
+  if (typeof v === "string") return resolveTemplateString(v, ctx, keepLiteral);
+  if (Array.isArray(v)) return v.map((x) => walk(x, ctx, keepLiteral));
   if (v && typeof v === "object") {
     const out: Record<string, unknown> = {};
     for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
-      out[k] = walk(val, ctx);
+      out[k] = walk(val, ctx, keepLiteral);
     }
     return out;
   }

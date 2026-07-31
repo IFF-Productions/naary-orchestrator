@@ -41,9 +41,11 @@ const STAGE_LABEL: Partial<Record<FixStage, string>> = {
  * The "this came from a failed run" header.
  *
  * It names what is about to leave the tenant. The prompt below is going to a model and it carries
- * the failing step's configuration and the outputs of the steps it read — so the steps are LISTED
- * rather than counted. "Includes output from 2 steps" is not something a user can check; "includes
- * output from pagerduty, lookup" is, and the prompt is right there to read in full.
+ * the failing step's configuration, the run's trigger input, and the output of EVERY step that ran
+ * — so the steps are LISTED rather than counted. "Includes output from 9 steps" is not something a
+ * user can check; "includes output from pagerduty, lookup, …" is, and the prompt is right there to
+ * read in full. That listing matters more now than it did when only the steps the failing one read
+ * were sent: the set is larger, so the sentence has to stay literally true about it.
  */
 function FixNoticeBanner({
   notice,
@@ -130,9 +132,10 @@ function FixNoticeBanner({
 
       {notice.includedNodeIds.length > 0 && (
         <div style={{ marginTop: 5 }}>
-          Sends this workflow, the failing step and its error, plus output from{" "}
+          Sends this workflow, the failing step and its error, the input that
+          started the run, and output from{" "}
           <span className="mono">{notice.includedNodeIds.join(", ")}</span> —
-          the steps it reads from. No other step output, variables or secrets.
+          every step that ran. No variables or secrets.
         </div>
       )}
     </div>

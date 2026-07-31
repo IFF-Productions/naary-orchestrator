@@ -56,11 +56,22 @@ Failure kind: provider_error
 Error: Missing required header 'From'
 
 That node's current configuration:
-{"provider":"pagerduty","action":"createIncident"}
+{"provider":"pagerduty","action":"createIncident","title":"{{ lookup.body.titel }}","auth":"{{ $secrets.PD_TOKEN }}"}
+
+The same configuration AS IT RAN, with this run's values filled in (\`{{ $secrets… }}\` and \`{{ $vars… }}\` are deliberately left unresolved):
+{"provider":"pagerduty","action":"createIncident","title":"","auth":"{{ $secrets.PD_TOKEN }}"}
+
+The input that started this run:
+  {"source":"cron"}
 
 The call that node made (secrets already redacted at capture):
   request: POST https://api.pagerduty.com/incidents
-  response: 400 Bad Request`;
+  response: 400 Bad Request
+
+Every step that ran in this run, the ones this node reads from first:
+  lookup: {"status":200,"body":{"title":"Disk full on web-03"}}
+  schedule: {"firedAt":"2026-07-31T14:22:03.000Z"}
+  crm_fetch: {"account":"acme","tier":"enterprise"}`;
 
 const meta: Meta<typeof Harness> = {
   title: "Canvas/AiPromptPanel",
@@ -89,8 +100,13 @@ export const Applying: Story = {
 
 /**
  * Arrived from a FAILED run (`?fix=<runId>`): the failure is already written up, and the header
- * NAMES the steps whose output goes with it. A count ("output from 2 steps") is not something a
+ * NAMES the steps whose output goes with it. A count ("output from 3 steps") is not something a
  * user can check; a list is, and the prompt itself is right there to read in full.
+ *
+ * The prompt is worth reading here rather than skimming — it is the whole disclosure. Note the
+ * AS-IT-RAN block: the authored title is `{{ lookup.body.titel }}` (a typo) and what actually went
+ * out was `""`. That is the bug this feature exists to make visible, and it is invisible in the
+ * template alone. Note also that the secret stays a token in both.
  */
 export const FromFailedRun: Story = {
   args: {
@@ -100,7 +116,7 @@ export const FromFailedRun: Story = {
     fixNotice: {
       runId: "exec-t-demo-ce20c38b",
       drift: null,
-      includedNodeIds: ["schedule", "lookup"],
+      includedNodeIds: ["lookup", "schedule", "crm_fetch"],
       error: null,
       stage: "done",
     },
