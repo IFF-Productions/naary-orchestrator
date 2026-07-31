@@ -190,6 +190,30 @@ describe("buildNodeLogRows — one row per executed step", () => {
     expect(rows[0].input).toEqual({ url: "https://api/42" });
   });
 
+  it("marks an ordinary step's output as its OWN, so the panel can address it", () => {
+    // `hasCtxOutput` is what lets the expanded row pass runId/nodeId to NodeOutputBody — the
+    // address a textToSpeech step's audio fetch needs. Without it the log would render a quietly
+    // less capable version of the same output the step card shows.
+    const rows = buildNodeLogRows({
+      steps: [step({ id: "speak" })],
+      ctx: { speak: { audioRef: "runs/x/speak.mp3" } },
+      nodeTimes: null,
+    });
+    expect(rows[0].hasCtxOutput).toBe(true);
+  });
+
+  it("marks the entry step's FALLBACK output as not its own", () => {
+    // The run input standing in for an entry node that wrote nothing is not addressable as
+    // `<runId>/<nodeId>` — it isn't that node's output at all.
+    const rows = buildNodeLogRows({
+      steps: [step({ id: "start" })],
+      ctx: { __input: { ticketId: "NAARY-1" } },
+      nodeTimes: null,
+      startNodeId: "start",
+    });
+    expect(rows[0].hasCtxOutput).toBe(false);
+  });
+
   it("uses stepOutputView for the ENTRY step, so it matches the step card", () => {
     // An older run's entry node published nothing to ctx; the step card falls back to the run's
     // trigger input. The log row has to agree — two panels disagreeing about one step's output is
