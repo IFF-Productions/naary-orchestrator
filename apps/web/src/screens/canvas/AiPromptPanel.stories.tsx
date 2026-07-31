@@ -162,8 +162,31 @@ export const FixReadingRun: Story = {
 };
 
 /**
- * Terminal, not a wait: the canvas finished loading with nothing on it to change (an empty or
- * uncompilable graph), so no description is coming. A spinner here would promise one forever.
+ * The workflow IS on the canvas but doesn't compile, so there is nothing valid to describe the
+ * failure against. Naming the compile error makes it fixable — and this is the case that showed
+ * up twice while building the feature, each time reading as "there's no workflow here", which was
+ * visibly false.
+ */
+export const FixCanvasDoesNotCompile: Story = {
+  args: {
+    initialMode: "edit",
+    canEdit: false,
+    initialPrompt: "",
+    fixNotice: {
+      runId: "exec-t-demo-ce20c38b",
+      drift: null,
+      includedNodeIds: [],
+      error: null,
+      stage: "blocked",
+      canvasError:
+        "node 'pagerduty': unknown action 'listIncidents' for provider 'pagerduty'",
+    },
+  },
+};
+
+/**
+ * Terminal, not a wait: the canvas finished loading with nothing on it to change, so no
+ * description is coming. A spinner here would promise one forever.
  */
 export const FixNoWorkflowToChange: Story = {
   args: {

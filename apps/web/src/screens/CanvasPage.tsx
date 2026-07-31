@@ -1288,6 +1288,9 @@ export function CanvasPage() {
                   // Reading the run takes a moment and the canvas load takes another — the panel
                   // reports both rather than sitting empty until they finish.
                   stage: fixFromRun.stage,
+                  // Only read when the stage is `blocked`, to tell "nothing on the canvas" from
+                  // "a workflow that doesn't compile" — which are different problems.
+                  canvasError: error ?? null,
                 }
               : null
           }

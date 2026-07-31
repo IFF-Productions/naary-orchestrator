@@ -16,6 +16,12 @@ export interface FixNotice {
   error: string | null;
   /** How far along the description is (see useFixFromRun) — the box is empty until `done`. */
   stage: FixStage;
+  /**
+   * Why the canvas has no graph, when `stage` is `blocked`. Two different situations reach that
+   * stage — nothing on the canvas at all, and a canvas that doesn't compile — and only one of
+   * them is "there's no workflow here". Building this feature hit the second twice.
+   */
+  canvasError?: string | null;
 }
 
 /**
@@ -58,8 +64,13 @@ function FixNoticeBanner({ notice }: { notice: FixNotice }) {
         Describing the failure from run{" "}
         <span className="mono">{notice.runId}</span>
         {/* "Read it below" is only true once there IS something below. Until then the sentence
-            would be pointing at an empty box, which is the state being fixed here. */}
-        {waiting ? "…" : ". Read it below and edit anything before generating."}
+            would be pointing at an empty box, which is the state being fixed here — and on the
+            `blocked` stage nothing is ever going to be there, so it stays off for that too. */}
+        {notice.stage === "done"
+          ? ". Read it below and edit anything before generating."
+          : waiting
+            ? "…"
+            : "."}
       </div>
 
       {/* The wait, named. Both stages are real and neither is instant: the canvas has to load
@@ -83,8 +94,12 @@ function FixNoticeBanner({ notice }: { notice: FixNotice }) {
           so no description is coming. Saying so beats a spinner that never resolves. */}
       {notice.stage === "blocked" && (
         <div style={{ color: "var(--state-paused)", marginTop: 5 }}>
-          There's no workflow on the canvas to change, so that run couldn't be
-          described here — say what you'd like changed instead.
+          {notice.canvasError
+            ? // The workflow IS here, it just doesn't compile — so the failing step can't be
+              // described against it. Naming the compile error makes it fixable; "there's no
+              // workflow on the canvas" would be a plainly false statement about a visible one.
+              `The canvas doesn't compile — ${notice.canvasError} — so that run couldn't be described here. Fix that, or say what you'd like changed.`
+            : "There's no workflow on the canvas to change, so that run couldn't be described here — say what you'd like changed instead."}
         </div>
       )}
 
