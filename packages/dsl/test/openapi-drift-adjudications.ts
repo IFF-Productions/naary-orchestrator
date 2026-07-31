@@ -118,6 +118,36 @@ export const ACKNOWLEDGED: { finding: string; why: string }[] = [
     finding: 'calendly.get_event: path field "eventUuid" ↔ upstream "uuid"',
     why: "Deliberate rename — same reason as cancel_event.",
   },
+  // Sentry, arriving with #946. All five are the same difference: Sentry's document spells its two
+  // path segments `organization_id_or_slug` / `project_id_or_slug`, we spell them `organizationSlug`
+  // / `projectSlug`. Substitution is POSITIONAL, so the names never have to agree — and these field
+  // keys are what authors bind expressions to, so they stay in the catalog's own camelCase house
+  // style rather than switching to snake_case for one provider.
+  {
+    finding:
+      'sentry.get_issue: path field "organizationSlug" ↔ upstream "organization_id_or_slug"',
+    why: 'Deliberate rename: Sentry accepts a numeric org id OR a slug in this segment and names it for both. Our field asks for the slug specifically — the value an author has in front of them in the Sentry URL — and offering "id or slug" in a config panel invites pasting the wrong one. Same reasoning as jira.issueKey.',
+  },
+  {
+    finding:
+      'sentry.update_issue: path field "organizationSlug" ↔ upstream "organization_id_or_slug"',
+    why: "Deliberate rename — same reason as get_issue.",
+  },
+  {
+    finding:
+      'sentry.list_issues: path field "organizationSlug" ↔ upstream "organization_id_or_slug"',
+    why: "Deliberate rename — same reason as get_issue. Predates #946; it only becomes visible now that Sentry has a pinned fixture to be compared against.",
+  },
+  {
+    finding:
+      'sentry.list_projects: path field "organizationSlug" ↔ upstream "organization_id_or_slug"',
+    why: "Deliberate rename — same reason as get_issue. Predates #946.",
+  },
+  {
+    finding:
+      'sentry.list_issues: path field "projectSlug" ↔ upstream "project_id_or_slug"',
+    why: "Deliberate rename — same reason as get_issue, one level down: the project segment takes an id or a slug too, and the field asks for the slug. Predates #946.",
+  },
 ];
 
 /**
@@ -174,7 +204,11 @@ export const UNSPECIFIED: { action: string; why: string }[] = [
  * entry is a claim that the spec is wrong or incomplete about a field we send on purpose; it is
  * not a place to park a finding nobody wanted to read.
  */
-export const ACKNOWLEDGED_BODY: { action: string; field: string; why: string }[] = [
+export const ACKNOWLEDGED_BODY: {
+  action: string;
+  field: string;
+  why: string;
+}[] = [
   {
     action: "msgraph.send_mail",
     field: "message",
@@ -189,6 +223,66 @@ export const ACKNOWLEDGED_BODY: { action: string; field: string; why: string }[]
     field: "saveToSentItems",
     why: "Same CSDL-PascalCase artifact as `message` — see that entry.",
   },
+];
+
+/**
+ * Sentry's `PUT …/issues/{issue_id}/` marks EVERY property of a partial update required (#946).
+ *
+ * The operation contradicts itself in its own two sentences. Its `description` reads:
+ *
+ *   > "Update an individual issue's attributes. Only the attributes submitted are modified."
+ *
+ * while its schema carries `required: ["assignedTo","discard","hasSeen","inbox","isBookmarked",
+ * "isPublic","isSubscribed","merge","priority","status","statusDetails","substatus"]` — all twelve.
+ *
+ * It is also unsatisfiable as written, which is the part that does not depend on reading the prose
+ * charitably. `merge` ("if true, merges the issues together") and `discard` ("if true, discards the
+ * issues instead of updating them") are opposite operations, and the nested `statusDetails` requires
+ * `inRelease`, `inNextRelease` AND all five `ignore*` fields (`ignoreCount`, `ignoreDuration`,
+ * `ignoreUserCount`, `ignoreUserWindow`, `ignoreWindow`) at once — alternative resolution targets.
+ * No request can satisfy this schema, so no catalog could be written to satisfy it either; a request
+ * that DID send all twelve would be the broken one.
+ *
+ * Systematic, not specific to this route: 9 of Sentry's 63 documented write bodies mark every
+ * property required, which is the signature of a generator emitting `required` from the property
+ * list rather than from the API's actual contract.
+ *
+ * Same class as the HubSpot entry below and PagerDuty's readOnly-yet-required service reference
+ * (#813) — the document neither confirms nor denies, so it is not evidence of a catalog bug. What
+ * we DO send (`status`) is the one field the action exists to set, and it is spec-confirmed.
+ */
+const SENTRY_PARTIAL_UPDATE =
+  "Sentry marks all 12 properties of a PARTIAL update required while the same operation's " +
+  'description reads "Only the attributes submitted are modified" — and the set is unsatisfiable ' +
+  "anyway (`merge` and `discard` are opposite operations; `statusDetails` requires `inRelease`, " +
+  "`inNextRelease` and all five `ignore*` fields simultaneously). A generator artifact: 9 of Sentry's " +
+  "63 write bodies mark every property required. Re-derived on every " +
+  "`pnpm refresh:openapi-fixtures`, so if Sentry fixes it this entry stops matching.";
+
+/**
+ * The required-but-unsent paths, listed EXPLICITLY rather than matched by prefix: the argument above
+ * is about this schema's twelve properties, and a wildcard would silently adopt any property Sentry
+ * adds later. A new one should fail the build and be looked at.
+ */
+const SENTRY_UPDATE_ISSUE_UNSENT = [
+  "assignedTo",
+  "discard",
+  "hasSeen",
+  "inbox",
+  "isBookmarked",
+  "isPublic",
+  "isSubscribed",
+  "merge",
+  "priority",
+  "statusDetails",
+  "statusDetails.ignoreCount",
+  "statusDetails.ignoreDuration",
+  "statusDetails.ignoreUserCount",
+  "statusDetails.ignoreUserWindow",
+  "statusDetails.ignoreWindow",
+  "statusDetails.inNextRelease",
+  "statusDetails.inRelease",
+  "substatus",
 ];
 
 /**
@@ -214,4 +308,9 @@ export const ACKNOWLEDGED_REQUIRED_BODY: {
       "spec neither confirms nor denies, so it is not evidence of a catalog bug. Re-derived on " +
       "every `pnpm refresh:openapi-fixtures`, so if HubSpot resolves it this entry stops matching.",
   },
+  ...SENTRY_UPDATE_ISSUE_UNSENT.map((path) => ({
+    action: "sentry.update_issue",
+    path,
+    why: SENTRY_PARTIAL_UPDATE,
+  })),
 ];

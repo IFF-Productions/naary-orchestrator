@@ -1,0 +1,231 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "API Reference",
+    "version": "v0"
+  },
+  "x-naary": {
+    "provider": "sentry",
+    "pathPrefix": "/api/0",
+    "source": "https://raw.githubusercontent.com/getsentry/sentry-api-schema/main/openapi-derefed.json",
+    "fetchedAt": "2026-07-31",
+    "note": "PRUNED snapshot — see packages/dsl/scripts/extract-openapi-fixtures.mjs. Do not hand-edit."
+  },
+  "paths": {
+    "/api/0/projects/{organization_id_or_slug}/{project_id_or_slug}/issues/": {
+      "get": {
+        "operationId": "List a Project's Issues",
+        "parameters": [
+          {
+            "name": "organization_id_or_slug",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "project_id_or_slug",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "statsPeriod",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "shortIdLookup",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "query",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "hashes",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false
+          }
+        ]
+      }
+    },
+    "/api/0/organizations/{organization_id_or_slug}/issues/{issue_id}/": {
+      "get": {
+        "operationId": "getOrganizationIssue",
+        "parameters": [
+          {
+            "name": "organization_id_or_slug",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "issue_id",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "environment",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "expand",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "collapse",
+            "in": "query",
+            "required": false
+          }
+        ]
+      },
+      "put": {
+        "operationId": "updateOrganizationIssue",
+        "parameters": [
+          {
+            "name": "organization_id_or_slug",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "issue_id",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "assignedTo",
+                  "discard",
+                  "hasSeen",
+                  "inbox",
+                  "isBookmarked",
+                  "isPublic",
+                  "isSubscribed",
+                  "merge",
+                  "priority",
+                  "status",
+                  "statusDetails",
+                  "substatus"
+                ],
+                "properties": {
+                  "inbox": {},
+                  "status": {},
+                  "statusDetails": {
+                    "required": [
+                      "ignoreCount",
+                      "ignoreDuration",
+                      "ignoreUserCount",
+                      "ignoreUserWindow",
+                      "ignoreWindow",
+                      "inNextRelease",
+                      "inRelease"
+                    ],
+                    "properties": {
+                      "inNextRelease": {},
+                      "inRelease": {},
+                      "inCommit": {},
+                      "ignoreDuration": {},
+                      "ignoreCount": {},
+                      "ignoreWindow": {},
+                      "ignoreUserCount": {},
+                      "ignoreUserWindow": {}
+                    }
+                  },
+                  "substatus": {},
+                  "hasSeen": {},
+                  "isBookmarked": {},
+                  "isPublic": {},
+                  "isSubscribed": {},
+                  "merge": {},
+                  "discard": {},
+                  "assignedTo": {},
+                  "priority": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/0/organizations/{organization_id_or_slug}/projects/": {
+      "get": {
+        "operationId": "listOrganizationProjects",
+        "parameters": [
+          {
+            "name": "organization_id_or_slug",
+            "in": "path",
+            "required": true
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "per_page",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "query",
+            "in": "query",
+            "required": false
+          }
+        ]
+      }
+    },
+    "/api/0/organizations/": {
+      "get": {
+        "operationId": "listOrganizations",
+        "parameters": [
+          {
+            "name": "owner",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "query",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "sortBy",
+            "in": "query",
+            "required": false
+          },
+          {
+            "name": "per_page",
+            "in": "query",
+            "required": false
+          }
+        ]
+      }
+    }
+  }
+}
