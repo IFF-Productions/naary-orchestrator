@@ -131,6 +131,9 @@ export function useFixFromRun({
     if (builtFor.current === fixRunId) return;
     builtFor.current = fixRunId;
     let live = true;
+    // Did this invocation get far enough to hand the prompt over? See the cleanup for why the
+    // claim above cannot be trusted on its own.
+    let handedOver = false;
 
     void (async () => {
       try {
@@ -150,6 +153,7 @@ export function useFixFromRun({
               "That run doesn't record which step failed, so there's nothing specific to describe. Say what you'd like changed instead.",
           }));
           setShowAi(true);
+          handedOver = true; // a stated reason IS the outcome; don't re-fetch over it
           return;
         }
 
@@ -179,6 +183,7 @@ export function useFixFromRun({
         setAiPrompt(instruction);
         setAiMode("edit");
         setShowAi(true);
+        handedOver = true;
         // Only what the FETCH knows. Drift is computed at render against the live version.
         setFetched({
           runVersion: runGraph?.version ?? null,
@@ -193,11 +198,32 @@ export function useFixFromRun({
             "Couldn't read that run, so the failure isn't described below — say what you'd like changed.",
         }));
         setShowAi(true);
+        handedOver = true;
       }
     })();
 
     return () => {
       live = false;
+      /**
+       * RELEASE THE CLAIM IF THIS INVOCATION NEVER FINISHED.
+       *
+       * Reported as "Fix with AI just takes me to the canvas without anything happening", and the
+       * claim + cancel above are exactly why:
+       *
+       *   1. the effect runs, claims `builtFor`, and starts the fetch;
+       *   2. the canvas RECOMPILES — `currentGraph` is a new object every time, so the effect is
+       *      torn down and this cleanup sets `live = false`;
+       *   3. the effect re-runs, sees its own claim, and returns early;
+       *   4. the fetch from (1) resolves into `if (!live) return` and the prompt is never set.
+       *
+       * The claim outlived the work it was standing for. StrictMode makes it happen every time in
+       * dev, but one recompile during load is enough in production — which is where it was seen.
+       *
+       * Releasing on an unfinished cancel means the re-run does the work instead of trusting a
+       * claim nobody is honouring. `handedOver` keeps the original guarantee intact: once the
+       * prompt has been handed over, the claim stays and nothing rebuilds over an edited prompt.
+       */
+      if (!handedOver) builtFor.current = null;
     };
   }, [fixRunId, currentGraph]);
 
