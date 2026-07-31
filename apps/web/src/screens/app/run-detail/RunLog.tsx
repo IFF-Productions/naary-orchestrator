@@ -168,6 +168,10 @@ export function LogPanel({ events }: { events: LogEntry[] | null }) {
     });
   return (
     <div
+      // Named group — see StepTimeline: both lists carry a button per step, and the name is what
+      // says which one you're in.
+      role="group"
+      aria-label="Execution log"
       style={{
         border: "1px solid var(--line-mid)",
         background: "var(--bg)",

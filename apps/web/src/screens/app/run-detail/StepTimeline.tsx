@@ -99,7 +99,10 @@ export function StepTimeline({
   onSelect: (id: string) => void;
 }) {
   return (
-    <div>
+    // Named group: the Execution log below now also holds a button per step, so "Start …" appears
+    // twice on this screen with different jobs. Which list you are in is the thing that tells them
+    // apart, and without a name on each that distinction exists only visually.
+    <div role="group" aria-label="Step timeline">
       <div
         className="mono"
         style={{

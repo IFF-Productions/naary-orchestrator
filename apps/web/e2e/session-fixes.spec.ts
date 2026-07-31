@@ -108,7 +108,14 @@ test("run detail: the 'Run input' panel shows the payload that started the run",
   // Explicitly select the Start (trigger) step. Its panel shows the entry payload as
   // "Trigger input" — the start node PUBLISHES the run input as its own output, like every
   // other entry node. (Deterministic: not a race on which node is current.)
-  await page.getByRole("button", { name: /Start/ }).click();
+  //
+  // Scoped to the STEP TIMELINE: the Execution log now carries its own button per step (it opens
+  // that step's input/output), so a bare /Start/ matches two buttons that do different things.
+  // Naming the region is what makes this unambiguous — for a screen reader as much as for here.
+  await page
+    .getByRole("group", { name: "Step timeline" })
+    .getByRole("button", { name: /Start/ })
+    .click();
 
   // The redesigned run detail shows the entry payload as the trigger step's "Trigger input".
   await expect(page.getByText("Trigger input")).toBeVisible();
