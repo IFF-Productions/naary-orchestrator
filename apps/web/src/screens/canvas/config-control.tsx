@@ -33,6 +33,104 @@ export function renderControlSections(c: ConfigSectionCtx) {
   } = c;
   return (
     <>
+      {kind === "retry" && (
+        <>
+          <div
+            style={{
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-3)",
+              lineHeight: 1.6,
+              marginBottom: 8,
+            }}
+          >
+            Everything between this node and its <strong>Retry End</strong>
+            repeats as one unit until an attempt finishes without an error. Steps
+            whose effect can't be undone — Send Email, SQL Exec, Code, Code Agent,
+            or an integration that writes — can't go inside; saving will say which
+            one and where to move it.
+          </div>
+          <Labeled label="Max attempts (including the first)">
+            <input
+              type="number"
+              min={1}
+              max={25}
+              value={num("maxAttempts") ?? ""}
+              onChange={(e) =>
+                onChange({
+                  maxAttempts: e.target.value
+                    ? Number(e.target.value)
+                    : undefined,
+                })
+              }
+              style={inputStyle}
+              placeholder="3"
+            />
+          </Labeled>
+          <Labeled label="Wait before the 2nd attempt (seconds)">
+            <input
+              type="number"
+              min={0}
+              value={num("initialIntervalSeconds") ?? ""}
+              onChange={(e) =>
+                onChange({
+                  initialIntervalSeconds: e.target.value
+                    ? Number(e.target.value)
+                    : undefined,
+                })
+              }
+              style={inputStyle}
+              placeholder="1"
+            />
+          </Labeled>
+          <Labeled label="Backoff multiplier (2 = double each time)">
+            <input
+              type="number"
+              min={1}
+              step="0.1"
+              value={num("backoffCoefficient") ?? ""}
+              onChange={(e) =>
+                onChange({
+                  backoffCoefficient: e.target.value
+                    ? Number(e.target.value)
+                    : undefined,
+                })
+              }
+              style={inputStyle}
+              placeholder="2"
+            />
+          </Labeled>
+          <Labeled label="Longest single wait (seconds, optional)">
+            <input
+              type="number"
+              min={0}
+              value={num("maxIntervalSeconds") ?? ""}
+              onChange={(e) =>
+                onChange({
+                  maxIntervalSeconds: e.target.value
+                    ? Number(e.target.value)
+                    : undefined,
+                })
+              }
+              style={inputStyle}
+              placeholder="no cap"
+            />
+          </Labeled>
+        </>
+      )}
+
+      {kind === "retryEnd" && (
+        <div
+          style={{
+            fontSize: "var(--text-xs)",
+            color: "var(--ink-3)",
+            lineHeight: 1.6,
+          }}
+        >
+          Closes the Retry region. The attempt policy lives on the matching{" "}
+          <strong>Retry</strong> node, so there is nothing to configure here.
+        </div>
+      )}
+
       {kind === "sendEmail" && (
         <>
           <Labeled label="SMTP connection id">

@@ -170,6 +170,9 @@ export interface NodeOutputMap {
   stopAndError: unknown;
   humanApproval: unknown;
   noOp: unknown;
+  /** Region brackets: control-flow only. Neither writes a ctx entry — the nodes INSIDE do. */
+  retry: unknown;
+  retryEnd: unknown;
   end: unknown;
 }
 

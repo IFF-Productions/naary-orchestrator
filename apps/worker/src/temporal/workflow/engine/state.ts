@@ -12,7 +12,12 @@ import type {
   ResumeInput,
   WebhookResponse,
 } from "@naary/contracts";
-import type { GraphDef, ItemsRegion, NodeDef } from "@naary/dsl";
+import type {
+  GraphDef,
+  ItemsRegion,
+  NodeDef,
+  RetryRegion,
+} from "@naary/dsl";
 import type * as activities from "../../activities";
 import type { RunGraphCtx } from "../types";
 
@@ -75,6 +80,8 @@ export interface Engine {
   mergeParents: Map<string, string[]>;
   /** splitOut id → its items-model region (precomputed, pure). */
   itemsRegionBySplit: Map<string, ItemsRegion>;
+  /** `retry` node id → its drawn region (validated at save). Empty for graphs with no retry node. */
+  retryRegionByStart: Map<string, RetryRegion>;
   /** merge ids owned by an A4 region's per-item pass (excluded from top-level joins). */
   a4RegionMergeIds: Set<string>;
   /** Single source of truth for every activity's `meta` (env-scoped cred reads). */

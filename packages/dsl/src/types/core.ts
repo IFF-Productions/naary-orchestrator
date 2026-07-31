@@ -34,6 +34,8 @@ export type NodeType =
   | "vectorQuery" // RAG: embed a query + return the top-k nearest stored chunks (activity)
   | "markdown" // convert an HTML string → Markdown (activity; node-html-parser)
   | "noOp" // does nothing; a structural/placeholder node — output {}
+  | "retry" // opens a RETRY region — nodes up to its `retryEnd` repeat until they succeed
+  | "retryEnd" // closes a retry region
   | "splitOut" // items model: opens a per-item region — reads an array, runs the region once per item
   | "loopEnd" // items model: closes a per-item region — collects the region's per-item outputs → array
   | "csv" // parse CSV text→rows / build rows→CSV text (activity; papaparse)

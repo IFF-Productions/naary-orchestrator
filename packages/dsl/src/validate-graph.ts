@@ -15,6 +15,7 @@
 import { getIntegrationAction, getIntegrationProvider } from "./integrations";
 import { validateHandoffs } from "./handoff";
 import { computeItemsRegions } from "./items-region";
+import { computeRetryRegions } from "./retry-region";
 import type { GraphDef, IntegrationNodeConfig } from "./types";
 
 export interface GraphValidation {
@@ -89,6 +90,16 @@ export function validateGraph(graph: GraphDef): GraphValidation {
   // inferred — so the whole correctness story is this structural save-time check). Reuse the region
   // computed above for the merge-exemption set.
   if (region.error) return { valid: false, error: region.error };
+
+  // Retry regions (retry…retryEnd): the same drawn-bracket contract, and the same reason for
+  // checking it HERE. A region containing a node whose effect can't be undone is refused rather
+  // than warned about, matching the call `RETRYABLE_NODE_KINDS` already made for per-node retry:
+  // a duplicate charge or a second email is not recoverable, so being wrong is asymmetric. The
+  // message names the node and where to move it.
+  const retryRegions = computeRetryRegions(graph);
+  if (retryRegions.error) {
+    return { valid: false, error: retryRegions.error };
+  }
 
   // Integration nodes: strict on PRESENT values (like httpRequest's url) — a bogus provider
   // or action (e.g. from a hand-edited or AI-generated graph) is rejected at save. Missing

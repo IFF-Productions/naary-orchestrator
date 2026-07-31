@@ -24,7 +24,9 @@ import type { ExecutionState } from "@naary/contracts";
 // and nothing tree-shakes. Type-only imports below are erased, so they may stay on the barrel.
 import {
   computeItemsRegions,
+  computeRetryRegions,
   type ItemsRegion,
+  type RetryRegion,
 } from "@naary/dsl/dist/workflow";
 import type { GraphDef, NodeDef } from "@naary/dsl";
 // Type-only: keeps activity code OUT of the deterministic workflow bundle.
@@ -128,6 +130,15 @@ export async function runGraph(
         if (nodeById.get(id)?.type === "merge") a4RegionMergeIds.add(id);
       }
     }
+  }
+
+  // Retry regions (retry…retryEnd). Pure + deterministic over the same graph the save gate
+  // validated, so computing it here can never disagree with what was accepted — the same
+  // single-source-of-truth arrangement `computeItemsRegions` already has. Empty for every graph
+  // without a retry node, which is all of them until someone draws one.
+  const retryRegionByStart = new Map<string, RetryRegion>();
+  for (const r of computeRetryRegions(graph).regions) {
+    retryRegionByStart.set(r.retryId, r);
   }
 
   const mergeParents = new Map<string, string[]>();
@@ -290,6 +301,7 @@ export async function runGraph(
     nodeIdSet,
     mergeParents,
     itemsRegionBySplit,
+    retryRegionByStart,
     a4RegionMergeIds,
     metaFor,
     syncStatus,

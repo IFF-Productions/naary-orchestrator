@@ -150,6 +150,8 @@ export function nodeIcon(type: NodeType): IconName {
     case "merge":
     case "splitOut":
     case "loopEnd":
+    case "retry":
+    case "retryEnd":
     case "forEach":
     case "executeSubWorkflow":
       return "router";

@@ -220,6 +220,22 @@ export const NODE_CATALOG: Record<NodeType, NodeCatalogEntry> = {
     summary: "Does nothing; a structural/placeholder node. Output is {}.",
     config: "{}",
   },
+  retry: {
+    group: "flow",
+    summary:
+      "Opens a RETRY region: every node up to its retryEnd repeats as a unit until an attempt " +
+      "succeeds, or maxAttempts is reached. For transient multi-step failures (fetch → parse), " +
+      "where retrying has to restart at the fetch.",
+    config:
+      "{ maxAttempts?, initialIntervalSeconds?, backoffCoefficient?, maxIntervalSeconds? }",
+  },
+  retryEnd: {
+    group: "flow",
+    summary:
+      "Closes a retry region. Nodes with effects that can't be undone (sendEmail, sqlExec, code, " +
+      "integration writes) are refused inside the region — move them after this node.",
+    config: "{}",
+  },
   splitOut: {
     group: "flow",
     summary:

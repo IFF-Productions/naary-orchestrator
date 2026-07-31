@@ -33,6 +33,7 @@ import type {
   MarkdownConfig,
   VectorUpsertConfig,
   VectorQueryConfig,
+  RetryConfig,
   SplitOutConfig,
   LoopEndConfig,
   GraphQLConfig,
@@ -102,6 +103,7 @@ export interface NodeConfigMap {
   vectorUpsert: VectorUpsertConfig;
   vectorQuery: VectorQueryConfig;
   noOp: Record<string, unknown>;
+  retry: RetryConfig;
   splitOut: SplitOutConfig;
   loopEnd: LoopEndConfig;
   csv: CsvConfig;
@@ -126,6 +128,8 @@ export interface NodeConfigMap {
   respondToWebhook: RespondToWebhookConfig;
   code: CodeConfig;
   humanApproval: HumanApprovalConfig;
+  /** Closes a retry region; carries no config of its own (the policy is on `retry`). */
+  retryEnd: Record<string, unknown>;
   end: Record<string, unknown>;
 }
 
