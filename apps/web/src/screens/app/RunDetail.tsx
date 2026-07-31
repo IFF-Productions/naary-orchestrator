@@ -34,7 +34,7 @@ import { usePermissions } from "../../lib/usePermissions";
 import { envAccent } from "../../workspace/EnvironmentSwitcher";
 import { RerunMenu, VersionBadge } from "./RerunMenu";
 import { ResumeButton } from "./run-detail/ResumeButton";
-import { buildDebugEvents } from "./run-detail/DebugLogSection";
+import { buildNodeLogRows } from "./run-detail/NodeLogRows";
 import { NodeOutputBody } from "./run-detail/NodeOutputBody";
 import { RegionTraceSection } from "./run-detail/RegionTraceSection";
 import { RunGraph } from "./run-detail/RunGraph";
@@ -466,13 +466,20 @@ function RunView({ id }: { id: string }) {
     [order, nodeById, states, waitingAge, state],
   );
 
-  // Execution-log rows: the curated Temporal events, PLUS — on a debug run (ctx.__debug) — one
-  // synthetic per-node debug row, interleaved by finish time (nodes with no timing sort last).
+  // Execution-log rows: the curated Temporal events PLUS one synthetic row per executed step,
+  // interleaved by finish time (steps with no timing sort last). The Temporal rows name no node
+  // — "Activity: runNodeActivity" — so without these the log says something ran but not what it
+  // did. Every run, not just a debug one: an ordinary failed run is the one people open.
   const logEntries: LogEntry[] | null = useMemo(() => {
-    if (!events) return events;
-    if (state?.ctx.__debug !== true) return events;
-    const debug = buildDebugEvents(timelineSteps, state.ctx, state.nodeTimes);
-    return [...events, ...debug].sort((a, b) => {
+    if (!events || !state) return events;
+    const nodeRows = buildNodeLogRows({
+      steps: timelineSteps,
+      ctx: state.ctx,
+      nodeTimes: state.nodeTimes,
+      nodes: nodeById,
+      startNodeId: graph?.startNodeId,
+    });
+    return [...events, ...nodeRows].sort((a, b) => {
       // null timestamps (untimed nodes) sort to the end; otherwise chronological by ISO string.
       // Both-null must return 0 (a consistent comparator) — returning 1 there is a contract
       // violation that can produce unstable ordering (#566 review).
@@ -481,7 +488,7 @@ function RunView({ id }: { id: string }) {
       if (!b.at) return -1;
       return a.at.localeCompare(b.at);
     });
-  }, [events, timelineSteps, state]);
+  }, [events, timelineSteps, state, nodeById, graph]);
 
   const detail: StepDetail | null = useMemo(() => {
     if (!state || !selectedId) return null;
@@ -893,8 +900,8 @@ function RunView({ id }: { id: string }) {
             node-details column on desktop (the grid + this Card are fragment siblings). */}
           <Card style={{ padding: "18px 20px", marginTop: 18 }}>
             <SectionTitle>Execution log</SectionTitle>
-            {/* On a debug run the per-node debug rows are interleaved into the timeline (logEntries);
-                a normal run just shows the curated Temporal events. */}
+            {/* The curated Temporal events with one row per executed step interleaved by finish
+                time; a step row opens to show what it was given and what it produced. */}
             <LogPanel events={logEntries} />
             <div
               className="mono"
@@ -906,10 +913,14 @@ function RunView({ id }: { id: string }) {
             >
               full run history · durable · state checkpointed · resumable for
               30d
-              {/* Name the debug rows where they appear — otherwise the extra per-node lines read as
-                  unexplained noise to whoever opens the run rather than the person who started it. */}
+              {/* Say that the step rows open — a caret in a mono log well is easy to read as
+                  decoration, and the input/output behind it is the point of the section. */}
+              {" · open a ▸ step row for its input and output"}
+              {/* Debug no longer changes what this panel shows (step rows are always here); it
+                  turns on VERBOSE WORKER LOGGING. Named so the flag doesn't read as broken to
+                  someone who ticked it expecting a difference on this screen. */}
               {state?.ctx.__debug === true &&
-                " · debug run: one extra row per step (timing + safe metadata)"}
+                " · debug run: verbose worker logs"}
             </div>
           </Card>
         </>

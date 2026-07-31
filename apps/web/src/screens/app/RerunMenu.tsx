@@ -31,11 +31,11 @@ function ago(iso: string): string {
  * runs) the picker is unavailable and only latest re-run is offered.
  *
  * The caret menu also carries "Re-run with debug" — the ONLY place in the app (with the
- * canvas's "Save & run with debug") that sets the API's `debug` flag, which turns on the
- * per-node rows the run detail's Execution log already knows how to render. A failed run you
- * want to understand is exactly the moment for it, hence its home here. It is deliberately a
- * one-shot action rather than a sticky preference: debug also raises the worker's log volume
- * for the run, and a toggle left on for weeks does that invisibly.
+ * canvas's "Save & run with debug") that sets the API's `debug` flag. That flag now means
+ * verbose WORKER logging only: the run detail's per-step rows, which it used to be the way to
+ * get, are in every run's Execution log. So this is for a problem you have to read the worker's
+ * own output to see. It is deliberately a one-shot action rather than a sticky preference —
+ * a toggle left on for weeks raises log volume invisibly.
  */
 export function RerunMenu({
   runId,
@@ -284,10 +284,10 @@ export function RerunMenu({
                 marginTop: 2,
               }}
             >
-              Adds a per-step row (timing, model, tokens, cost, HTTP status) to
-              the new run's Execution log and logs it verbosely in the worker. A
-              real run at the latest version — it repeats the flow's actions and
-              bills its model calls again.
+              Logs every step verbosely in the worker, for diagnosing a problem
+              in the worker's own output — per-step input/output is in the
+              Execution log either way. A real run at the latest version: it
+              repeats the flow's actions and bills its model calls again.
             </span>
           </button>
           <div
