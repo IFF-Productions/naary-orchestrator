@@ -931,6 +931,24 @@ export interface EffectivePermissions {
   share: VerbAccess;
 }
 
+/**
+ * A proposed fix awaiting review (self-healing). `baseVersion` is what it was written against —
+ * approving is refused if the workflow has moved on since, so the reviewer is shown it.
+ */
+export interface FixProposal {
+  id: string;
+  workflowKey: string;
+  runId: string;
+  /** The failing step and its error. Never node OUTPUT content — that is not stored. */
+  failureSummary: string;
+  baseVersion: number;
+  diffSummary: { add: number; chg: number; del: number; total: number };
+  /** pending | approved | rejected | applied | stale | expired */
+  status: string;
+  appliedVersion: number | null;
+  createdAt: string;
+}
+
 /** Map a control-plane status to a design run-state token. */
 export function statusToRunState(
   s: ExecutionStatus,

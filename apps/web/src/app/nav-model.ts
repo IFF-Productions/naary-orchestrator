@@ -68,6 +68,13 @@ export const BUILDER_MODES: NavMode[] = [
         icon: "approval",
         badgeKey: "approvals",
       },
+      {
+        to: "/app/fix-proposals",
+        label: "Proposed fixes",
+        // `edit` rather than an AI-ish icon: what waits here is a CHANGE to a workflow, and that
+        // is what the user is deciding about — the fact a model wrote it is secondary.
+        icon: "edit",
+      },
       { to: "/app/schedules", label: "Schedules", icon: "clock" },
     ],
   },
