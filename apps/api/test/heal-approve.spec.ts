@@ -63,6 +63,7 @@ function makeService(over: {
     graphs as never,
     {} as never,
     { assertCan: vi.fn() } as never,
+    { sendFixProposal: vi.fn() } as never,
   );
   // The Temporal client is only used to signal the parked workflow, which is best-effort.
   (svc as unknown as { client: unknown }).client = {

@@ -8,11 +8,12 @@
  */
 import { Module } from "@nestjs/common";
 import { EnvironmentsModule } from "../environments/environments.module";
+import { NotificationsModule } from "../notifications/notifications.module";
 import { HealController } from "./heal.controller";
 import { HealService } from "./heal.service";
 
 @Module({
-  imports: [EnvironmentsModule],
+  imports: [EnvironmentsModule, NotificationsModule],
   controllers: [HealController],
   providers: [HealService],
   exports: [HealService],
