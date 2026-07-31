@@ -164,6 +164,11 @@ describe("SchedulesService.reconcileLegacyScheduleIds", () => {
     expect(opts.scheduleId).toBe("sched-t-1-e-prod-wf-deadbeef");
     expect(opts.spec.cronExpressions).toEqual(["0 9 * * *"]);
     expect(opts.action.args[2]).toMatchObject({ environmentId: "e-prod" });
+    // A scheduled run starts with what the schedule has, which is nothing (#979). This slot used
+    // to default to `{ message: "scheduled run" }` — a THIRD answer, next to the manual path's
+    // support-ticket payload and the cron/poll paths' `{}`, all for the same question. args[1] is
+    // the run input (args = [graph, input, opts]); pollGraph declares no sampleInput.
+    expect(opts.action.args[1]).toEqual({});
     // Row was paused → the recreated schedule is paused too (no surprise firing).
     expect(pause).toHaveBeenCalled();
     // Upsert (not create) so a crash-retry that got this far converges on the same row.

@@ -178,6 +178,115 @@ describe("start (version resolution)", () => {
   });
 });
 
+/**
+ * What a manually-started run is handed as its trigger input (#979).
+ *
+ * The rule is `body.input → Start node's sampleInput → {}`, and the last step is the one with
+ * history: it used to be a hardcoded `{ message: "I was charged twice this month" }` support-ticket
+ * payload left over from the demo seed graph. That made "Run now" structurally different from every
+ * real trigger — cron and poll schedules start a run with `{}` — so manually testing a scheduled
+ * workflow fed it data the schedule would never send, and the run failed for a reason that could
+ * not happen in production. `sampleInput` is declared on the `start` node type ONLY, so a
+ * scheduleTrigger graph had no way to override it either.
+ *
+ * These assert the input positionally out of the stubbed `startGraph` (3rd arg) rather than
+ * trusting a return value, because the input is not otherwise observable from `start()`.
+ */
+describe("start (trigger input)", () => {
+  const inputOf = (startGraph: { mock: { calls: unknown[][] } }) =>
+    startGraph.mock.calls[0][2];
+
+  it("passes the caller's input through untouched", async () => {
+    const { service, getLatest, startGraph } = makeService();
+    getLatest.mockResolvedValue(SNAP_LATEST);
+
+    await service.start("t1", "e1", { ticketId: "NAARY-42" }, "refunds");
+
+    expect(inputOf(startGraph)).toEqual({ ticketId: "NAARY-42" });
+  });
+
+  it("falls back to the Start node's sampleInput when the caller passes none", async () => {
+    const { service, getLatest, startGraph } = makeService();
+    getLatest.mockResolvedValue({
+      ...SNAP_LATEST,
+      graph: {
+        startNodeId: "s",
+        nodes: [
+          {
+            id: "s",
+            type: "start",
+            config: { sampleInput: { message: "hello" } },
+          },
+        ],
+        edges: [],
+      },
+    });
+
+    await service.start("t1", "e1", undefined, "refunds");
+
+    expect(inputOf(startGraph)).toEqual({ message: "hello" });
+  });
+
+  it("an explicit input BEATS the Start node's sampleInput", async () => {
+    const { service, getLatest, startGraph } = makeService();
+    getLatest.mockResolvedValue({
+      ...SNAP_LATEST,
+      graph: {
+        startNodeId: "s",
+        nodes: [
+          {
+            id: "s",
+            type: "start",
+            config: { sampleInput: { message: "hello" } },
+          },
+        ],
+        edges: [],
+      },
+    });
+
+    await service.start("t1", "e1", { message: "typed by hand" }, "refunds");
+
+    expect(inputOf(startGraph)).toEqual({ message: "typed by hand" });
+  });
+
+  // The regression. A scheduleTrigger graph cannot declare a sampleInput at all (the field is on
+  // `start` only), so whatever this branch produces is what EVERY manual run of EVERY scheduled
+  // workflow gets. It must match what syncCronSchedule actually passes, which is `{}`.
+  it("hands a scheduleTrigger graph the same EMPTY input its cron does — no demo payload", async () => {
+    const { service, getLatest, startGraph } = makeService();
+    getLatest.mockResolvedValue({
+      ...SNAP_LATEST,
+      graph: {
+        startNodeId: "cron",
+        nodes: [
+          {
+            id: "cron",
+            type: "scheduleTrigger",
+            config: { cron: "*/5 * * * *" },
+          },
+        ],
+        edges: [],
+      },
+    });
+
+    await service.start("t1", "e1", undefined, "nightly-report");
+
+    expect(inputOf(startGraph)).toEqual({});
+  });
+
+  // Guards the general shape, not just the schedule case: no graph gets invented trigger data.
+  // Asserted as a substring scan so a DIFFERENT invented payload can't quietly take its place.
+  it("invents no trigger data for a graph with no sampleInput", async () => {
+    const { service, getLatest, startGraph } = makeService();
+    getLatest.mockResolvedValue(SNAP_LATEST); // GRAPH: a bare start node, no config
+
+    await service.start("t1", "e1", undefined, "refunds");
+
+    expect(inputOf(startGraph)).toEqual({});
+    expect(JSON.stringify(inputOf(startGraph))).not.toMatch(/charged|message/i);
+  });
+});
+
 // RBAC G1 (§4): manual starts carry an actor and are `run`-gated; trigger paths
 // carry NO principal and must stay byte-identical (workspace-level automation).
 import { ForbiddenException } from "@nestjs/common";

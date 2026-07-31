@@ -240,15 +240,18 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
           : `No version ${graphVersion} of '${workflowKey}' for this tenant`,
       );
     }
-    // Default input precedence: explicit body input → the Start node's configured
-    // sampleInput → a generic fallback. Lets a workflow define realistic test data.
+    // Default input precedence: explicit body input → the Start node's configured sampleInput →
+    // EMPTY. The last step used to be a hardcoded `{ message: "I was charged twice this month" }`
+    // demo payload, which made a manual run structurally different from the real trigger: cron and
+    // poll schedules start a run with `{}`, so "Run now" on a scheduled workflow injected a support
+    // ticket its steps were never written to accept, and the run failed for a reason the schedule
+    // would never hit (#979). Worse, `sampleInput` only exists on the `start` node type, so a
+    // scheduleTrigger graph had no way to opt out. That payload now lives on the demo graph that
+    // wants it (sampleGraph). A run with nothing to pass passes nothing.
     return this.startGraph(
       `exec-${tenantId}`,
       snapshot,
-      input ??
-        startSampleInput(snapshot.graph) ?? {
-          message: "I was charged twice this month",
-        },
+      input ?? startSampleInput(snapshot.graph) ?? {},
       tenantId,
       environmentId,
       workflowKey,

@@ -26,7 +26,17 @@ const CLASSIFY_SCHEMA = {
 export const sampleGraph: GraphDef = {
   startNodeId: "start",
   nodes: [
-    { id: "start", type: "start" },
+    // The demo payload lives HERE, on the graph that wants it, rather than as a fallback inside
+    // the start-a-run service. It used to be the latter, which meant every workflow with no
+    // sample input got a support-ticket message injected — including scheduled ones, whose real
+    // trigger passes `{}`. A manual test run of a schedule therefore could not reproduce what the
+    // schedule does, and the mismatch surfaced as a node failure (#979). Sample data belongs to
+    // the sample; it is visible and editable here, and invisible when it was in the service.
+    {
+      id: "start",
+      type: "start",
+      config: { sampleInput: { message: "I was charged twice this month" } },
+    },
     {
       id: "agent",
       type: "agent",
