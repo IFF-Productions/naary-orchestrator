@@ -17,6 +17,7 @@ import { ExecutionsModule } from "./executions/executions.module";
 import { ChatModule } from "./chat/chat.module";
 import { FormsModule } from "./forms/forms.module";
 import { GraphsModule } from "./graphs/graphs.module";
+import { HealModule } from "./heal/heal.module";
 import { HealthModule } from "./health/health.module";
 import { McpModule } from "./mcp/mcp.module";
 import { McpRegistryModule } from "./mcp-registry/mcp-registry.module";
@@ -76,6 +77,8 @@ import { WebhooksModule } from "./webhooks/webhooks.module";
     AuditModule,
     HealthModule,
     GraphsModule,
+    // Self-healing (Phase 2). Also hosts the API's Temporal worker for the heal queue.
+    HealModule,
     PinsModule,
     EvalsModule,
     ExecutionsModule,

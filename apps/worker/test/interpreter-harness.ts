@@ -38,11 +38,19 @@ export const harnessState: {
   /** Agent guardrails (#576): the projection `resolveToolPolicy` returns. `{}` (the default) means
    *  "everything allowed", which is what every pre-#576 interpreter spec expects. */
   toolPolicy: activities.ToolPolicyProjection;
+  /** Self-healing opt-in (Phase 2). FALSE by default — the production default is off, and every
+   *  pre-Phase-2 spec must see byte-identical behaviour. */
+  selfHealEnabled: boolean;
+  /** Make `shouldSelfHeal` THROW — models the heal machinery being broken, which must never
+   *  change what a failed run reports. */
+  selfHealThrows: boolean;
 } = {
   loadVariablesResult: { slackChannel: "#alerts" },
   loadTemplateResult: null,
   pollChanged: true,
   pauseAgentFailures: 0,
+  selfHealEnabled: false,
+  selfHealThrows: false,
   refreshBudgetResult: null,
   httpFailures: 0,
   httpResponse: {
@@ -466,6 +474,17 @@ const mockActivities = {
     };
   },
   recordExecution: async (): Promise<void> => undefined, // run-ownership upsert; no-op here
+  // Self-healing opt-in (Phase 2). Mutable so a spec can model an opted-IN workflow; captures
+  // calls so "we consulted the setting before spending anything" is assertable.
+  shouldSelfHeal: async (meta: {
+    tenantId: string;
+    environmentId?: string;
+    workflowKey?: string;
+  }): Promise<boolean> => {
+    selfHealCalls.push(meta);
+    if (harnessState.selfHealThrows) throw new Error("self-heal lookup exploded");
+    return harnessState.selfHealEnabled;
+  },
   // Slice 3: the post-resume budget re-read. Mutable result so a test can model the
   // PUT that raised the caps; captures calls to prove the re-read happens on resume.
   refreshBudget: async (meta: {
@@ -539,6 +558,11 @@ const statusPushes: {
 const loadVariablesCalls: { tenantId: string; environmentId?: string }[] = [];
 const pollCalls: activities.PollMeta[] = [];
 const refreshBudgetCalls: { tenantId: string }[] = [];
+const selfHealCalls: {
+  tenantId: string;
+  environmentId?: string;
+  workflowKey?: string;
+}[] = [];
 const notifyCalls: activities.NotificationInput[] = [];
 const prepareApprovalCalls: {
   tenantId: string;
@@ -1298,6 +1322,7 @@ export {
   loadVariablesCalls,
   pollCalls,
   refreshBudgetCalls,
+  selfHealCalls,
   notifyCalls,
   prepareApprovalCalls,
   resolveToolPolicyCalls,

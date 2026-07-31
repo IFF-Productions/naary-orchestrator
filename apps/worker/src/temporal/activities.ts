@@ -50,6 +50,7 @@ export {
   loadTemplate,
   setExecutionStatus,
   persistResumeSnapshot,
+  shouldSelfHeal,
   refreshBudget,
   loadChatHistory,
   appendChatTurn,

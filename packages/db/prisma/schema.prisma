@@ -340,6 +340,74 @@ model WorkflowActivation {
   @@id([tenantId, environmentId, workflowKey])
 }
 
+/** Per-workflow SELF-HEALING opt-in. When enabled, a failed run of `workflowKey` launches a
+ *  detached `healRun` workflow that diagnoses the failure, proposes a graph edit, notifies, and
+ *  waits for a human to approve before anything is written.
+ *
+ *  ABSENCE ⇒ OFF, deliberately the opposite default to WorkflowActivation above. An automatic
+ *  edit to somebody's production workflow — even a proposed one that costs BYOK tokens to
+ *  generate — is not something to switch on for people. Don't "fix" this default to on.
+ *
+ *  Env-scoped like its neighbours: enabling in sandbox must not enable prod. */
+model SelfHealSetting {
+  tenantId      String
+  environmentId String
+  environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
+  workflowKey   String
+  enabled       Boolean  @default(false)
+  updatedAt     DateTime @default(now()) @updatedAt
+
+  @@id([tenantId, environmentId, workflowKey])
+}
+
+/** A proposed fix for a failed run, awaiting a human decision (self-healing, Phase 2).
+ *
+ *  The row IS the durable record; the `healRun` workflow parks on a Signal and applies only after
+ *  approval, so nothing here is written to the workflow without a person saying so.
+ *
+ *  `failureSignature` is the dedupe key — a failing 5-minute schedule must not generate (and
+ *  bill for) a proposal every 5 minutes. One OPEN proposal per (tenant, env, workflowKey,
+ *  signature); a DIFFERENT failure gets its own.
+ *
+ *  `baseVersion` is what the proposal was generated against. Approval can arrive days later, so
+ *  apply re-checks that it is still the latest version and marks the proposal `stale` rather than
+ *  overwriting edits made in the meantime. */
+model WorkflowFixProposal {
+  id            String   @id @default(uuid())
+  tenantId      String
+  environmentId String
+  environment   Environment @relation(fields: [environmentId], references: [id], onDelete: Cascade)
+  workflowKey   String
+  /// The run whose failure prompted this.
+  runId         String
+  /// The node that failed + classified kind + normalized message — see healFailureSignature.
+  failureSignature String
+  /// Human-readable one-liner for the inbox (the error, truncated). Never node OUTPUT content.
+  failureSummary String
+  /// Workflow version this was generated against; apply refuses if it is no longer latest.
+  baseVersion   Int
+  /// The proposed GraphDef, exactly as it would be saved.
+  proposedGraph Json
+  /// {add,chg,del,total} from diffGraphs — so the inbox lists proposals without diffing N graphs.
+  diffSummary   Json
+  /// pending | approved | rejected | applied | stale | expired | failed
+  status        String   @default("pending")
+  /// Version written when applied; null otherwise.
+  appliedVersion Int?
+  /// Who decided, for the audit trail. Null while pending.
+  decidedBy     String?
+  decidedAt     DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @default(now()) @updatedAt
+
+  /// The dedupe guarantee, enforced by the DB rather than by a read-then-write race: at most one
+  /// row per signature in a given status. Applied to `pending` only via a partial index in the
+  /// migration — Prisma can't express that here, so the migration adds it directly.
+  @@index([tenantId, environmentId, workflowKey, status])
+  @@index([tenantId, status])
+  @@index([runId])
+}
+
 /** Workflow tag (n8n parity, RBAC program slice T1) — ORGANIZATIONAL metadata only. Tags are
  *  NOT permission-bearing today; tag-scoped grants are a documented future seam in the upcoming
  *  RBAC-GROUPS design. Name is unique per tenant; `color` is an optional hex the UI picks from
@@ -621,6 +689,8 @@ model Environment {
   pinnedData           PinnedData[]
   evalDatasets         EvalDataset[]
   errorHandlers        ErrorHandler[]
+  selfHealSettings     SelfHealSetting[]
+  fixProposals         WorkflowFixProposal[]
   workflowGrants       WorkflowGrant[]
   schedules            Schedule[]
   pollStates           PollState[]

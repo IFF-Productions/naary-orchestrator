@@ -209,6 +209,12 @@ services:
       PORT: '3000'
       # This app's OWN Sentry project (falls back to SENTRY_DSN when unset).
       SENTRY_DSN_API: ${SENTRY_DSN_API:-}
+      # Self-healing (Phase 2): the API also hosts a small Temporal worker polling the heal
+      # queue, because generating and saving a fix need GraphGeneratorService/GraphsService.
+      # UNSET ⇒ ON, but the feature is still per-workflow opt-in and off by default, so an
+      # unset value polls an empty queue and costs nothing. Set to `off` to stop this replica
+      # polling — for a deployment that runs the heal worker separately, or during an incident.
+      SELF_HEAL_WORKER: ${SELF_HEAL_WORKER:-}
       # Allow the containerized web app (and the Vite dev server) as CORS origins.
       CORS_ORIGINS: http://localhost:8081,http://localhost:5173
       # Firebase Auth (human login). The API verifies ID tokens with the Admin SDK,

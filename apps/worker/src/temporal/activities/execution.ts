@@ -368,3 +368,53 @@ export async function persistResumeSnapshot(meta: {
     );
   }
 }
+
+/**
+ * Is self-healing enabled for this workflow (Phase 2)?
+ *
+ * One indexed read on the primary key, called only on the FAILURE path and only behind
+ * `wf.patched("self-heal-v1")`. ABSENCE ⇒ FALSE — the setting is opt-in per (tenant, env,
+ * workflowKey) and absent for almost everyone, so the overwhelmingly common answer is "no" and
+ * the failing run goes on to fail exactly as it did before.
+ *
+ * NEVER THROWS. It runs beside the resume snapshot on a path whose one job is to report the run's
+ * real failure; an error here that propagated would replace that failure with a bookkeeping one.
+ * The caller wraps it too — belt and braces, because the ways Temporal can fail a CALL (an
+ * unregistered activity, a timeout, retries exhausted) are not catchable inside it.
+ *
+ * Answering `false` on an error is the safe direction: a missed proposal costs a notification
+ * nobody receives, while a spurious `true` spends a tenant's model tokens without being asked.
+ */
+export async function shouldSelfHeal(meta: {
+  tenantId: string;
+  environmentId?: string;
+  workflowKey?: string;
+}): Promise<boolean> {
+  // A run with no workflowKey predates key tracking and has nothing to propose a fix TO; a run
+  // with no environmentId predates env scoping and cannot be matched to an env-scoped setting.
+  if (!meta.workflowKey || !meta.environmentId) return false;
+  try {
+    const row = await getPrisma().selfHealSetting.findUnique({
+      where: {
+        tenantId_environmentId_workflowKey: {
+          tenantId: meta.tenantId,
+          environmentId: meta.environmentId,
+          workflowKey: meta.workflowKey,
+        },
+      },
+      select: { enabled: true },
+    });
+    return row?.enabled === true;
+  } catch (err) {
+    log.warn(
+      {
+        activity: "shouldSelfHeal",
+        tenantId: meta.tenantId,
+        workflowKey: meta.workflowKey,
+        err: err instanceof Error ? err.message : String(err),
+      },
+      "could not read the self-heal setting; treating the workflow as opted out",
+    );
+    return false;
+  }
+}
