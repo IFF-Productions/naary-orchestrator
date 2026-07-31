@@ -183,6 +183,23 @@ export function useFixFromRun({
     // A fix is a CHANGE to this workflow. Set here rather than on completion so the panel doesn't
     // silently switch mode under the user midway through reading it.
     setAiMode("edit");
+    /**
+     * EVERYTHING SHOWN ABOUT A RUN BELONGS TO THAT RUN.
+     *
+     * `?fix=` can change without the canvas unmounting — browser back/forward between two fix
+     * URLs. Without this reset the panel would report the NEW run in its header while still
+     * showing the OLD run's description, drift warning and "sends output from …" list. Every one
+     * of those is an assertion about which run's data is about to be sent to a model, and the
+     * step list in particular is the panel's whole disclosure of what leaves the tenant — showing
+     * one run's under another's header is not a cosmetic staleness.
+     *
+     * Clearing the box does discard hand-edits carried across a deliberate switch to a different
+     * run's fix URL. That is the right trade: the user navigated to run B asking for run B's
+     * description, and the alternative — keeping their text under a header describing a different
+     * run — is the misattribution this is here to prevent.
+     */
+    setFetched({ runVersion: null, includedNodeIds: [], error: null });
+    setAiPrompt("");
   }, [fixRunId]);
 
   useEffect(() => {
