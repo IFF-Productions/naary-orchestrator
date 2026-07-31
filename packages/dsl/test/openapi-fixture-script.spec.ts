@@ -50,6 +50,14 @@ function sourceKeys(): string[] {
     start,
     "SOURCES block not found — has the script been reshaped?",
   ).toBeGreaterThan(-1);
+  // BOTH ends, or the slice lies. `indexOf` returns -1 for a missing terminator, and
+  // `slice(start, -1)` is not empty — it runs to one character before EOF, so the regex would
+  // happily return keys from a block that never closes and the guard would read as passing. That
+  // is the same shape as the bug this file exists to catch, one level up.
+  expect(
+    end,
+    "SOURCES block never closes — has the script been reshaped?",
+  ).toBeGreaterThan(start);
   const block = src.slice(start, end);
   // Top-level keys only: two-space indent. A nested entry (the #950 bug) is indented four.
   return [...block.matchAll(/^ {2}(\w+): \{$/gm)].map((m) => m[1]);

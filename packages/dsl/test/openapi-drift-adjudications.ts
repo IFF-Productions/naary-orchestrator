@@ -238,9 +238,10 @@ export const ACKNOWLEDGED_BODY: {
  * It is also unsatisfiable as written, which is the part that does not depend on reading the prose
  * charitably. `merge` ("if true, merges the issues together") and `discard` ("if true, discards the
  * issues instead of updating them") are opposite operations, and the nested `statusDetails` requires
- * `inRelease`, `inNextRelease` AND the three `ignore*` windows at once — alternative resolution
- * targets. No request can satisfy this schema, so no catalog could be written to satisfy it either;
- * a request that DID send all twelve would be the broken one.
+ * `inRelease`, `inNextRelease` AND all five `ignore*` fields (`ignoreCount`, `ignoreDuration`,
+ * `ignoreUserCount`, `ignoreUserWindow`, `ignoreWindow`) at once — alternative resolution targets.
+ * No request can satisfy this schema, so no catalog could be written to satisfy it either; a request
+ * that DID send all twelve would be the broken one.
  *
  * Systematic, not specific to this route: 9 of Sentry's 63 documented write bodies mark every
  * property required, which is the signature of a generator emitting `required` from the property
@@ -254,7 +255,7 @@ const SENTRY_PARTIAL_UPDATE =
   "Sentry marks all 12 properties of a PARTIAL update required while the same operation's " +
   'description reads "Only the attributes submitted are modified" — and the set is unsatisfiable ' +
   "anyway (`merge` and `discard` are opposite operations; `statusDetails` requires `inRelease`, " +
-  "`inNextRelease` and the `ignore*` windows simultaneously). A generator artifact: 9 of Sentry's " +
+  "`inNextRelease` and all five `ignore*` fields simultaneously). A generator artifact: 9 of Sentry's " +
   "63 write bodies mark every property required. Re-derived on every " +
   "`pnpm refresh:openapi-fixtures`, so if Sentry fixes it this entry stops matching.";
 
