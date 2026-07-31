@@ -321,6 +321,20 @@ export const graphsApi = {
       body: JSON.stringify({ errorWorkflowKey }),
     });
   },
+  /** Is self-healing on for this workflow? Default OFF — see the SelfHealSetting schema. */
+  getSelfHeal(workflowKey: string): Promise<{ enabled: boolean }> {
+    return http(`/graphs/${encodeURIComponent(workflowKey)}/self-heal`);
+  },
+  /** Turn self-healing on/off. Requires `edit` on the workflow (enforced server-side). */
+  setSelfHeal(
+    workflowKey: string,
+    enabled: boolean,
+  ): Promise<{ enabled: boolean }> {
+    return http(`/graphs/${encodeURIComponent(workflowKey)}/self-heal`, {
+      method: "PUT",
+      body: JSON.stringify({ enabled }),
+    });
+  },
   // Save a compiled graph under a workflowKey (versioned + content-hashed server-side).
   saveGraph(
     workflowKey: string,

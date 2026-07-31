@@ -123,6 +123,7 @@ export function WorkflowDetail() {
   const [error, setError] = useState<string | null>(null);
   const [workflows, setWorkflows] = useState<{ workflowKey: string }[]>([]);
   const [errWk, setErrWk] = useState<string | null>(null);
+  const [selfHeal, setSelfHeal] = useState(false);
   const [runs, setRuns] = useState<RunSummary[]>([]);
   // ACTIVE-env version history (the diff pickers + the history card).
   const [versions, setVersions] = useState<GraphVersion[]>([]);
@@ -187,6 +188,10 @@ export function WorkflowDetail() {
       .getErrorHandler(key)
       .then((r) => live && setErrWk(r.errorWorkflowKey))
       .catch(() => undefined);
+    api
+      .getSelfHeal(key)
+      .then((r) => live && setSelfHeal(r.enabled))
+      .catch(() => undefined);
     return () => {
       live = false;
     };
@@ -204,6 +209,14 @@ export function WorkflowDetail() {
   async function bindErrorHandler(value: string | null): Promise<void> {
     setErrWk(value);
     await api.setErrorHandler(key, value).catch(() => undefined);
+  }
+
+  async function toggleSelfHeal(next: boolean): Promise<void> {
+    // Optimistic, then REVERTED on failure. The server enforces `edit`, so a viewer flipping this
+    // gets a 403 — leaving the switch showing "on" for a setting that was refused would be the
+    // worst of both: no self-healing, and a UI that says there is.
+    setSelfHeal(next);
+    await api.setSelfHeal(key, next).catch(() => setSelfHeal(!next));
   }
 
   // Memoized on the graph alone — recomputing it per render is not just wasted layout work, it
@@ -643,6 +656,52 @@ export function WorkflowDetail() {
                 </option>
               ))}
           </select>
+
+          {/* Self-healing sits directly under the error workflow because they answer the same
+              question — what happens when this fails — and splitting them across two screens
+              would be the odd choice. */}
+          <label
+            style={{
+              display: "flex",
+              alignItems: "flex-start",
+              gap: 10,
+              marginTop: 14,
+              cursor: "pointer",
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={selfHeal}
+              onChange={(e) => void toggleSelfHeal(e.target.checked)}
+              style={{ marginTop: 3, flex: "none" }}
+            />
+            <span>
+              <span
+                style={{
+                  fontSize: "var(--text-sm)",
+                  fontWeight: "var(--weight-semibold)",
+                  color: "var(--ink)",
+                }}
+              >
+                Suggest a fix when this fails
+              </span>
+              <span
+                style={{
+                  display: "block",
+                  fontSize: "var(--text-sm)",
+                  color: "var(--ink-2)",
+                  lineHeight: 1.6,
+                  marginTop: 2,
+                }}
+              >
+                A failed run is diagnosed and a change to this workflow is
+                proposed for you to review. <strong>Nothing is applied
+                without your approval</strong>, and the diff is shown before
+                anything is saved. Generating a proposal uses your model
+                provider key, and repeated identical failures propose once.
+              </span>
+            </span>
+          </label>
           <div
             style={{
               fontSize: "var(--text-sm)",
