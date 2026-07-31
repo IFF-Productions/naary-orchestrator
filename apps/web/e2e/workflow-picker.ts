@@ -99,17 +99,26 @@ export async function openDialogWith(
 ): Promise<void> {
   const title = page.getByText(dialogTitle, { exact: true });
   const button = page.getByRole("button", { name: trigger });
-  const deadline = Date.now() + budgetMs;
+  const start = Date.now();
+  const deadline = start + budgetMs;
 
   while (Date.now() < deadline) {
     // Check BEFORE clicking, every time. Not because a stray click would close it — it wouldn't,
     // see above — but because clicking a covered trigger burns the click timeout doing nothing,
     // which measurably delayed the open in testing.
     if (await title.isVisible().catch(() => false)) return;
+    // Every wait is CLAMPED to what's left. Checking the deadline only at the top of the loop
+    // would let one iteration run ~6s past it (click 3s + wait 3s), so a "25s budget" could spend
+    // 31s and then report "never opened within 25000ms" — a number that was not true. The first
+    // version of this did exactly that, and its own measurements said 27.2s.
+    const clickBudget = Math.min(3_000, deadline - Date.now());
+    if (clickBudget <= 0) break;
     // A short click timeout so a covered/not-yet-bound trigger costs a moment, not the budget.
-    await button.click({ timeout: 3_000 }).catch(() => {});
+    await button.click({ timeout: clickBudget }).catch(() => {});
+    const waitBudget = Math.min(3_000, deadline - Date.now());
+    if (waitBudget <= 0) break;
     const opened = await title
-      .waitFor({ state: "visible", timeout: 3_000 })
+      .waitFor({ state: "visible", timeout: waitBudget })
       .then(() => true)
       .catch(() => false);
     if (opened) return;
@@ -117,9 +126,11 @@ export async function openDialogWith(
 
   // Out of budget. Say WHICH thing never happened — "element(s) not found" on the picker inside
   // sends the reader after the wrong component, which is what this helper exists to prevent.
+  // The time reported is what was actually SPENT, not what was asked for.
+  const spentMs = Date.now() - start;
   const triggerVisible = await button.isVisible().catch(() => false);
   throw new Error(
-    `"${dialogTitle}" never opened within ${budgetMs}ms of clicking "${trigger}". ` +
+    `"${dialogTitle}" never opened in the ${spentMs}ms after clicking "${trigger}". ` +
       (triggerVisible
         ? "The trigger is on screen, so either its handler never bound or the dialog's render is " +
           "still gated on data (Integrations renders it only once `getMe` resolves). Check the " +
