@@ -99,13 +99,17 @@ export function unsafeNodeReason(node: NodeDef): string | undefined {
   // catalog (see integration-write.ts), so a new write action is covered without touching this.
   if (type === "integration") {
     const cfg = (node.config ?? {}) as { provider?: string; action?: string };
-    // An unconfigured integration node is refused too: we cannot prove it is a read, and the save
-    // gate is the last place to catch it before a retry could double an effect. Fail closed.
-    if (
-      !cfg.provider ||
-      !cfg.action ||
-      isIntegrationWriteAction(cfg.provider, cfg.action)
-    ) {
+    // Two different refusals, and they need two different sentences. Reporting an unconfigured
+    // node as one that "WRITES (undefined/undefined)" was inaccurate AND unhelpful — the author's
+    // next move is to finish configuring it, not to move it. Review caught it.
+    if (!cfg.provider || !cfg.action) {
+      return (
+        `retry region contains integration '${id}', which has no provider/action set yet — until ` +
+        `it does we can't tell whether repeating it is safe, so it can't be inside a retry region. ` +
+        `Finish configuring it, or move it out.`
+      );
+    }
+    if (isIntegrationWriteAction(cfg.provider, cfg.action)) {
       return (
         `retry region contains integration '${id}' (${cfg.provider}/${cfg.action}), which WRITES — ` +
         `a second attempt would perform it again. Move it after the retry end, or take it out of ` +
@@ -252,14 +256,23 @@ export function computeRetryRegions(graph: GraphDef): RetryRegionResult {
 
       regionNodeIds.push(cur);
 
-      const nexts = outFrom(cur);
-      if (nexts.length !== 1) {
+      const bodyOut: EdgeDef[] = outEdges.get(cur) ?? [];
+      if (bodyOut.length !== 1) {
         return err(
           `retry region node '${cur}' must have exactly one outgoing edge (branching inside a ` +
             `retry region is not supported)`,
         );
       }
-      cur = nexts[0];
+      // A CONDITIONAL edge here would be silently IGNORED: the interpreter walks the region's
+      // precomputed node list linearly and never evaluates conditions inside it. A graph that says
+      // "only continue if X" and then continues regardless is worse than one that won't save.
+      if (bodyOut[0].condition !== undefined) {
+        return err(
+          `retry region node '${cur}' has a conditional outgoing edge — conditions inside a retry ` +
+            `region are not evaluated, so it would be ignored. Move the branch outside the region.`,
+        );
+      }
+      cur = bodyOut[0].to;
     }
 
     if (claimedEnds.has(endId)) {

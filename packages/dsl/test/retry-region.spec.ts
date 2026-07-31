@@ -166,11 +166,33 @@ describe("computeRetryRegions — what must be REFUSED, by name", () => {
     expect(read.error).toBeUndefined();
   });
 
-  it("refuses an UNCONFIGURED integration — fail closed", () => {
-    // We cannot prove it is a read, and the save gate is the last chance before a retry could
-    // double an effect.
+  it("refuses an UNCONFIGURED integration — with its OWN reason, not the write one", () => {
+    // Fail closed: we can't prove it's a read. But the first version reported it as a node that
+    // "WRITES (undefined/undefined)", which is inaccurate and tells the author to move a node when
+    // what they need to do is finish configuring it. Review caught the wording.
     const res = computeRetryRegions(graphWith([node("todo", "integration")]));
     expect(res.error).toContain("todo");
+    expect(res.error).toMatch(/no provider\/action set/);
+    expect(res.error).not.toMatch(/WRITES/);
+    expect(res.error).not.toContain("undefined");
+  });
+
+  it("refuses a CONDITIONAL edge inside the region", () => {
+    // The interpreter walks the region's precomputed node list linearly and never evaluates
+    // conditions inside it — so a conditional edge here would be silently IGNORED. A graph that
+    // says "only continue if X" and then continues regardless is worse than one that won't save.
+    const g = graphWith([
+      node("fetch", "httpRequest"),
+      node("parse", "json"),
+    ]);
+    g.edges = g.edges.map((e) =>
+      e.from === "fetch"
+        ? { ...e, condition: { path: "fetch.status", op: "eq" as const, value: 200 } }
+        : e,
+    );
+    const res = computeRetryRegions(g);
+    expect(res.error).toContain("fetch");
+    expect(res.error).toMatch(/not evaluated/);
   });
 
   it("refuses a durable/control node with a reason of its own", () => {

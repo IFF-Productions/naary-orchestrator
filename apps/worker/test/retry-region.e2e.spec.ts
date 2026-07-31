@@ -129,6 +129,37 @@ describe("retry region", () => {
     });
   }, 120_000);
 
+  it("HONOURS onError:'continue' inside the region instead of retrying past it", async () => {
+    // `onError: "continue"` is handled by exec-chain, not execNode — so the first version, which
+    // called execNode directly, silently overrode the author's instruction: a node explicitly told
+    // to continue past its error instead threw and retried the WHOLE region. Review caught it.
+    //
+    // A node marked "continue" is one whose failure is expected and handled downstream. Retrying
+    // around it is repeating work to arrive at the same place.
+    harnessState.httpFailures = 99; // fetch always fails…
+    const g = retryGraph({ initialIntervalSeconds: 0 });
+    g.nodes = g.nodes.map((n) =>
+      n.id === "fetch" ? { ...n, onError: "continue" } : n,
+    ) as typeof g.nodes;
+
+    const worker = await makeWorker(env);
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [g, { x: 1 }, { tenantId: "t-retry", environmentId: "e-retry" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-retry-on-error-continue",
+      });
+      const result = await handle.result();
+
+      // …and the run COMPLETES, because the author said to carry on.
+      expect(result.status).toBe("completed");
+      // ONE call: the region did not retry around a node whose failure was expected.
+      expect(httpCalls).toHaveLength(1);
+      // The error is the node's output, exactly as it would be outside a retry region.
+      expect(result.ctx.fetch).toMatchObject({ error: expect.any(String) });
+    });
+  }, 120_000);
+
   it("costs nothing when the first attempt succeeds", async () => {
     // The overwhelmingly common case: a region that works must not add a call or a wait.
     const worker = await makeWorker(env);

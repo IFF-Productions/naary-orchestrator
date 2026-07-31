@@ -141,7 +141,32 @@ export async function execChain(
               const rnode = nodeById.get(rid);
               if (rnode === undefined) return "invalid_graph";
               state.currentNodeId = rid;
-              const terminal = await engine.execNode(rnode);
+              let terminal: ExecutionStatus | null;
+              try {
+                terminal = await engine.execNode(rnode);
+              } catch (err) {
+                // A BUDGET PAUSE is not a node error and must not consume an attempt: the run
+                // parks until the cap is raised, then re-runs this node. Checked FIRST, exactly as
+                // the top-level walk does.
+                if (isBudgetPauseFailure(err) && wf.patched("budget-pause-v1")) {
+                  await engine.pauseOnBudget();
+                  continue; // re-run the SAME node, same attempt
+                }
+                /**
+                 * `onError: "continue"` is handled by exec-chain, NOT by execNode — so calling
+                 * execNode directly (as the first version did) silently OVERRODE the author's
+                 * per-node instruction: a node explicitly told to continue past its error instead
+                 * threw and triggered a retry of the whole region. Review caught it.
+                 *
+                 * Honoured here the way the top-level walk does: record the error as that node's
+                 * output and carry on, so the attempt is not treated as failed. A node the author
+                 * marked "continue" is one whose failure is expected and handled downstream —
+                 * retrying the region around it would be repeating work to reach the same place.
+                 */
+                if (rnode.onError !== "continue") throw err;
+                ctx[rid] = { error: nodeErrorMessage(err) };
+                continue;
+              }
               // A RETURNED terminal (rejected / budget_exceeded / circuit_open) is a decision, not
               // a failure — retrying it would ignore what the run just decided. Only a THROW is a
               // failed attempt.
