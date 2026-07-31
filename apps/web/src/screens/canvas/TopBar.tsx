@@ -606,7 +606,10 @@ export function CanvasTopBar({
                 // a real run, and it produces more log output than a plain one.
                 {
                   label: "Save & run with debug",
-                  hint: "Adds a per-step row (timing, model, tokens, cost, HTTP status) to the run's Execution log and logs it verbosely in the worker. Runs the flow for real.",
+                  // The per-step rows are in every run's Execution log now, so this flag no longer
+                  // changes that screen — it turns on verbose WORKER logging. Claiming otherwise
+                  // would have people tick it looking for a difference that isn't there.
+                  hint: "Logs every step verbosely in the worker, for diagnosing a problem in the worker's own output. Runs the flow for real. (Per-step input/output is in the Execution log either way.)",
                   action: onRunDebug,
                   disabled: busy || checking || !graphValid || !maySave,
                 },
