@@ -1,0 +1,133 @@
+// ── Pipedrive (cloud, api.pipedrive.com/v1; auth = an API token as a Bearer) ──────────
+import type { IntegrationProvider } from "../types";
+
+export const PIPEDRIVE: IntegrationProvider = {
+  key: "pipedrive",
+  label: "Pipedrive",
+  baseUrl: "https://api.pipedrive.com/v1",
+  authScheme: "bearer",
+  description:
+    "Act on Pipedrive CRM — create/get/update deals, create persons, list deals.",
+  auth: "A custom connection whose token is a Pipedrive API token, sent as a Bearer token.",
+  actions: [
+    {
+      key: "create_deal",
+      label: "Create deal",
+      description: "Create a new deal.",
+      method: "POST",
+      pathTemplate: "/deals",
+      write: true,
+      fields: [
+        { key: "title", label: "Title", in: "body", required: true },
+        {
+          key: "value",
+          label: "Value",
+          in: "body",
+          required: false,
+          type: "number",
+        },
+        { key: "currency", label: "Currency", in: "body", required: false },
+        {
+          key: "person_id",
+          label: "Person id",
+          in: "body",
+          required: false,
+          type: "number",
+        },
+        {
+          key: "org_id",
+          label: "Organization id",
+          in: "body",
+          required: false,
+          type: "number",
+        },
+      ],
+    },
+    {
+      key: "get_deal",
+      label: "Get deal",
+      description: "Fetch a single deal by id.",
+      method: "GET",
+      pathTemplate: "/deals/{dealId}",
+      write: false,
+      fields: [{ key: "dealId", label: "Deal id", in: "path", required: true }],
+    },
+    {
+      key: "update_deal",
+      label: "Update deal",
+      description: "Update an existing deal by id.",
+      method: "PUT",
+      pathTemplate: "/deals/{dealId}",
+      write: true,
+      fields: [
+        { key: "dealId", label: "Deal id", in: "path", required: true },
+        { key: "title", label: "Title", in: "body", required: false },
+        {
+          key: "value",
+          label: "Value",
+          in: "body",
+          required: false,
+          type: "number",
+        },
+        {
+          key: "status",
+          label: "Status",
+          in: "body",
+          required: false,
+          hint: "open|won|lost|deleted",
+        },
+      ],
+    },
+    {
+      key: "create_person",
+      label: "Create person",
+      description: "Create a new person (contact).",
+      method: "POST",
+      pathTemplate: "/persons",
+      write: true,
+      fields: [
+        { key: "name", label: "Name", in: "body", required: true },
+        {
+          key: "email",
+          label: "Email",
+          in: "body",
+          required: false,
+          type: "string[]",
+          hint: "array of email addresses",
+        },
+        { key: "phone", label: "Phone", in: "body", required: false },
+      ],
+    },
+    {
+      key: "list_deals",
+      label: "List deals",
+      description: "List deals, optionally filtered by status.",
+      method: "GET",
+      pathTemplate: "/deals",
+      write: false,
+      fields: [
+        {
+          key: "status",
+          label: "Status",
+          in: "query",
+          required: false,
+          hint: "open|won|lost|deleted|all_not_deleted",
+        },
+        {
+          key: "limit",
+          label: "Limit",
+          in: "query",
+          required: false,
+          type: "number",
+        },
+        {
+          key: "start",
+          label: "Start",
+          in: "query",
+          required: false,
+          type: "number",
+        },
+      ],
+    },
+  ],
+};
