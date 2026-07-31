@@ -285,6 +285,27 @@ jobs:
           E2E_API_BASE: http://localhost:${{ env.E2E_API_PORT }}
         run: pnpm --filter @naary/web test:e2e
 
+      # The screenshot + trace Playwright already captures (see playwright.config.ts) only exist
+      # on the runner, so a CI-only failure had to be diagnosed from a stack trace alone. Uploading
+      # them turns "the dialog never opened" into a picture of the screen where it didn't, and a
+      # trace you can step through with `playwright show-trace`.
+      #
+      # NOT `if: failure()`. The trace is written `on-first-retry`, so a FLAKY test — one that
+      # fails, retries and passes — is precisely the case that produces a trace and leaves the job
+      # green. Gating on failure would discard the evidence for the flakes we most want to read.
+      # `test-results/` only exists when something failed at least once, so a clean run uploads the
+      # report alone.
+      - name: Playwright report + traces
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            apps/web/playwright-report
+            apps/web/test-results
+          retention-days: 7
+          if-no-files-found: ignore
+
       - name: Stack logs (on failure)
         if: failure()
         run: ${{ steps.compose.outputs.cmd }} logs --tail=300 || true

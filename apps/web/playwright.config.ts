@@ -20,8 +20,19 @@ export default defineConfig({
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   workers: process.env.CI ? 1 : undefined,
-  reporter: process.env.CI ? "line" : "list",
-  timeout: 30_000,
+  // CI keeps the streaming line reporter (the job log is the first thing anyone reads) AND writes
+  // an HTML report, which the workflow uploads on failure. Screenshots and traces are already
+  // captured below; until that upload existed they were written into the runner and thrown away,
+  // so diagnosing a CI-only failure meant reasoning from a stack trace about a screen nobody
+  // could look at.
+  reporter: process.env.CI
+    ? [["line"], ["html", { open: "never" }]]
+    : ("list" as const),
+  // 30s was not enough headroom on a loaded CI stack: a spec that waits ~25s for a data-gated
+  // dialog and then drives a picker (readyPicker alone budgets 20s) has nothing left, and fails
+  // for being slow rather than wrong. A longer ceiling costs nothing when tests pass — it is only
+  // ever spent on a test that was going to be slow or fail anyway.
+  timeout: 60_000,
   expect: { timeout: 10_000 },
   use: {
     baseURL,
