@@ -7,8 +7,11 @@
  * when the real budget policy sets a per-execution cap) · Build with AI ·
  * feedback · "…" overflow menu (Import / Export / Run input / workflow
  * switcher) · Save · Save & run.
+ *
+ * On a PHONE the row is narrower than that list, so Save and "Check flow" move
+ * INTO the "…" menu and only the name + "Save & run" stay in the bar (#964).
  */
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button, Icon, StatusPill } from "../../components";
 import type { GraphSummary } from "../../lib/api";
@@ -70,6 +73,27 @@ const monoLabel: React.CSSProperties = {
   letterSpacing: "0.03em",
   color: "var(--ink-3)",
 };
+
+/** Rule between groups in the "…" menu (also used above the workflow switcher). */
+const menuDivider: React.CSSProperties = {
+  borderTop: "1px solid var(--line)",
+  margin: "6px 0",
+};
+
+/**
+ * One row of the "…" menu. Typed rather than inferred from the literal because the list is now
+ * assembled conditionally (the phone-only Save / Check flow rows are spread in), and a widened
+ * union would quietly drop `hint` on the items that carry one.
+ */
+interface MenuItem {
+  label: string;
+  action: () => void;
+  disabled?: boolean;
+  /** Sub-label — the honest cost of the action, or WHY it is disabled. */
+  hint?: string;
+  /** Draw a rule after this row. */
+  endsGroup?: boolean;
+}
 
 export function CanvasTopBar({
   name,
@@ -299,8 +323,10 @@ export function CanvasTopBar({
       )}
 
       {/* name (editable, styled as plain bold text) + mono meta. On a phone the name shrinks
-          FIRST (so the right cluster's Save/Run stay put) and the mono key·version meta is
-          hidden to save the row. */}
+          FIRST (so the right cluster's "…" / Save & run stay put) and the mono key·version meta
+          is hidden to save the row. It shrinks, but it must not VANISH: `minWidth: 0` against a
+          `flex: none` cluster meant the name absorbed every pixel of shortfall and ended up 14px
+          wide — its own padding — at 390px (#964). The cluster is what got smaller instead. */}
       <div
         style={{
           display: "flex",
@@ -477,9 +503,14 @@ export function CanvasTopBar({
         </span>
       )}
 
-      {/* right cluster. On a phone it's flex:none so Save / Save & run / the "…" menu never
-          shrink or clip (the workflow name shrinks first instead); on wider layouts it keeps the
-          original min-width:0 so it can still shrink if needed. */}
+      {/* right cluster. On a phone it's flex:none so "Save & run" and the "…" menu never shrink
+          or clip (the workflow name shrinks first instead); on wider layouts it keeps the
+          original min-width:0 so it can still shrink if needed.
+
+          flex:none is only safe because the phone cluster is now SHORT — two controls. It cannot
+          shrink, so whatever it contains it takes, and the header's overflow goes off the right
+          edge under a root that is `overflow-x: hidden` (#511's trap): not clipped-but-scrollable,
+          just gone. Anything added here must be `!phone` unless the row is measured again. */}
       <div
         style={{
           marginLeft: "auto",
@@ -589,78 +620,110 @@ export function CanvasTopBar({
                 zIndex: 40,
               }}
             >
-              {[
-                { label: "Import…", action: onImport, disabled: busy },
-                {
-                  label: "Export",
-                  action: onExport,
-                  disabled: busy || !graphValid,
-                },
-                {
-                  label: showInput ? "Hide run input" : "Run input…",
-                  action: onToggleInput,
-                  disabled: busy,
-                },
-                // Diagnostics: a normal "Save & run" PLUS the API's per-run `debug` flag. Gated
-                // exactly like "Save & run" (it saves first). The hint is the honest cost — it is
-                // a real run, and it produces more log output than a plain one.
-                {
-                  label: "Save & run with debug",
-                  // The per-step rows are in every run's Execution log now, so this flag no longer
-                  // changes that screen — it turns on verbose WORKER logging. Claiming otherwise
-                  // would have people tick it looking for a difference that isn't there.
-                  hint: "Logs every step verbosely in the worker, for diagnosing a problem in the worker's own output. Runs the flow for real. (Per-step input/output is in the Execution log either way.)",
-                  action: onRunDebug,
-                  disabled: busy || checking || !graphValid || !maySave,
-                },
-              ].map((it) => (
-                <button
-                  key={it.label}
-                  type="button"
-                  role="menuitem"
-                  disabled={it.disabled}
-                  onClick={() => {
-                    setMenuOpen(false);
-                    it.action();
-                  }}
-                  className="naary-menu-item"
-                  style={{
-                    display: "block",
-                    width: "100%",
-                    textAlign: "left",
-                    padding: "8px 10px",
-                    borderRadius: 8,
-                    border: "none",
-                    background: "transparent",
-                    color: it.disabled ? "var(--ink-3)" : "var(--ink)",
-                    fontSize: "var(--text-sm)",
-                    cursor: it.disabled ? "default" : "pointer",
-                  }}
-                >
-                  {it.label}
-                  {"hint" in it && it.hint && (
-                    <span
-                      style={{
-                        display: "block",
-                        fontSize: "var(--text-2xs)",
-                        lineHeight: 1.4,
-                        color: "var(--ink-3)",
-                        marginTop: 2,
-                        whiteSpace: "normal",
-                      }}
-                    >
-                      {it.hint}
-                    </span>
-                  )}
-                </button>
+              {(
+                [
+                  // #964: on a phone Save and "Check flow" are HERE, not in the bar — measured at
+                  // 390px the bar could not hold them. The name input was down to 14px (its own
+                  // padding: the workflow you are editing was not on screen at all) and
+                  // "Save & run" ran 22–109px past the right edge, under a root that is
+                  // `overflow-x: hidden`, so the primary CTA could not even be scrolled to. The
+                  // name and the one CTA win the row; the two secondary actions join the menu that
+                  // already holds the less-frequent ones.
+                  //
+                  // `saveDeniedTitle` rides along as `hint`: a menu row has no `title` to hover,
+                  // and on a touch screen a hover tooltip is nothing — so the RBAC reason a save is
+                  // refused would otherwise have disappeared on exactly the layout that hides the
+                  // button. Same for "Checking…": the bar's `status` text is desktop-only, so
+                  // without the label swap a phone user gets no sign a check is running at all.
+                  ...(phone
+                    ? [
+                        {
+                          label: "Save",
+                          hint: maySave ? undefined : saveDeniedTitle,
+                          action: onSave,
+                          disabled: busy || !graphValid || !maySave,
+                        },
+                        {
+                          label: checking ? "Checking…" : "Check flow",
+                          hint: maySave
+                            ? "Saves, then checks every integration node's config, request and connection — without running anything"
+                            : saveDeniedTitle,
+                          action: onCheck,
+                          disabled: busy || checking || !graphValid || !maySave,
+                          endsGroup: true,
+                        },
+                      ]
+                    : []),
+                  { label: "Import…", action: onImport, disabled: busy },
+                  {
+                    label: "Export",
+                    action: onExport,
+                    disabled: busy || !graphValid,
+                  },
+                  {
+                    label: showInput ? "Hide run input" : "Run input…",
+                    action: onToggleInput,
+                    disabled: busy,
+                  },
+                  // Diagnostics: a normal "Save & run" PLUS the API's per-run `debug` flag. Gated
+                  // exactly like "Save & run" (it saves first). The hint is the honest cost — it is
+                  // a real run, and it produces more log output than a plain one.
+                  {
+                    label: "Save & run with debug",
+                    // The per-step rows are in every run's Execution log now, so this flag no
+                    // longer changes that screen — it turns on verbose WORKER logging. Claiming
+                    // otherwise would have people tick it looking for a difference that isn't
+                    // there.
+                    hint: "Logs every step verbosely in the worker, for diagnosing a problem in the worker's own output. Runs the flow for real. (Per-step input/output is in the Execution log either way.)",
+                    action: onRunDebug,
+                    disabled: busy || checking || !graphValid || !maySave,
+                  },
+                ] satisfies MenuItem[]
+              ).map((it) => (
+                <Fragment key={it.label}>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled={it.disabled}
+                    onClick={() => {
+                      setMenuOpen(false);
+                      it.action();
+                    }}
+                    className="naary-menu-item"
+                    style={{
+                      display: "block",
+                      width: "100%",
+                      textAlign: "left",
+                      padding: "8px 10px",
+                      borderRadius: 8,
+                      border: "none",
+                      background: "transparent",
+                      color: it.disabled ? "var(--ink-3)" : "var(--ink)",
+                      fontSize: "var(--text-sm)",
+                      cursor: it.disabled ? "default" : "pointer",
+                    }}
+                  >
+                    {it.label}
+                    {it.hint && (
+                      <span
+                        style={{
+                          display: "block",
+                          fontSize: "var(--text-2xs)",
+                          lineHeight: 1.4,
+                          color: "var(--ink-3)",
+                          marginTop: 2,
+                          whiteSpace: "normal",
+                        }}
+                      >
+                        {it.hint}
+                      </span>
+                    )}
+                  </button>
+                  {it.endsGroup && <div style={menuDivider} />}
+                </Fragment>
               ))}
 
-              <div
-                style={{
-                  borderTop: "1px solid var(--line)",
-                  margin: "6px 0",
-                }}
-              />
+              <div style={menuDivider} />
               <div
                 className="mono"
                 style={{
@@ -751,28 +814,35 @@ export function CanvasTopBar({
           )}
         </div>
 
-        <Button
-          variant="secondary"
-          disabled={busy || !graphValid || !maySave}
-          title={maySave ? undefined : saveDeniedTitle}
-          onClick={onSave}
-        >
-          Save
-        </Button>
+        {/* Save and "Check flow" are BUTTONS only from tablet up; on a phone they are rows in the
+            "…" menu above, because the bar is not wide enough for all three plus a readable name
+            (#964). "Save & run" stays — it is the primary CTA, and the one action worth the room. */}
+        {!phone && (
+          <Button
+            variant="secondary"
+            disabled={busy || !graphValid || !maySave}
+            title={maySave ? undefined : saveDeniedTitle}
+            onClick={onSave}
+          >
+            Save
+          </Button>
+        )}
         {/* Sits before "Save & run" because it is the cheap answer to the same question, and it
             is the one to reach for FIRST on a flow with real side effects. */}
-        <Button
-          variant="secondary"
-          disabled={busy || checking || !graphValid || !maySave}
-          title={
-            maySave
-              ? "Saves, then checks every integration node's config, request and connection — without running anything"
-              : saveDeniedTitle
-          }
-          onClick={onCheck}
-        >
-          {checking ? "Checking…" : "Check flow"}
-        </Button>
+        {!phone && (
+          <Button
+            variant="secondary"
+            disabled={busy || checking || !graphValid || !maySave}
+            title={
+              maySave
+                ? "Saves, then checks every integration node's config, request and connection — without running anything"
+                : saveDeniedTitle
+            }
+            onClick={onCheck}
+          >
+            {checking ? "Checking…" : "Check flow"}
+          </Button>
+        )}
         <Button
           variant="primary"
           disabled={busy || checking || !graphValid || !maySave}
