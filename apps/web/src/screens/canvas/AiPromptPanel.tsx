@@ -249,14 +249,14 @@ export function AiPromptPanel({
           // path, including the wait, so the panel doesn't jump under the user the moment the
           // description lands; the ordinary panel keeps its compact shape.
           rows={fixNotice ? 12 : 2}
-          // Read-only while the description is being written, because it is about to be written
-          // INTO this box: anything typed in that window would be silently replaced the moment
-          // the run came back. Opening the panel early is what created that window — a wait the
-          // user could see but not safely use. It reverts the instant the description lands, or
-          // when the stage ends with no description to insert.
-          disabled={
-            generating || Boolean(fixNotice && STAGE_LABEL[fixNotice.stage])
-          }
+          // READ-ONLY, not disabled, while the description is being written. It is about to be
+          // written INTO this box, so anything typed in that window would be silently replaced
+          // the moment the run came back — but `disabled` would also take the field out of the
+          // tab order and out of reach of a screen reader, which is a bigger loss than the one
+          // being prevented. `readOnly` stops the typing and keeps the field focusable. Reverts
+          // the instant the description lands, or when the stage ends with none to insert.
+          readOnly={Boolean(fixNotice && STAGE_LABEL[fixNotice.stage])}
+          disabled={generating}
           onKeyDown={(e) => {
             if ((e.metaKey || e.ctrlKey) && e.key === "Enter") onGenerate();
           }}
