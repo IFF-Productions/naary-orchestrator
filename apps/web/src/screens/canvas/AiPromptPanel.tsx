@@ -41,11 +41,15 @@ const STAGE_LABEL: Partial<Record<FixStage, string>> = {
  * The "this came from a failed run" header.
  *
  * It names what is about to leave the tenant. The prompt below is going to a model and it carries
- * the failing step's configuration, the run's trigger input, and the output of EVERY step that ran
- * — so the steps are LISTED rather than counted. "Includes output from 9 steps" is not something a
- * user can check; "includes output from pagerduty, lookup, …" is, and the prompt is right there to
- * read in full. That listing matters more now than it did when only the steps the failing one read
- * were sent: the set is larger, so the sentence has to stay literally true about it.
+ * the failing step's configuration, the run's trigger input, and the output of the steps that ran
+ * — so the steps are LISTED rather than counted OR characterised. "Includes output from 9 steps"
+ * is not something a user can check; "includes output from pagerduty, lookup, …" is, and the
+ * prompt is right there to read in full.
+ *
+ * The list is also the only formulation that stays TRUE. `buildFixInstruction` drops steps when
+ * the section exceeds its size budget, so any sentence of the form "every step that ran" is a
+ * claim this component cannot keep — and it would be false about precisely the disclosure it is
+ * making. `includedNodeIds` is what actually went, so that is what it names.
  */
 function FixNoticeBanner({
   notice,
@@ -132,10 +136,14 @@ function FixNoticeBanner({
 
       {notice.includedNodeIds.length > 0 && (
         <div style={{ marginTop: 5 }}>
+          {/* NAMES the steps rather than characterising the set. "every step that ran" was a
+              claim this component cannot keep: the instruction drops steps when the section
+              exceeds its size budget, so on a large run the sentence would have been false about
+              the very thing it exists to disclose. The list is exact by construction. */}
           Sends this workflow, the failing step and its error, the input that
           started the run, and output from{" "}
-          <span className="mono">{notice.includedNodeIds.join(", ")}</span> —
-          every step that ran. No variables or secrets.
+          <span className="mono">{notice.includedNodeIds.join(", ")}</span>. No
+          variables or secrets.
         </div>
       )}
     </div>

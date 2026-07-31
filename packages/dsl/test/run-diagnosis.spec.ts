@@ -115,6 +115,21 @@ describe("buildFixInstruction — what it includes", () => {
     expect(instruction).toContain('"title":"<unresolved>"');
   });
 
+  it("omits the AS IT RAN block when the ctx could not be READ", () => {
+    // Resolving against a ctx we failed to recover marks every reference `<unresolved>`, which
+    // asserts "this produced no value at runtime" when the truth is "we don't know". That is the
+    // confident falsehood `ctxAvailable` exists to prevent, and this block reintroduced it one
+    // level down until review caught it.
+    const { instruction } = buildFixInstruction({
+      ...base,
+      ctx: {},
+      ctxAvailable: false,
+    });
+    expect(instruction).not.toContain("AS IT RAN");
+    expect(instruction).not.toContain("<unresolved>");
+    expect(instruction).toContain("could not be read");
+  });
+
   it("omits the AS IT RAN block when the config has no templates to fill in", () => {
     // Two identical blocks would invite the model to read the second as a different fact.
     const graph: GraphDef = {

@@ -213,15 +213,27 @@ export function buildFixInstruction(
     // what a fix has to EDIT; this is what actually went out, and it is where a whole class of bug
     // becomes visible — a mistyped path (`{{ lookup.body.titel }}`) resolves to nothing, so the
     // call was made without that field. Invisible in the template, obvious here.
-    const ranAs = resolveTemplates(
-      (node.config ?? {}) as Record<string, unknown>,
-      ctx ?? {},
-      keepLiteralInDiagnosis,
-    );
+    //
+    // ONLY WHEN THE CTX WAS ACTUALLY READ. Resolving against a ctx we failed to recover marks
+    // every reference `<unresolved>` — which asserts "this produced no value at runtime" when the
+    // truth is "we don't know what it produced". That is the exact confident-falsehood this file
+    // grew `ctxAvailable` to prevent, and building this block reintroduced it one level down.
+    const ranAs =
+      ctxAvailable === false
+        ? undefined
+        : resolveTemplates(
+            (node.config ?? {}) as Record<string, unknown>,
+            ctx ?? {},
+            keepLiteralInDiagnosis,
+          );
     // Only when it differs — a config with no templates would just repeat itself, and a second
     // identical block invites the model to treat it as a second, different fact.
-    const ranAsText = clipResolved(ranAs, MAX_OUTPUT_CHARS);
-    if (ranAsText !== clip(node.config ?? {}, MAX_OUTPUT_CHARS)) {
+    const ranAsText =
+      ranAs === undefined ? null : clipResolved(ranAs, MAX_OUTPUT_CHARS);
+    if (
+      ranAsText !== null &&
+      ranAsText !== clip(node.config ?? {}, MAX_OUTPUT_CHARS)
+    ) {
       parts.push(
         `\nThe same configuration AS IT RAN, with this run's values filled in ` +
           `(\`{{ $secrets… }}\` and \`{{ $vars… }}\` are deliberately left unresolved; ` +
