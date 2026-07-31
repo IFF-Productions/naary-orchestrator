@@ -23,6 +23,11 @@ import { connectTemporal } from "../temporal/client";
 // same cap applies whether a schedule starts the run or the API does, so two copies could disagree
 // about a safety net (#805).
 import { DEFAULT_MAX_STEPS_PER_RUN } from "../executions/executions.types";
+// Same reasoning as the cap above, and the same bug one level down: this file used to carry its own
+// byte-identical copy of the Start-node sample-input reader, and the two copies had already drifted
+// to DIFFERENT fallbacks ({ message: "scheduled run" } here, a support-ticket payload there) while
+// the cron and poll paths in this same file passed `{}`. Three answers to one question (#979).
+import { startSampleInput } from "../executions/executions.helpers";
 
 export interface ScheduleView {
   id: string;
@@ -103,7 +108,9 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
           "schedrun",
           { tenantId, environmentId, workflowKey },
           snapshot,
-          sampleInput(snapshot.graph) ?? { message: "scheduled run" },
+          // `{}` when the graph declares no sample: a scheduled run gets what the schedule has,
+          // which is nothing. Matches syncCronSchedule/syncPollSchedule below.
+          startSampleInput(snapshot.graph) ?? {},
         ),
       });
     } catch (_e) {
@@ -483,7 +490,7 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
             "schedrun",
             { tenantId, environmentId, workflowKey },
             snapshot,
-            sampleInput(snapshot.graph) ?? { message: "scheduled run" },
+            startSampleInput(snapshot.graph) ?? {},
           ),
         });
       } catch (e) {
@@ -685,14 +692,4 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
     }
     return { workflowKey: row.workflowKey, environmentId: row.environmentId };
   }
-}
-
-/** The Start node's configured sample input (the scheduled run's input). */
-function sampleInput(graph: GraphDef): Record<string, unknown> | undefined {
-  const start = graph.nodes.find((n) => n.id === graph.startNodeId);
-  const s = (start?.config as { sampleInput?: unknown } | undefined)
-    ?.sampleInput;
-  return s && typeof s === "object" && !Array.isArray(s)
-    ? (s as Record<string, unknown>)
-    : undefined;
 }
