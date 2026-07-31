@@ -372,6 +372,14 @@ export const workflowHandlers = [
       contentHash: "sha-i9",
     }),
   ),
+  // Self-healing is OFF by default, which is what the toggle must show for a workflow nobody has
+  // opted in — the same default the schema states.
+  http.get("*/api/graphs/:key/self-heal", () =>
+    HttpResponse.json({ enabled: false }),
+  ),
+  http.put("*/api/graphs/:key/self-heal", () =>
+    HttpResponse.json({ enabled: true }),
+  ),
   http.get("*/api/graphs/:key/error-handler", () =>
     HttpResponse.json({ errorWorkflowKey: null }),
   ),
