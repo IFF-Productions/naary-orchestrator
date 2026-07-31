@@ -48,14 +48,26 @@ export const SENTRY: IntegrationProvider = {
         },
       ],
     },
+    // ORG-SCOPED, not the legacy `/issues/{issueId}/` (#946). Both work against the live API, but
+    // Sentry's published document contains only this form — so the un-scoped path could never be
+    // spec-verified, which is the whole point of pinning a vendor document. The org slug is not
+    // derivable from an issue id, so this cannot be back-filled: it is a required field on two
+    // actions that authors have already configured. It is the same value `list_issues` and
+    // `list_projects` below already ask for, so an author of a Sentry workflow has it to hand.
     {
       key: "get_issue",
       label: "Get issue",
       description: "Fetch a single issue by id.",
       method: "GET",
-      pathTemplate: "/issues/{issueId}/",
+      pathTemplate: "/organizations/{organizationSlug}/issues/{issueId}/",
       write: false,
       fields: [
+        {
+          key: "organizationSlug",
+          label: "Organization slug",
+          in: "path",
+          required: true,
+        },
         { key: "issueId", label: "Issue id", in: "path", required: true },
       ],
     },
@@ -64,9 +76,15 @@ export const SENTRY: IntegrationProvider = {
       label: "Update issue",
       description: "Update an issue's status (resolve, ignore, or reopen).",
       method: "PUT",
-      pathTemplate: "/issues/{issueId}/",
+      pathTemplate: "/organizations/{organizationSlug}/issues/{issueId}/",
       write: true,
       fields: [
+        {
+          key: "organizationSlug",
+          label: "Organization slug",
+          in: "path",
+          required: true,
+        },
         { key: "issueId", label: "Issue id", in: "path", required: true },
         {
           key: "status",

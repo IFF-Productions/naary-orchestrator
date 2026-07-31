@@ -556,14 +556,40 @@ describe("integration catalog — request construction", () => {
     expect(req.body).toBeUndefined();
   });
 
-  it("Sentry update_issue → PUT /issues/{issueId}/ (trailing slash) with { status } body", () => {
+  // ORG-SCOPED since #946 — the legacy un-scoped `/issues/{issueId}/` still works against the live
+  // API but appears in no Sentry document, so it could never be spec-verified.
+  it("Sentry update_issue → PUT the ORG-SCOPED issue path (trailing slash) with { status } body", () => {
     const req = buildIntegrationRequest("sentry", "update_issue", {
+      organizationSlug: "acme",
       issueId: "1234567890",
       status: "resolved",
     });
     expect(req.method).toBe("PUT");
-    expect(req.path).toBe("/issues/1234567890/");
+    expect(req.path).toBe("/organizations/acme/issues/1234567890/");
     expect(req.body).toEqual({ status: "resolved" });
+  });
+
+  // The org slug is not derivable from an issue id, so this is a REQUIRED field on an action authors
+  // have already configured. An existing workflow that omits it must fail loudly at build time
+  // rather than silently substituting empty and calling `/organizations//issues/…/` — the #866
+  // failure mode, which is why `applyField` throws on an empty path field at all.
+  it("Sentry update_issue without an organizationSlug fails to build, it does not substitute empty", () => {
+    expect(() =>
+      buildIntegrationRequest("sentry", "update_issue", {
+        issueId: "1234567890",
+        status: "resolved",
+      }),
+    ).toThrow(/organizationSlug/);
+  });
+
+  it("Sentry get_issue → GET the ORG-SCOPED issue path, no body", () => {
+    const req = buildIntegrationRequest("sentry", "get_issue", {
+      organizationSlug: "acme",
+      issueId: "1234567890",
+    });
+    expect(req.method).toBe("GET");
+    expect(req.path).toBe("/organizations/acme/issues/1234567890/");
+    expect(req.body).toBeUndefined();
   });
 
   it("Sentry list_issues → GET path with org/project slugs (trailing slash), no body", () => {

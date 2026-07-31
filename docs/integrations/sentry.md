@@ -53,8 +53,8 @@ Either way, the definitive check is **single-node Test** on the canvas: drop a *
 | Action | Method | Endpoint | Required fields | Optional fields |
 | --- | --- | --- | --- | --- |
 | List issues | `GET` | `/projects/{organizationSlug}/{projectSlug}/issues/` | `organizationSlug`, `projectSlug` | `query`, `statsPeriod` |
-| Get issue | `GET` | `/issues/{issueId}/` | `issueId` | — |
-| **Update issue** (write) | `PUT` | `/issues/{issueId}/` | `issueId`, `status` | — |
+| Get issue | `GET` | `/organizations/{organizationSlug}/issues/{issueId}/` | `organizationSlug`, `issueId` | — |
+| **Update issue** (write) | `PUT` | `/organizations/{organizationSlug}/issues/{issueId}/` | `organizationSlug`, `issueId`, `status` | — |
 | List projects | `GET` | `/organizations/{organizationSlug}/projects/` | `organizationSlug` | — |
 | List organizations | `GET` | `/organizations/` | — | — |
 

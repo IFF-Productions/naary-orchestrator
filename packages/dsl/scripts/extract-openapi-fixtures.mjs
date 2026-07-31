@@ -224,6 +224,7 @@ const SOURCES = {
       "https://developers.zoom.us/api-hub/users/methods/endpoints.json",
     ],
     pathPrefix: "",
+  },
   // ── added by #944, the Notion data-source migration ────────────────────────────────────────────
   notion: {
     // Notion DOES publish a machine-readable document — one file, openapi 3.1.0, 34 paths, no
@@ -234,6 +235,20 @@ const SOURCES = {
     // says so — which is precisely the failure mode #944 was filed about.
     url: "https://developers.notion.com/openapi.json",
     pathPrefix: "/v1",
+  },
+  // ── added by #946, moving the two issue actions onto the org-scoped route ──────────────────────
+  sentry: {
+    // Sentry's own generated document, published as a build artifact of their API. `-derefed` is
+    // the one to take: the sibling `openapi.json` is a table of contents whose `paths` are external
+    // `$ref`s into per-file fragments, which would need `external: true` and a second fetch layer
+    // for no gain. This file is self-contained.
+    //
+    // The path prefix is `/api/0` because the document spells routes in full
+    // (`/api/0/organizations/{organization_id_or_slug}/issues/{issue_id}/`) while our `baseUrl`
+    // already ends in `/api/0`. Pinning it is what stops `get_issue`/`update_issue` drifting back
+    // to the legacy un-scoped form, which works but appears in no Sentry document (#946).
+    url: "https://raw.githubusercontent.com/getsentry/sentry-api-schema/main/openapi-derefed.json",
+    pathPrefix: "/api/0",
   },
 };
 
@@ -267,8 +282,6 @@ const SOURCES = {
  *                instead of `PUT`, and `{id}`. Vendoring v2 would diff our requests against
  *                endpoints we don't call. (A live probe can't settle it either: Pipedrive
  *                authenticates before routing, so an unknown path also answers 401.)
- *   sentry     — documents only the org-scoped `/api/0/organizations/{org}/issues/{id}/`; ours is
- *                the legacy un-scoped `/api/0/issues/{id}/`, which works but is not in the document.
  *   zendesk    — real and fetchable (developer.zendesk.com/zendesk/oas.yaml) but canonicalises paths
  *                WITHOUT the `.json` suffix our catalog uses (`/api/v2/tickets` vs `/tickets.json`).
  *                #813 deferred the rewrite seam until a second provider needed it and named Shopify
@@ -279,6 +292,13 @@ const SOURCES = {
  * vendor-published, fetchable, and self-contained. It is in SOURCES as of #944. The lesson is that
  * "not found" is a statement about a search, so it belongs next to the search that came back
  * empty — and it expires the moment somebody looks again.
+ *
+ * `sentry` came off this list the same way, and for a sharper reason (#946). Its row read "documents
+ * only the org-scoped issue route; ours is the legacy un-scoped one" — which was true, and was a
+ * finding about OUR CATALOG rather than about Sentry's document. The un-scoped path works, so the
+ * row had quietly become a reason not to look, when the actual fix was to call the route the vendor
+ * documents. A provider whose spec exists and is fetchable does not belong here just because our
+ * request doesn't match it; that is the case the drift spec is FOR.
  */
 
 /** Placeholders differ in name between us and upstream, so match on SHAPE. */
@@ -325,8 +345,7 @@ async function loadDocument(url, format) {
   const cached = documents.get(url);
   if (cached) return cached;
   const res = await fetch(url);
-  if (!res.ok)
-    throw new Error(`${res.status} ${res.statusText} — ${url}`);
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText} — ${url}`);
   const isYaml =
     (format ?? (/\.ya?ml($|\?)/.test(url) ? "yaml" : "json")) === "yaml";
   // `yaml` is a devDependency of this package and imported LAZILY, so a JSON-only refresh still
@@ -380,12 +399,20 @@ async function materialize(node, docUrl, stack = new Set(), hops = 0) {
     // chain, bounded only by the `hops > 12` backstop rather than caught as circular. OpenAPI 3.1
     // permits `$ref` siblings, so that shape is legal input, not a malformed spec.
     const stackWithKey = new Set(stack).add(key);
-    const resolved = await materialize(target, targetUrl, stackWithKey, hops + 1);
+    const resolved = await materialize(
+      target,
+      targetUrl,
+      stackWithKey,
+      hops + 1,
+    );
     // OpenAPI 3.1 allows keys beside `$ref` (a `description` override, most often). Ours win.
     // `hops` is NOT incremented: siblings sit at this node's level, not one indirection deeper.
     const { $ref: _ignored, ...siblings } = node;
     return Object.keys(siblings).length
-      ? { ...resolved, ...(await materialize(siblings, docUrl, stackWithKey, hops)) }
+      ? {
+          ...resolved,
+          ...(await materialize(siblings, docUrl, stackWithKey, hops)),
+        }
       : resolved;
   }
   const out = {};
@@ -533,7 +560,9 @@ function pruneParameters(raw, deref, pinnedHeaders = new Set()) {
   return (
     (Array.isArray(raw) ? raw : [])
       .map((p) => deref(p))
-      .filter((p) => p && typeof p.name === "string" && typeof p.in === "string")
+      .filter(
+        (p) => p && typeof p.name === "string" && typeof p.in === "string",
+      )
       // Swagger 2's `body`/`formData` parameters ARE the request body; they are folded into a
       // `requestBody` by `swagger2RequestBody` and must not also show up as parameters, where the
       // drift spec would look for an `in:"formData"` catalog field that cannot exist.
