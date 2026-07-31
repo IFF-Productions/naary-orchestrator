@@ -30,6 +30,48 @@ export interface FixFromRun {
   includedNodeIds: string[];
   /** Why no instruction could be built (run gone, no failed node, …). */
   error: string | null;
+  /** How far along the description is — what the panel reports while nothing is in the box yet. */
+  stage: FixStage;
+}
+
+/**
+ * What the panel should be SAYING right now.
+ *
+ * Reported as "Fix with AI initially loads the canvas but nothing is happening, then it will show
+ * the prefilled prompt". Both waits are real — the canvas has to load and compile before the
+ * description can be built against it (decision 1), and then three reads of the run have to come
+ * back — so the honest fix is to name the wait rather than to shorten it.
+ *
+ * `blocked` is the one that matters most, and it is why this is a four-state enum rather than a
+ * boolean. The effect below refuses to build without a compiled graph; if the canvas never
+ * compiles, a `loading` boolean would spin forever — a spinner that promises something is coming
+ * and never delivers is a worse version of the very complaint being fixed. Once the canvas has
+ * finished LOADING and still has no graph, that is an answer, not a wait.
+ */
+export type FixStage =
+  "idle" | "loading-canvas" | "reading-run" | "blocked" | "done";
+
+export function fixStage({
+  fixRunId,
+  hasGraph,
+  canvasLoaded,
+  doneFor,
+}: {
+  fixRunId: string | null;
+  /** The canvas has compiled — the thing the description gets built against. */
+  hasGraph: boolean;
+  /** The workflow fetch has SETTLED (either way). Distinguishes "not yet" from "never". */
+  canvasLoaded: boolean;
+  /** The run whose description has been handed to the panel, successfully or with a reason. */
+  doneFor: string | null;
+}): FixStage {
+  if (!fixRunId) return "idle";
+  // A stated outcome — the instruction, or the reason there isn't one — ends the wait. Compared
+  // by run id so arriving from a SECOND failed run starts reporting again instead of showing the
+  // previous run's result as though it were this one's.
+  if (doneFor === fixRunId) return "done";
+  if (hasGraph) return "reading-run";
+  return canvasLoaded ? "blocked" : "loading-canvas";
 }
 
 /** What the fetch produced. Kept apart from `drift`, which also depends on live canvas state. */
@@ -96,6 +138,7 @@ export function useFixFromRun({
   fixRunId,
   currentGraph,
   currentVersion,
+  canvasLoaded,
   setAiPrompt,
   setAiMode,
   setShowAi,
@@ -107,6 +150,8 @@ export function useFixFromRun({
    */
   currentGraph: GraphDef | undefined;
   currentVersion: number | null;
+  /** Whether the workflow fetch has settled — see `fixStage`, which needs it to stop waiting. */
+  canvasLoaded: boolean;
   setAiPrompt: (v: string) => void;
   setAiMode: (m: "edit" | "create") => void;
   setShowAi: (v: boolean) => void;
@@ -120,6 +165,25 @@ export function useFixFromRun({
     includedNodeIds: [],
     error: null,
   });
+  /** The run this hook has finished reporting on — the `done` side of {@link fixStage}. */
+  const [doneFor, setDoneFor] = useState<string | null>(null);
+
+  /**
+   * OPEN THE PANEL ON ARRIVAL, not on completion.
+   *
+   * Separate from the build effect below on purpose: that one waits for `currentGraph`, so opening
+   * there means the panel appears only once the canvas has loaded AND three reads of the run have
+   * come back. Until then the user sees a canvas that looks like they navigated to it for no
+   * reason — which is exactly what was reported. This effect depends on `fixRunId` alone, so the
+   * panel is up (reporting progress) from the first render after the click.
+   */
+  useEffect(() => {
+    if (!fixRunId) return;
+    setShowAi(true);
+    // A fix is a CHANGE to this workflow. Set here rather than on completion so the panel doesn't
+    // silently switch mode under the user midway through reading it.
+    setAiMode("edit");
+  }, [fixRunId]);
 
   useEffect(() => {
     if (!fixRunId) return;
@@ -134,6 +198,16 @@ export function useFixFromRun({
     // Did this invocation get far enough to hand the prompt over? See the cleanup for why the
     // claim above cannot be trusted on its own.
     let handedOver = false;
+    /**
+     * The single hand-over point. There are three of them below — an instruction, a run with no
+     * failed step, and a read that failed — and each has to move BOTH the local claim and the
+     * reported stage. Setting one at three sites and the other at two is how #973 happened; one
+     * function is one thing to get right.
+     */
+    const finish = () => {
+      handedOver = true;
+      setDoneFor(fixRunId);
+    };
 
     void (async () => {
       try {
@@ -153,7 +227,7 @@ export function useFixFromRun({
               "That run doesn't record which step failed, so there's nothing specific to describe. Say what you'd like changed instead.",
           }));
           setShowAi(true);
-          handedOver = true; // a stated reason IS the outcome; don't re-fetch over it
+          finish(); // a stated reason IS the outcome; don't re-fetch over it
           return;
         }
 
@@ -183,7 +257,7 @@ export function useFixFromRun({
         setAiPrompt(instruction);
         setAiMode("edit");
         setShowAi(true);
-        handedOver = true;
+        finish();
         // Only what the FETCH knows. Drift is computed at render against the live version.
         setFetched({
           runVersion: runGraph?.version ?? null,
@@ -198,7 +272,7 @@ export function useFixFromRun({
             "Couldn't read that run, so the failure isn't described below — say what you'd like changed.",
         }));
         setShowAi(true);
-        handedOver = true;
+        finish();
       }
     })();
 
@@ -234,5 +308,11 @@ export function useFixFromRun({
     drift: driftBetween(fetched.runVersion, currentVersion),
     includedNodeIds: fetched.includedNodeIds,
     error: fetched.error,
+    stage: fixStage({
+      fixRunId,
+      hasGraph: currentGraph !== undefined,
+      canvasLoaded,
+      doneFor,
+    }),
   };
 }

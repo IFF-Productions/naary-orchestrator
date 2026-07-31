@@ -168,12 +168,18 @@ export function CanvasStage({
       </NodeActionsContext.Provider>
 
       {/* hint pill (design comp copy, verbatim) — hidden ≤1024 where the graph
-          viewport is capped and the drag-to-map loop lives in the stacked dock. */}
+          viewport is capped and the drag-to-map loop lives in the stacked dock.
+
+          It CLEARS THE ZOOM CONTROLS rather than sitting on them. <Controls /> is a
+          react-flow bottom-LEFT panel: 15px panel margin + a 26px button + its 1px
+          borders = 43px, so the pill starts at 55. `pointerEvents: none` meant the
+          buttons still worked, but they were hidden underneath — which is worse than
+          being unclickable, because nothing suggests they're there. */}
       {!stacked && (
         <div
           style={{
             position: "absolute",
-            left: 20,
+            left: 55,
             bottom: 18,
             display: "flex",
             alignItems: "center",
@@ -187,7 +193,9 @@ export function CanvasStage({
             padding: "8px 13px",
             pointerEvents: "none",
             zIndex: 5,
-            maxWidth: "calc(100% - 40px)",
+            // Tracks the left offset above, so a long hint wraps instead of running under the
+            // full-screen toggle on a narrow canvas.
+            maxWidth: "calc(100% - 75px)",
           }}
         >
           <span
