@@ -1,6 +1,6 @@
 {
   "name": "@naary/usage",
-  "version": "0.0.53",
+  "version": "0.0.54",
   "private": true,
   "description": "Spend ledger: model pricing + usage recording. Consumed by worker activities + api — NEVER by workflow code.",
   "main": "dist/index.js",
