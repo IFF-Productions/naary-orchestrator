@@ -45,7 +45,14 @@ const STAGE_LABEL: Partial<Record<FixStage, string>> = {
  * rather than counted. "Includes output from 2 steps" is not something a user can check; "includes
  * output from pagerduty, lookup" is, and the prompt is right there to read in full.
  */
-function FixNoticeBanner({ notice }: { notice: FixNotice }) {
+function FixNoticeBanner({
+  notice,
+  hasPrompt,
+}: {
+  notice: FixNotice;
+  /** Is there actually a description in the box? Not every `done` produces one. */
+  hasPrompt: boolean;
+}) {
   const waiting = STAGE_LABEL[notice.stage];
   return (
     <div
@@ -63,10 +70,11 @@ function FixNoticeBanner({ notice }: { notice: FixNotice }) {
       <div style={{ color: "var(--ink-2)" }}>
         Describing the failure from run{" "}
         <span className="mono">{notice.runId}</span>
-        {/* "Read it below" is only true once there IS something below. Until then the sentence
-            would be pointing at an empty box, which is the state being fixed here — and on the
-            `blocked` stage nothing is ever going to be there, so it stays off for that too. */}
-        {notice.stage === "done"
+        {/* "Read it below" is only true once there IS something below — asserted against the box
+            itself rather than against the stage. `done` does not imply a description: a run whose
+            outputs couldn't be read finishes with a stated reason and an EMPTY box, and pointing
+            that user at it is the same confusion this whole change is fixing. */}
+        {hasPrompt
           ? ". Read it below and edit anything before generating."
           : waiting
             ? "…"
@@ -166,7 +174,12 @@ export function AiPromptPanel({
         background: "var(--surface)",
       }}
     >
-      {fixNotice && <FixNoticeBanner notice={fixNotice} />}
+      {fixNotice && (
+        <FixNoticeBanner
+          notice={fixNotice}
+          hasPrompt={aiPrompt.trim().length > 0}
+        />
+      )}
       {canEdit && (
         <div
           role="radiogroup"
@@ -223,9 +236,9 @@ export function AiPromptPanel({
           onChange={(e) => onPromptChange(e.target.value)}
           placeholder={
             // Still being written: say so IN the box, so the empty box isn't the only answer
-            // during the wait. You can type over it — the description is a starting point.
+            // during the wait.
             fixNotice && STAGE_LABEL[fixNotice.stage]
-              ? "The failure is being written up here — or describe the change yourself."
+              ? "The failure is being written up here…"
               : editing
                 ? "e.g. If there are no open incidents, end the run instead of failing."
                 : "e.g. When a webhook comes in, have an agent summarize it, wait for my approval, then email the summary to my team."
@@ -236,7 +249,14 @@ export function AiPromptPanel({
           // path, including the wait, so the panel doesn't jump under the user the moment the
           // description lands; the ordinary panel keeps its compact shape.
           rows={fixNotice ? 12 : 2}
-          disabled={generating}
+          // Read-only while the description is being written, because it is about to be written
+          // INTO this box: anything typed in that window would be silently replaced the moment
+          // the run came back. Opening the panel early is what created that window — a wait the
+          // user could see but not safely use. It reverts the instant the description lands, or
+          // when the stage ends with no description to insert.
+          disabled={
+            generating || Boolean(fixNotice && STAGE_LABEL[fixNotice.stage])
+          }
           onKeyDown={(e) => {
             if ((e.metaKey || e.ctrlKey) && e.key === "Enter") onGenerate();
           }}
