@@ -16,6 +16,7 @@ import {
   evaluateCondition,
   resolveTemplates,
   nextNodes,
+  retryBackoffMs,
   resolveHttpRequest,
   resolveMcpArguments,
   asNodeConfig,
@@ -64,6 +65,7 @@ export async function execChain(
     nodeById,
     mergeParents,
     itemsRegionBySplit,
+    retryRegionByStart,
     metaFor,
   } = engine;
   let current: string | undefined = startId;
@@ -101,6 +103,87 @@ export async function execChain(
       return "invalid_graph";
     }
     state.currentNodeId = current;
+
+    /**
+     * RETRY REGION (retry…retryEnd): run the bracketed nodes as a UNIT, repeating the whole span
+     * until an attempt completes without throwing or the attempts run out.
+     *
+     * The bracket is DRAWN and was validated at save (computeRetryRegions), so there is no
+     * participation inference here — the region is a list, and this is a bounded loop over it.
+     * That validation is also what guarantees nothing inside performs an effect a second attempt
+     * would repeat; the interpreter does not re-check, exactly as the items region doesn't.
+     *
+     * Gated by patched() so runs that predate this stay replay-safe. Old graphs have no `retry`
+     * node, so they never reach the branch at all.
+     */
+    if (node.type === "retry" && wf.patched("retry-region-v1")) {
+      const region = retryRegionByStart.get(current);
+      if (region) {
+        const { policy } = region;
+        let attempt = 1;
+        for (;;) {
+          state.stepCount++;
+          if (
+            runCtx.maxStepsPerRun !== undefined &&
+            state.stepCount > runCtx.maxStepsPerRun
+          ) {
+            return "circuit_open";
+          }
+          try {
+            for (const rid of region.regionNodeIds) {
+              state.stepCount++;
+              if (
+                runCtx.maxStepsPerRun !== undefined &&
+                state.stepCount > runCtx.maxStepsPerRun
+              ) {
+                return "circuit_open";
+              }
+              const rnode = nodeById.get(rid);
+              if (rnode === undefined) return "invalid_graph";
+              state.currentNodeId = rid;
+              const terminal = await engine.execNode(rnode);
+              // A RETURNED terminal (rejected / budget_exceeded / circuit_open) is a decision, not
+              // a failure — retrying it would ignore what the run just decided. Only a THROW is a
+              // failed attempt.
+              if (terminal !== null) return terminal;
+            }
+          } catch (err) {
+            if (attempt >= policy.maxAttempts) {
+              /**
+               * OUT OF ATTEMPTS — rethrow the NODE'S OWN ERROR, never a wrapper.
+               *
+               * Everything downstream of a failure keys off the real error: `failedNodeId` and the
+               * redacted HTTP capture on the run detail, `classifyFailure`, the fix diagnosis, and
+               * self-healing's dedupe signature. A "retry exhausted after 3 attempts" wrapper would
+               * blind all of it at once, replacing the one thing that says WHAT broke with a
+               * statement about how many times we asked.
+               */
+              throw err;
+            }
+            attempt++;
+            // Record the attempt where the run detail can see it: a step that silently took 40s is
+            // indistinguishable from a slow one.
+            const attempts = (ctx.__retryAttempts ?? {}) as Record<
+              string,
+              number
+            >;
+            attempts[current] = attempt;
+            ctx.__retryAttempts = attempts;
+            // A DURABLE timer, not a busy wait: a worker restart mid-backoff resumes correctly and
+            // a long wait costs nothing while idle.
+            const backoff = retryBackoffMs(policy, attempt);
+            if (backoff > 0) await wf.sleep(backoff);
+            continue;
+          }
+          break; // the attempt completed without throwing
+        }
+        // Continue AFTER the closing bracket. `retryEnd` itself is a passthrough with no output.
+        state.currentNodeId = region.retryEndId;
+        const exits = nextNodes(graph, region.retryEndId, ctx);
+        current = exits[0];
+        continue;
+      }
+    }
 
     // Items model (design ITEMS-MODEL-CURRENT-ITEM.md §0.2): a splitOut runs its LINEAR PURE
     // region once per array element, then hands the collected array to loopEnd. The region is

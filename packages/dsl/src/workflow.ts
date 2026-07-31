@@ -41,6 +41,14 @@ export {
   computeItemsRegions,
   BATCHABLE_REGION_ACTIVITIES,
 } from "./items-region";
+// Retry regions (retry…retryEnd). Zod-free and catalog-free by construction, so it is safe for the
+// deterministic bundle — the interpreter computes the same regions the save gate validated.
+export {
+  computeRetryRegions,
+  retryBackoffMs,
+  type ResolvedRetryPolicy,
+  type RetryRegion,
+} from "./retry-region";
 export { asNodeConfig } from "./node-config";
 export { getNodeOutput } from "./node-output";
 
