@@ -902,7 +902,7 @@ function RunView({ id }: { id: string }) {
             <SectionTitle>Execution log</SectionTitle>
             {/* The curated Temporal events with one row per executed step interleaved by finish
                 time; a step row opens to show what it was given and what it produced. */}
-            <LogPanel events={logEntries} />
+            <LogPanel events={logEntries} runId={id} />
             <div
               className="mono"
               style={{
@@ -986,7 +986,7 @@ function RunView({ id }: { id: string }) {
           <Card style={{ padding: "18px 20px" }}>
             <SectionTitle>Execution log</SectionTitle>
             {/* Same merged rows as the graph layout — consistent across both (#566 review). */}
-            <LogPanel events={logEntries} />
+            <LogPanel events={logEntries} runId={id} />
           </Card>
         </div>
       )}

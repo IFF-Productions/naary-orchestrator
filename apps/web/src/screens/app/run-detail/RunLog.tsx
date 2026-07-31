@@ -38,6 +38,12 @@ export interface LogEntry {
   input?: unknown;
   /** The step's own output from the run ctx. */
   output?: unknown;
+  /**
+   * Whether `output` is this step's OWN ctx entry, as opposed to the run's `__input` standing in
+   * for an entry node that wrote none. Only the former is addressable as `<runId>/<nodeId>`, which
+   * is what a textToSpeech step's audio fetch needs (see StepDetailCard, same distinction).
+   */
+  hasCtxOutput?: boolean;
   /** Set when the step ran more than once — its ctx holds only the LAST run's values. */
   ranTimes?: number;
 }
@@ -86,7 +92,7 @@ function hasPayload(ev: LogEntry): boolean {
 }
 
 /** One expanded step: what it was given, and what it produced. */
-function StepPayload({ ev }: { ev: LogEntry }) {
+function StepPayload({ ev, runId }: { ev: LogEntry; runId?: string }) {
   return (
     <div
       style={{
@@ -122,7 +128,15 @@ function StepPayload({ ev }: { ev: LogEntry }) {
           <PayloadLabel style={ev.input !== undefined ? { marginTop: 12 } : {}}>
             output
           </PayloadLabel>
-          <NodeOutputBody output={ev.output} />
+          {/* runId/nodeId are what let NodeOutputBody offer a textToSpeech step's audio player.
+              Passed only for a step's OWN ctx output, because that is the only thing addressable
+              as `<runId>/<nodeId>` — without them the log would render a quietly less capable
+              version of the same output the step card shows. */}
+          <NodeOutputBody
+            output={ev.output}
+            runId={runId}
+            nodeId={ev.hasCtxOutput === false ? undefined : ev.nodeId}
+          />
         </>
       )}
     </div>
@@ -156,8 +170,27 @@ function PayloadLabel({
 /** The design's log panel: dark mono well, timestamped rows coloured by kind. Accepts LogEntry so
  *  the caller can interleave synthetic per-step rows with the curated Temporal events — those rows
  *  carry a payload and open to show what the step was given and what it produced. */
-export function LogPanel({ events }: { events: LogEntry[] | null }) {
+export function LogPanel({
+  events,
+  runId,
+}: {
+  events: LogEntry[] | null;
+  /** The run these rows belong to — only needed to address a step's audio output. */
+  runId?: string;
+}) {
   const [open, setOpen] = useState<Set<string>>(new Set());
+
+  /**
+   * Forget which rows were open when the log resets.
+   *
+   * `useRunHistory` sets `events` to null when the run id changes, so this is per-run state. Row
+   * keys are `node-<nodeId>`, which two runs of the SAME workflow share — so without this, opening
+   * a step here and navigating to another run of that workflow would leave the corresponding row
+   * pre-opened there, and the panel stuck at its taller height while showing "Loading log…".
+   */
+  useEffect(() => {
+    if (events === null) setOpen(new Set());
+  }, [events]);
   const toggle = (key: string) =>
     setOpen((prev) => {
       const next = new Set(prev);
@@ -260,7 +293,7 @@ export function LogPanel({ events }: { events: LogEntry[] | null }) {
                   </span>
                 )}
               </div>
-              {expandable && isOpen && <StepPayload ev={ev} />}
+              {expandable && isOpen && <StepPayload ev={ev} runId={runId} />}
             </div>
           );
         })
