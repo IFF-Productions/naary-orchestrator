@@ -102,6 +102,7 @@ export const FromFailedRun: Story = {
       drift: null,
       includedNodeIds: ["schedule", "lookup"],
       error: null,
+      stage: "done",
     },
   },
 };
@@ -117,6 +118,87 @@ export const VersionDrift: Story = {
       drift: { runVersion: 3, currentVersion: 7 },
       includedNodeIds: ["schedule"],
       error: null,
+      stage: "done",
+    },
+  },
+};
+
+/**
+ * The first moment after pressing "Fix with AI" — the workflow is still opening.
+ *
+ * This is the state that was MISSING: the canvas appeared, the panel didn't, and nothing said the
+ * description was on its way, so the honest reading was that the button had done nothing. The box
+ * is already full height here, so the description lands without the panel jumping.
+ */
+export const FixOpeningWorkflow: Story = {
+  args: {
+    initialMode: "edit",
+    canEdit: true,
+    initialPrompt: "",
+    fixNotice: {
+      runId: "exec-t-demo-ce20c38b",
+      drift: null,
+      includedNodeIds: [],
+      error: null,
+      stage: "loading-canvas",
+    },
+  },
+};
+
+/** The canvas is up; the run's error, failing step and inputs are being read (three fetches). */
+export const FixReadingRun: Story = {
+  args: {
+    initialMode: "edit",
+    canEdit: true,
+    initialPrompt: "",
+    fixNotice: {
+      runId: "exec-t-demo-ce20c38b",
+      drift: null,
+      includedNodeIds: [],
+      error: null,
+      stage: "reading-run",
+    },
+  },
+};
+
+/**
+ * The workflow IS on the canvas but doesn't compile, so there is nothing valid to describe the
+ * failure against. Naming the compile error makes it fixable — and this is the case that showed
+ * up twice while building the feature, each time reading as "there's no workflow here", which was
+ * visibly false.
+ */
+export const FixCanvasDoesNotCompile: Story = {
+  args: {
+    initialMode: "edit",
+    canEdit: false,
+    initialPrompt: "",
+    fixNotice: {
+      runId: "exec-t-demo-ce20c38b",
+      drift: null,
+      includedNodeIds: [],
+      error: null,
+      stage: "blocked",
+      canvasError:
+        "node 'pagerduty': unknown action 'listIncidents' for provider 'pagerduty'",
+    },
+  },
+};
+
+/**
+ * Terminal, not a wait: the canvas finished loading with nothing on it to change, so no
+ * description is coming. A spinner here would promise one forever.
+ */
+export const FixNoWorkflowToChange: Story = {
+  args: {
+    initialMode: "edit",
+    canEdit: false,
+    initialPrompt: "",
+    fixNotice: {
+      runId: "exec-t-demo-ce20c38b",
+      drift: null,
+      includedNodeIds: [],
+      error: null,
+      stage: "blocked",
     },
   },
 };
@@ -133,6 +215,7 @@ export const FixCouldNotRead: Story = {
       includedNodeIds: [],
       error:
         "Couldn't read that run, so the failure isn't described below — say what you'd like changed.",
+      stage: "done",
     },
   },
 };

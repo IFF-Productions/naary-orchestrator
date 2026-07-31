@@ -149,6 +149,10 @@ export function CanvasPage() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [canvasFullscreen]);
+  // Has the workflow fetch SETTLED — either way? Not "did it succeed": the only consumer
+  // (useFixFromRun) needs to tell "the canvas hasn't loaded yet" from "it isn't going to", and a
+  // failed fetch answers the second. See `fixStage`.
+  const [canvasLoaded, setCanvasLoaded] = useState(false);
   // The saved workflowKey (empty until first save of a NEW workflow → slug(name)).
   const [workflowKey, setWorkflowKey] = useState("");
   const [workflows, setWorkflows] = useState<GraphSummary[]>([]);
@@ -261,6 +265,7 @@ export function CanvasPage() {
     // The graph the fix will CHANGE — the live canvas, not the snapshot the run executed.
     currentGraph: graph,
     currentVersion: version,
+    canvasLoaded,
     setAiPrompt,
     setAiMode,
     setShowAi,
@@ -598,6 +603,9 @@ export function CanvasPage() {
     let live = true;
     // A different workflow (or a template fork) invalidates all local test-run state.
     setNodeRuns({});
+    // A blank canvas has nothing to fetch, so it is already as loaded as it will get; the two
+    // branches below flip this when their fetch settles.
+    setCanvasLoaded(!templateParam && !keyParam);
     api
       .listGraphs()
       .then((ws) => live && setWorkflows(ws))
@@ -629,7 +637,8 @@ export function CanvasPage() {
         })
         .catch(
           () => live && setStatus(`Couldn't load template '${templateParam}'.`),
-        );
+        )
+        .finally(() => live && setCanvasLoaded(true));
     } else if (keyParam) {
       api
         .getGraph(keyParam)
@@ -650,9 +659,11 @@ export function CanvasPage() {
             80,
           );
         })
-        .catch(
-          () => live && setStatus(`Couldn't open workflow '${keyParam}'.`),
-        );
+        .catch(() => live && setStatus(`Couldn't open workflow '${keyParam}'.`))
+        // Settled, not succeeded — a workflow that failed to open is an answer for `fixStage`,
+        // which would otherwise report "loading" forever on the one path that most needs to say
+        // what went wrong.
+        .finally(() => live && setCanvasLoaded(true));
     }
     return () => {
       live = false;
@@ -1274,6 +1285,12 @@ export function CanvasPage() {
                   drift: fixFromRun.drift,
                   includedNodeIds: fixFromRun.includedNodeIds,
                   error: fixFromRun.error,
+                  // Reading the run takes a moment and the canvas load takes another — the panel
+                  // reports both rather than sitting empty until they finish.
+                  stage: fixFromRun.stage,
+                  // Only read when the stage is `blocked`, to tell "nothing on the canvas" from
+                  // "a workflow that doesn't compile" — which are different problems.
+                  canvasError: error ?? null,
                 }
               : null
           }
