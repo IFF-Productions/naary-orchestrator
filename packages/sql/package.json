@@ -1,6 +1,6 @@
 {
   "name": "@naary/sql",
-  "version": "0.0.60",
+  "version": "0.0.61",
   "private": true,
   "description": "SQL adapters (Postgres, MSSQL, MySQL) for the sqlQuery (read) + sqlExec (write) nodes. Engine-pluggable; used by worker activities only — NEVER by workflow code.",
   "main": "dist/index.js",
