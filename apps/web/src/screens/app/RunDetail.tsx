@@ -273,8 +273,14 @@ function RunView({ id }: { id: string }) {
   // Fetch the run's executed graph snapshot once (immutable for the life of the run).
   useEffect(() => {
     let cancelled = false;
-    // Clear the previous run's graph immediately so navigating between runs (this screen
-    // isn't unmounted) never flashes — or keeps showing — the wrong run's graph.
+    // Clear the previous run's graph immediately so navigating between runs never flashes — or
+    // keeps showing — the wrong run's graph.
+    //
+    // This said "(this screen isn't unmounted)". It is now: AppShell keys the routed screen by
+    // `${pathname}|${activeEnv}`, so a run→run navigation remounts the whole screen and every
+    // piece of state here starts fresh. Kept anyway — belt and braces on a mistake that shows one
+    // run's data under another run's header, and the guard is one `key=` away from being needed
+    // again. What it must not do is claim a reason that stopped being true.
     setGraph(null);
     setRunVersion(null);
     setRunWorkflowKey(null);

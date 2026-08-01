@@ -106,6 +106,22 @@ describe("fixStage", () => {
     ).toBe("loading-canvas");
   });
 
+  it("STILL waits on the canvas when a graph compiles before the workflow lands", () => {
+    // #998, and the reason this stage was unreachable in the app. The canvas mounts with
+    // SEED_NODES (start → approval → end), which COMPILE — so `hasGraph` is true on the very
+    // first render, before the workflow has been fetched. A graph is not the workflow: reporting
+    // "reading the run" here would name the wait wrongly, and the build effect reads the same
+    // condition, so it would describe the failure against the SEED canvas.
+    expect(
+      fixStage({
+        fixRunId: RUN,
+        hasGraph: true,
+        canvasLoaded: false,
+        doneFor: null,
+      }),
+    ).toBe("loading-canvas");
+  });
+
   it("waits on the RUN once there's a graph to describe the failure against", () => {
     expect(
       fixStage({
