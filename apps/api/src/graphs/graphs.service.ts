@@ -192,6 +192,17 @@ export class GraphsService {
     actor?: Principal,
     /** Optional commit note for this version (#488, API/CLI-settable). */
     saveMessage?: string,
+    /**
+     * WHO to record when there is no `actor` — for an INTERNAL writer that still owes the tenant
+     * an attribution (#1016's automated fix, which publishes a new latest version of a workflow
+     * that may be live). Without it such a write lands with `savedBy: null`, indistinguishable
+     * in the version list from a promote copy-in, and "something changed my workflow and nothing
+     * says what" is exactly the failure this migration is not allowed to have.
+     *
+     * NOT a way to name a user: it is ignored whenever `actor` is present, so it can never
+     * override or spoof a real principal's attribution.
+     */
+    savedByOverride?: string,
   ): Promise<GraphSnapshot> {
     // #904 — the ONE key-bearing path that REFUSES to resolve an alias.
     //
@@ -323,7 +334,7 @@ export class GraphsService {
     // for internal/promote copy-in, which is actor-less by design) and the optional WHY.
     const savedBy = actor
       ? (actor.email ?? actor.subject ?? "api-token")
-      : null;
+      : (savedByOverride ?? null);
     const row = await getPrisma().graphDefinition.create({
       data: {
         tenantId,
