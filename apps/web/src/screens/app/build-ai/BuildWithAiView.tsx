@@ -371,7 +371,7 @@ export function BuildWithAiView({
           onProvider={onProvider}
           providerHint={providerHint}
           onResume={onResume}
-          onOpenInCanvas={onOpenInCanvas}
+          onAccept={onOpenInCanvas}
           onConfirmStale={onConfirmStale}
           onDismissStale={onDismissStale}
           compact={compact}

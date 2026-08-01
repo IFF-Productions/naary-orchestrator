@@ -94,3 +94,30 @@ export function providerSetupHint(options: ProviderOption[]): string | null {
     ? "Every configured AI provider key failed validation — re-add one in Integrations to generate."
     : "Add an AI provider key (Anthropic, OpenAI or Google) or a Claude Code credential in Integrations to generate workflows.";
 }
+
+/**
+ * The remembered choice — ONE key, shared by the Build with AI screen and the canvas panel.
+ *
+ * They are the same conversation on two surfaces, so "generate with Claude Code" chosen in one is
+ * an answer for the other; two keys would make the same question get asked twice. localStorage can
+ * THROW (sandboxed iframe, private mode) and a preference is never worth failing a screen over, so
+ * both helpers swallow.
+ */
+const PROVIDER_KEY = "naary-build-ai-provider";
+
+export function readStoredProvider(): string | null {
+  try {
+    return localStorage.getItem(PROVIDER_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function writeStoredProvider(value: AiBuilderProvider | null): void {
+  try {
+    if (value) localStorage.setItem(PROVIDER_KEY, value);
+    else localStorage.removeItem(PROVIDER_KEY);
+  } catch {
+    /* preference only */
+  }
+}

@@ -34,6 +34,7 @@ import {
 } from "./builder-session.response";
 import { BuilderSessionsService } from "./builder-sessions.service";
 import { CloseSessionDto, OpenSessionDto, SendTurnDto } from "./builder.dto";
+import { turnPrevious } from "./turn-input";
 import {
   deriveTitle,
   estimateTurnCostUsd,
@@ -214,8 +215,13 @@ export class BuilderSessionsController {
       const result = await this.generator.editStream(
         tenantId,
         envId,
-        // No prior draft ⇒ the first turn is a create; otherwise edit the current graph.
-        { previous: session.currentGraph ?? undefined, instruction: message },
+        // The caller's own draft when it sent one (the canvas panel owns its graph, unsaved edits
+        // included), otherwise the session's. No prior draft either way ⇒ this turn is a create.
+        // See turn-input.ts for why the asymmetry is deliberate.
+        {
+          previous: turnPrevious(body.graph, session.currentGraph),
+          instruction: message,
+        },
         body.provider,
         {
           timeoutMs: TURN_TIMEOUT_MS,

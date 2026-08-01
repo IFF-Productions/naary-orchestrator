@@ -1,16 +1,25 @@
 /**
- * Build with AI — the 452px conversation column (design "Naary AI Generate").
- * Intro empty-state with example-idea chips (+ real resumable sessions), the
- * message thread (ember-flame AI avatar / user bubbles), typing dots while the
- * turn stream warms up, the "Building" plan card derived from real SSE frames,
- * and the composer. Purely presentational — the screen container owns all I/O.
+ * The AI builder conversation — intro empty-state with example-idea chips (+ real resumable
+ * sessions), the message thread (ember-flame AI avatar / user bubbles), typing dots while the turn
+ * stream warms up, the "Building" plan card derived from real SSE frames, and the composer. Purely
+ * presentational — the container owns all I/O.
+ *
+ * TWO SURFACES, ONE COMPONENT (#1003). It is the 452px column on the Build with AI screen (design
+ * "Naary AI Generate") and the strip under the canvas's top bar, switched by `variant`. Deliberately
+ * not two components that look alike: the canvas panel spent its whole life as a one-shot form
+ * because "the same thing, over there" was never the same thing, and a second copy of this would
+ * drift the same way. What genuinely differs between the surfaces is a handful of named props —
+ * where the draft lives, what sits above the composer, whether there is an accept button — and each
+ * one is here because the surfaces really do differ, not to make one of them configurable.
  */
-import { useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Icon } from "../../../components";
 import {
   type BuilderSessionSummary,
   SAVE_OPTION,
 } from "../../../lib/api/builder";
+import { ConversationIntro } from "./ConversationIntro";
 import type { EditTarget } from "./edit-target";
 import type { PlanLine } from "./model";
 import { ProviderPicker } from "./ProviderPicker";
@@ -27,6 +36,28 @@ export interface ChatMsg {
 }
 
 export type BuildPhase = "idle" | "streaming" | "ready";
+
+/**
+ * Where this conversation is rendered.
+ *
+ * `page` — the Build with AI screen: a fixed 452px column that owns its full height, beside a
+ * read-only preview stage.
+ * `panel` — the canvas: a full-width strip under the top bar, above a canvas that stays live and
+ * editable. It must claim only the height it needs (the canvas below it is the point), so the
+ * thread scrolls inside a cap rather than the column filling the viewport.
+ */
+export type ConversationVariant = "page" | "panel";
+
+/**
+ * Composer bounds. One line to start; grows with the content up to a cap, because a `?fix=`
+ * description arrives ~15 lines long and the banner above it asks the user to read it first.
+ *
+ * The cap is tighter on a phone, where this panel and the canvas it is describing share one narrow
+ * screen — a box that can eat 220px there is a box that hides the workflow it just changed.
+ */
+const COMPOSER_MIN_H = 38;
+const COMPOSER_MAX_H = 220;
+const COMPOSER_MAX_H_COMPACT = 150;
 
 /** The brand ember-flame avatar next to assistant turns. */
 function EmberAvatar() {
@@ -51,38 +82,6 @@ function EmberAvatar() {
   );
 }
 
-const EXAMPLES: { label: string; icon: "bolt" | "agent" | "approval" }[] = [
-  {
-    label:
-      "When a refund request arrives, ask me to approve big ones, then issue it via Stripe",
-    icon: "approval",
-  },
-  {
-    label: "Summarize each new support email with AI and post it to Slack",
-    icon: "agent",
-  },
-  {
-    label:
-      "Every weekday at 9am, fetch open GitHub issues and email me a digest",
-    icon: "bolt",
-  },
-];
-
-/**
- * Openers for an EDIT chat. A separate list, not the create examples reworded: those describe whole
- * workflows ("when a refund request arrives, …"), and offering one here would invite the user to
- * ask for the very rewrite this screen is built to avoid.
- */
-const EDIT_EXAMPLES: { label: string; icon: "bolt" | "agent" | "approval" }[] =
-  [
-    { label: "Add a Slack notification when it finishes", icon: "bolt" },
-    {
-      label: "Require my approval before the last step runs",
-      icon: "approval",
-    },
-    { label: "Retry the HTTP request twice before giving up", icon: "agent" },
-  ];
-
 export function ConversationPanel({
   phase,
   messages,
@@ -100,10 +99,18 @@ export function ConversationPanel({
   onProvider,
   providerHint,
   onResume,
-  onOpenInCanvas,
+  onAccept,
   onConfirmStale,
   onDismissStale,
   compact,
+  variant = "page",
+  draft: draftProp,
+  onDraftChange,
+  draftReadOnly,
+  banner,
+  showAccept = true,
+  hideIntro,
+  composerMinHeight,
 }: {
   phase: BuildPhase;
   messages: ChatMsg[];
@@ -113,7 +120,7 @@ export function ConversationPanel({
   error: string | null;
   /** Open sessions to resume (real, env-scoped); null while loading. */
   resumables: BuilderSessionSummary[] | null;
-  /** "Open in canvas" in flight (saving the draft). */
+  /** The accept action is in flight (saving the draft). */
   opening: boolean;
   /** The workflow this chat edits, or null for a from-scratch build. */
   editing: EditTarget | null;
@@ -127,14 +134,73 @@ export function ConversationPanel({
   provider: AiBuilderProvider | null;
   onProvider: (next: AiBuilderProvider | null) => void;
   providerHint: string | null;
-  onResume: (id: string) => void;
-  onOpenInCanvas: () => void;
-  onConfirmStale: () => void;
-  onDismissStale: () => void;
+  onResume?: (id: string) => void;
+  /**
+   * "This draft is good — keep it." The page saves the draft and opens it in the canvas; the canvas
+   * saves the workflow. Both the accept button and the `SAVE_OPTION` quick reply call it, so the
+   * chip can never promise something the surface doesn't do.
+   */
+  onAccept?: () => void;
+  onConfirmStale?: () => void;
+  onDismissStale?: () => void;
   compact?: boolean;
+  variant?: ConversationVariant;
+  /**
+   * A CONTROLLED composer draft, for a container that has something to put in it.
+   *
+   * `?fix=<runId>` writes a description of a failed run into the box and the user reads it before
+   * sending — so the draft has to be reachable from outside. Omit both and the composer keeps its
+   * own state, which is what the page wants.
+   */
+  draft?: string;
+  onDraftChange?: (next: string) => void;
+  /**
+   * The draft is about to be WRITTEN INTO — reject typing that would be silently replaced.
+   *
+   * `readOnly`, never `disabled`: disabled drops the field out of the tab order and out of reach of
+   * a screen reader, which is a bigger loss than the one being prevented. Guarded in
+   * `apps/web/e2e/fix-with-ai.spec.ts`, which asserts both halves.
+   */
+  draftReadOnly?: boolean;
+  /**
+   * Rendered directly ABOVE the composer — what this turn is about to do, and with what.
+   *
+   * The canvas puts two things here: the `?fix=` disclosure of which run's data is about to leave
+   * the tenant, and the edit-vs-create chooser. Both belong next to Send rather than at the top of a
+   * scrolling thread, because both are claims about the message the user is about to send.
+   */
+  banner?: ReactNode;
+  /** False where the surface has its own save (the canvas top bar) — see `onAccept`. */
+  showAccept?: boolean;
+  /**
+   * Drop the empty state, leaving the banner and composer alone above the canvas.
+   *
+   * For the `?fix=` arrival, where the banner already IS the intro — it names the run, what is
+   * about to be sent and what to do next — so a second empty state above it would be redundant,
+   * and its example chips are actively dangerous: a chip SENDS immediately, which would discard
+   * the description of the user's failed run without a word. The intro's COPY still applies (the
+   * placeholder and hint below stay in their idle wording); only the block is dropped.
+   */
+  hideIntro?: boolean;
+  /**
+   * Pre-size the composer, for a container that is about to write something long into it.
+   *
+   * The `?fix=` box is ~15 lines when it lands. Growing into that from one line makes the whole
+   * panel jump under the reader at the exact moment the thing they are meant to read appears — so
+   * the canvas asks for the height up front and the description simply arrives in it.
+   */
+  composerMinHeight?: number;
 }) {
-  const [draft, setDraft] = useState("");
+  const [ownDraft, setOwnDraft] = useState("");
+  const controlled = draftProp !== undefined;
+  const draft = controlled ? draftProp : ownDraft;
+  const setDraft = (next: string) => {
+    if (controlled) onDraftChange?.(next);
+    else setOwnDraft(next);
+  };
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  const embedded = variant === "panel";
   const showIntro = phase === "idle" && messages.length === 0;
   const streaming = phase === "streaming";
   const ready = phase === "ready";
@@ -148,11 +214,37 @@ export function ConversationPanel({
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages, typing, plan, error]);
 
+  /**
+   * Grow the composer to its content, up to a cap.
+   *
+   * One typed sentence wants one line; a `?fix=` description is fifteen, and the banner above it
+   * says to read it before sending — which is not an instruction you can follow through a one-line
+   * window. Measured rather than switched on a row count, so it also covers a long message someone
+   * simply typed. `useLayoutEffect` so the resize is committed with the paint that shows the text,
+   * never a frame after it.
+   */
+  const composerMin = composerMinHeight ?? COMPOSER_MIN_H;
+  const composerMax = Math.max(
+    composerMin,
+    compact ? COMPOSER_MAX_H_COMPACT : COMPOSER_MAX_H,
+  );
+  useLayoutEffect(() => {
+    const el = composerRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(Math.max(el.scrollHeight, composerMin), composerMax)}px`;
+  }, [draft, composerMin, composerMax]);
+
   // `seeding` blocks a turn until we know WHICH workflow it edits — see BuildWithAiState.seeding.
-  const canSend = draft.trim().length > 0 && !streaming && !opening && !seeding;
+  const canSend =
+    draft.trim().length > 0 &&
+    !streaming &&
+    !opening &&
+    !seeding &&
+    !draftReadOnly;
   const send = () => {
     const text = draft.trim();
-    if (!text || streaming || opening || seeding) return;
+    if (!text || streaming || opening || seeding || draftReadOnly) return;
     setDraft("");
     onSend(text);
   };
@@ -169,6 +261,20 @@ export function ConversationPanel({
       : ready
         ? "Ask for a change — “add a Slack step”…"
         : idlePlaceholder;
+  /**
+   * What happens to a landed draft, in the surface's own terms.
+   *
+   * On the page the draft lives server-side and has to be brought over ("open it" / "publish it").
+   * On the canvas it is already the thing the user is looking at, and the only remaining act is
+   * Save — so promising to "open" it would describe a journey they have already made.
+   */
+  const settled = embedded
+    ? editing
+      ? "The change is on the canvas — refine by chatting, or Save to keep it."
+      : "The draft is on the canvas — refine by chatting, or Save to keep it."
+    : editing
+      ? "The change is on the canvas — refine by chatting, or publish it."
+      : "The draft is on the canvas — refine by chatting, or open it.";
   const hint = seeding
     ? "Loading the workflow you're editing…"
     : showIntro
@@ -178,240 +284,56 @@ export function ConversationPanel({
       : streaming
         ? "One moment…"
         : ready
-          ? editing
-            ? "The change is on the canvas — refine by chatting, or publish it."
-            : "The draft is on the canvas — refine by chatting, or open it."
+          ? settled
           : "Send a message to keep building.";
+
+  /**
+   * The thread's own box.
+   *
+   * On the page the column owns the viewport, so the thread takes whatever is left. In the canvas
+   * strip it must NOT: the canvas underneath is the point, so the thread is capped and scrolls
+   * inside the cap, and everything below it (banner, composer) keeps its natural height however
+   * long the conversation gets. Shorter on a phone, where the same strip is a much bigger share of
+   * the screen.
+   */
+  const threadBox = embedded
+    ? { flex: "none" as const, maxHeight: compact ? 200 : 300 }
+    : { flex: 1 };
 
   return (
     <div
       style={{
-        width: compact ? "100%" : 452,
+        width: embedded || compact ? "100%" : 452,
         flex: "none",
-        borderRight: compact ? "none" : "1px solid var(--line)",
-        borderBottom: compact ? "1px solid var(--line)" : "none",
+        borderRight: embedded || compact ? "none" : "1px solid var(--line)",
+        borderBottom: embedded || compact ? "1px solid var(--line)" : "none",
         background: "var(--panel)",
         display: "flex",
         flexDirection: "column",
         minHeight: 0,
-        height: compact ? "60vh" : "auto",
+        // The canvas strip claims only what it needs; the page column fills its half of the screen.
+        height: embedded ? undefined : compact ? "60vh" : "auto",
       }}
     >
-      {showIntro && seeding ? (
-        /* The binding is still resolving, so `editing` is null — and the create intro below would
-           read "What should we automate?" at a user who just clicked "Edit with AI". Show nothing
-           that presumes either mode until we know which one this is. */
-        <div style={{ flex: 1, overflowY: "auto", padding: 22 }}>
-          <div
-            style={{
-              fontSize: 19,
-              fontWeight: "var(--weight-bold)",
-              letterSpacing: "-.01em",
-              color: "var(--ink)",
-            }}
-          >
-            Loading your workflow…
-          </div>
-          <div
-            style={{
-              fontSize: "var(--text-body)",
-              color: "var(--ink-2)",
-              marginTop: 6,
-              lineHeight: 1.55,
-            }}
-          >
-            Fetching the workflow you're editing so this chat changes it rather
-            than replacing it.
-          </div>
-        </div>
-      ) : showIntro ? (
-        <div
-          ref={scrollRef}
-          style={{ flex: 1, overflowY: "auto", padding: 22 }}
-        >
-          <div
-            style={{
-              fontSize: 19,
-              fontWeight: "var(--weight-bold)",
-              letterSpacing: "-.01em",
-              color: "var(--ink)",
-            }}
-          >
-            {editing ? "What should we change?" : "What should we automate?"}
-          </div>
-          <div
-            style={{
-              fontSize: "var(--text-body)",
-              color: "var(--ink-2)",
-              marginTop: 6,
-              lineHeight: 1.55,
-            }}
-          >
-            {editing ? (
-              <>
-                You're editing{" "}
-                <strong style={{ color: "var(--ink)" }}>{editing.name}</strong>{" "}
-                — it's already on the canvas to the right. Tell me the change in
-                a sentence and I'll apply it to this workflow, not start a new
-                one.
-              </>
-            ) : (
-              <>
-                Tell me the goal in a sentence. I'll draft a runnable workflow
-                on the canvas — then you refine it by chatting.
-              </>
-            )}
-          </div>
-
-          <div
-            className="mono"
-            style={{
-              fontSize: "var(--text-2xs)",
-              letterSpacing: ".1em",
-              textTransform: "uppercase",
-              color: "var(--ink-faint)",
-              margin: "20px 0 9px",
-            }}
-          >
-            {editing ? "Common changes" : "Start from an idea"}
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-            {(editing ? EDIT_EXAMPLES : EXAMPLES).map((ex) => (
-              <button
-                key={ex.label}
-                type="button"
-                onClick={() => onSend(ex.label)}
-                className="bwa-chip"
-                style={{
-                  border: "1px solid var(--line-mid)",
-                  background: "var(--card)",
-                  borderRadius: 10,
-                  padding: "10px 12px",
-                  cursor: "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 10,
-                  textAlign: "left",
-                }}
-              >
-                <span
-                  style={{
-                    width: 26,
-                    height: 26,
-                    flex: "none",
-                    borderRadius: 7,
-                    border: "1px solid var(--brand)",
-                    color: "var(--brand)",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                  }}
-                >
-                  <Icon name={ex.icon} size={14} strokeWidth={1.7} />
-                </span>
-                <span
-                  style={{
-                    fontSize: "var(--text-sm)",
-                    color: "var(--ink-soft)",
-                    lineHeight: 1.4,
-                  }}
-                >
-                  {ex.label}
-                </span>
-              </button>
-            ))}
-          </div>
-
-          {resumables && resumables.length > 0 && (
-            <>
-              <div
-                className="mono"
-                style={{
-                  fontSize: "var(--text-2xs)",
-                  letterSpacing: ".1em",
-                  textTransform: "uppercase",
-                  color: "var(--ink-faint)",
-                  margin: "20px 0 9px",
-                }}
-              >
-                Resume a build
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-                {resumables.map((s) => (
-                  <button
-                    key={s.id}
-                    type="button"
-                    onClick={() => onResume(s.id)}
-                    className="bwa-chip"
-                    style={{
-                      border: "1px solid var(--line-mid)",
-                      background: "var(--card)",
-                      borderRadius: 10,
-                      padding: "10px 12px",
-                      cursor: "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 10,
-                      textAlign: "left",
-                    }}
-                  >
-                    <span
-                      style={{
-                        width: 26,
-                        height: 26,
-                        flex: "none",
-                        borderRadius: 7,
-                        border: "1px solid var(--line-2)",
-                        color: "var(--ink-2)",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                      }}
-                    >
-                      <Icon name="refresh" size={14} strokeWidth={1.7} />
-                    </span>
-                    <span style={{ minWidth: 0, flex: 1 }}>
-                      <span
-                        style={{
-                          display: "block",
-                          fontSize: "var(--text-sm)",
-                          color: "var(--ink-soft)",
-                          whiteSpace: "nowrap",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                        }}
-                      >
-                        {s.title ?? "Untitled build"}
-                      </span>
-                      {/* A session bound to a workflow says so HERE too — resuming one is a
-                          decision about someone's live workflow, and the list is where it's made. */}
-                      <span
-                        className="mono"
-                        style={{
-                          display: "block",
-                          fontSize: "var(--text-2xs)",
-                          color: "var(--ink-3)",
-                          marginTop: 2,
-                          whiteSpace: "nowrap",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                        }}
-                      >
-                        {s.workflowKey ? `editing ${s.workflowKey} · ` : ""}
-                        {new Date(s.updatedAt).toLocaleString()}
-                      </span>
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
-        </div>
+      {/* `hideIntro` drops the BLOCK, not the state: the placeholder and hint above still read as
+          the idle ones, because that is still what this is. */}
+      {showIntro ? (
+        hideIntro ? null : (
+          <ConversationIntro
+            scrollRef={scrollRef}
+            boxStyle={{ ...threadBox, overflowY: "auto", padding: 22 }}
+            seeding={seeding}
+            editing={editing}
+            resumables={resumables}
+            onResume={onResume}
+            onSend={onSend}
+          />
+        )
       ) : (
         <div
           ref={scrollRef}
           style={{
-            flex: 1,
+            ...threadBox,
             overflowY: "auto",
             padding: "20px 20px 8px",
             display: "flex",
@@ -474,14 +396,18 @@ export function ConversationPanel({
                         }}
                       >
                         {m.options.map((opt) => {
+                          // The accept chip is only offered where accepting is wired up: it is a
+                          // promise about what tapping it does, and a surface with no `onAccept`
+                          // would silently do nothing.
                           const isSave = opt === SAVE_OPTION;
+                          if (isSave && !onAccept) return null;
                           return (
                             <button
                               key={opt}
                               type="button"
                               className="bwa-chip"
                               onClick={() =>
-                                isSave ? onOpenInCanvas() : onSend(opt)
+                                isSave ? onAccept?.() : onSend(opt)
                               }
                               style={{
                                 border: `1px solid ${
@@ -765,12 +691,14 @@ export function ConversationPanel({
       )}
 
       {/* Save — the draft is real (validated result frame). Bound to a workflow this publishes its
-          next VERSION; unbound it creates a new one and opens it. */}
-      {ready && !staleWarning && (
+          next VERSION; unbound it creates a new one and opens it. Absent on a surface that already
+          has a Save of its own (the canvas top bar) — a second button for one act invites the
+          question of how the two differ, and the honest answer is that they don't. */}
+      {ready && !staleWarning && showAccept && onAccept && (
         <div style={{ flex: "none", padding: "4px 20px 12px" }}>
           <button
             type="button"
-            onClick={onOpenInCanvas}
+            onClick={onAccept}
             disabled={opening}
             style={{
               width: "100%",
@@ -816,6 +744,9 @@ export function ConversationPanel({
           padding: "12px 16px",
         }}
       >
+        {/* What this turn is about to do, and with what — see the `banner` prop. Above the box and
+            below the thread, because it qualifies the message that's about to be sent. */}
+        {banner}
         <div
           style={{
             border: `1px solid ${streaming ? "var(--brand)" : "var(--line-2)"}`,
@@ -829,6 +760,7 @@ export function ConversationPanel({
           }}
         >
           <textarea
+            ref={composerRef}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
@@ -839,11 +771,16 @@ export function ConversationPanel({
             }}
             placeholder={placeholder}
             disabled={streaming}
+            // See `draftReadOnly`: the box is about to be written into, so typing here would be
+            // silently replaced — but it stays enabled, focusable and in the tab order.
+            readOnly={draftReadOnly}
             rows={1}
             style={{
               flex: 1,
-              height: 38,
-              maxHeight: 90,
+              // Height is owned by the auto-grow layout effect above; these are its bounds, kept
+              // here so a first paint before the effect runs is already the right size.
+              height: composerMin,
+              maxHeight: composerMax,
               resize: "none",
               background: "transparent",
               border: "none",

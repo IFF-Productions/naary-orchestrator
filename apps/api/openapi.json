@@ -23670,6 +23670,11 @@
           "provider": {
             "type": "string",
             "description": "Model provider to generate with (anthropic|openai|google|claude-code). Defaults to the workspace's configured provider."
+          },
+          "graph": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "The working draft to apply the change to. Present ⇒ it supersedes the session's stored draft for this turn (the canvas panel owns its graph, including unsaved edits). Absent ⇒ the session's `currentGraph` is edited, and an empty one makes this turn a create."
           }
         },
         "required": [
