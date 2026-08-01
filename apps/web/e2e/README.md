@@ -40,17 +40,32 @@ These tests skip the Firebase browser login. `global-setup.ts`:
 - `runs` — start a run → paused at approval → approve → completed (the durable loop).
 - `fix-with-ai` — "Fix with AI" on a failed run → the canvas at `?fix=<runId>` with the failure
   written into the AI panel (#995).
+- `authoring-smoke` — THE FIRST-RUN PATH (#830): generate with AI → open a node → type `{{` →
+  pick a ref → save → test-run a node, asserting each step by its user-visible symptom.
 
-## Stubbed specs (`fix-with-ai`)
+## Stubbed specs (`fix-with-ai`, `authoring-smoke`)
 
-Most specs here drive REAL data through the stack. `fix-with-ai` deliberately does not: it stubs
-every response it reads with `page.route`, because what it guards is the SPA's behaviour **while
-it waits** — a panel that must open on arrival, a box that must be read-only mid-wait, a stage
-that must terminate. An instantly-fulfilled route gives no observable window, so those assertions
-would be vacuous. The stubs sleep before fulfilling, which makes the intermediate states real.
+Most specs here drive REAL data through the stack. Two deliberately do not — for opposite reasons.
 
-If you add assertions there, keep two rules: the delays are lower bounds (a slow machine only
-widens the window, never narrows it), and every new assertion must be shown to FAIL — break the
-app or the stub, watch it go red, revert.
+`fix-with-ai` stubs every response it reads with `page.route`, because what it guards is the SPA's
+behaviour **while it waits** — a panel that must open on arrival, a box that must be read-only
+mid-wait, a stage that must terminate. An instantly-fulfilled route gives no observable window, so
+those assertions would be vacuous. The stubs sleep before fulfilling, which makes the intermediate
+states real.
 
-CI wiring (start the stack, then run this) is a follow-up.
+`authoring-smoke` stubs exactly ONE hop, the builder session + turn, and nothing else: it is the
+only paid, non-deterministic call on the path (a BYOK model call in CI is not acceptable) and the
+only one whose response must be pinned, because the generated node ids are what the `{{` reference
+list is asserted against. Its stub does NOT sleep — it guards a landed graph, not a wait. The save
+and the single-node test run go to the real stack, or those two steps would assert nothing.
+
+If you add assertions to either, keep two rules: the delays (where there are any) are lower bounds
+— a slow machine only widens the window, never narrows it — and every new assertion must be shown
+to FAIL: break the app or the stub, watch it go red, revert.
+
+## In CI
+
+`.github/workflows/e2e.yml` builds the stack and runs this whole directory on every pull request
+and every push to `main` (per-run compose project + ephemeral ports, so parallel runs don't
+collide). This line used to read "CI wiring is a follow-up" — it has not been true since that
+workflow landed, and a stale note here is how a suite comes to be believed unwatched.
