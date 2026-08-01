@@ -2,6 +2,7 @@
 import { useState } from "react";
 import { Button } from "../../components";
 import type { TestNodeResult } from "../../lib/api";
+import { jsonErrorText } from "../../lib/json-error";
 
 /**
  * Data pinning (design SINGLE-NODE-EXECUTION.md slice 1): pin a sample output for this node so you
@@ -80,8 +81,8 @@ export function PinSection({
     let parsed: unknown;
     try {
       parsed = JSON.parse(draft);
-    } catch {
-      setErr("Enter valid JSON.");
+    } catch (e) {
+      setErr(jsonErrorText(e));
       return;
     }
     setBusy(true);

@@ -7,6 +7,7 @@ import {
   type EdgeConditionDraft,
   VALUELESS_OPS,
 } from "../../lib/graph-model";
+import { parseJsonField } from "../../lib/json-error";
 import { RowHead } from "./PinSection";
 import {
   ARGUMENT_COPY,
@@ -271,30 +272,17 @@ export function JsonField({
 
   function commit(next: string) {
     setText(next);
-    const trimmed = next.trim();
-    if (!trimmed) {
-      setError(null);
-      onChange(undefined);
+    // Blank ⇒ `{ ok: true, value: undefined }`, i.e. clear the setting.
+    const result = parseJsonField(
+      next,
+      allowArray ? "objectOrArray" : "object",
+    );
+    if (!result.ok) {
+      setError(result.error);
       return;
     }
-    try {
-      const parsed = JSON.parse(trimmed);
-      const isObject =
-        typeof parsed === "object" && parsed !== null && !Array.isArray(parsed);
-      const isArray = Array.isArray(parsed);
-      if (!isObject && !(allowArray && isArray)) {
-        setError(
-          allowArray
-            ? "Must be a JSON object or array"
-            : "Must be a JSON object",
-        );
-        return;
-      }
-      setError(null);
-      onChange(parsed);
-    } catch {
-      setError("Invalid JSON");
-    }
+    setError(null);
+    onChange(result.value);
   }
 
   return (
@@ -376,23 +364,14 @@ export function JsonArrayField({
 
   function commit(next: string) {
     setText(next);
-    const trimmed = next.trim();
-    if (!trimmed) {
-      setError(null);
-      onChange(undefined);
+    // Blank ⇒ `{ ok: true, value: undefined }`, i.e. clear the setting.
+    const result = parseJsonField(next, "array");
+    if (!result.ok) {
+      setError(result.error);
       return;
     }
-    try {
-      const parsed = JSON.parse(trimmed);
-      if (!Array.isArray(parsed)) {
-        setError("Must be a JSON array");
-        return;
-      }
-      setError(null);
-      onChange(parsed as unknown[]);
-    } catch {
-      setError("Invalid JSON");
-    }
+    setError(null);
+    onChange(result.value as unknown[] | undefined);
   }
 
   return (
