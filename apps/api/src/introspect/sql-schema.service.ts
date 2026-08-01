@@ -19,6 +19,16 @@
  * a response — including error responses, which is the subtle one: `pg`/`mysql2`/`tedious`
  * connection errors put the host, port and sometimes the user in `e.message`. Driver messages are
  * therefore mapped to a fixed set of our own strings, exactly as the worker activity does.
+ *
+ * SCOPING. A connection is looked up by its own id, TENANT-scoped, and its secret is read from the
+ * connection row's own `environmentId` — the caller's active environment is not a filter. That is
+ * the same rule the sibling `POST /tenants/:id/connections/:connectionId/test` route states
+ * explicitly, and it is the right one: the schema you get back is the schema of the database that
+ * connection actually points at, never a mix of one env's id and another's credential. The
+ * consequence, stated rather than implied: a member of the tenant can read the table names of a
+ * connection in an environment other than their active one. Table names are not credentials, and
+ * both existing routes already behave this way — but if connections ever become env-scoped for
+ * reads, this route must move with them.
  */
 import {
   BadRequestException,
