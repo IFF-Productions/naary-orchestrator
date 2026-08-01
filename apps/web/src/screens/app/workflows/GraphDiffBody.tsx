@@ -275,6 +275,8 @@ export function isEmptyDiff(d: GraphDiff): boolean {
     d.nodesChanged.length === 0 &&
     d.edgesAdded.length === 0 &&
     d.edgesRemoved.length === 0 &&
+    // `?? []`/`?.` here and below guard the WIRE, not the type — see FieldChanges: the `/diff`
+    // payload is cast, not validated, so an API mid-rolling-deploy can omit `edgesChanged`.
     (d.edgesChanged?.length ?? 0) === 0 &&
     !d.edgesReordered &&
     !d.startNodeChanged
@@ -365,6 +367,7 @@ export function GraphDiffBody({ diff }: { diff: GraphDiff }) {
       {/* The route is unchanged; only its predicate moved. Before #1020 this rendered as an
           "edge removed" tile beside an "edge added" one — the same edit, shown twice, reading as
           routing torn out and rebuilt. One tile, both sides of the condition. */}
+      {/* `?? []` guards the wire, not the type — see isEmptyDiff. */}
       {(diff.edgesChanged ?? []).map((e, i) => (
         <DiffRow
           key={`ec-${i}-${e.from}-${e.to}`}
