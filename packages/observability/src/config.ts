@@ -35,7 +35,9 @@ export function sentryDsn(
  * wins, then NODE_ENV, then "development" — the fallback chain exists because prod containers
  * don't set NODE_ENV, and without it every prod event filed under "development".
  */
-export function sentryEnvironment(env: NodeJS.ProcessEnv = process.env): string {
+export function sentryEnvironment(
+  env: NodeJS.ProcessEnv = process.env,
+): string {
   return env.SENTRY_ENVIRONMENT ?? env.NODE_ENV ?? "development";
 }
 
@@ -46,14 +48,44 @@ export function sentryRelease(
   return env.SENTRY_RELEASE;
 }
 
+/**
+ * Parse a sample rate from the environment.
+ *
+ * Empty / whitespace / absent means "not configured" → the fallback, because docker-compose
+ * renders an unset variable as the empty string (`${SENTRY_TRACES_SAMPLE_RATE:-0}` only
+ * defaults when the var is *absent*, and CI passes unset secrets through as `""`). A
+ * non-numeric or non-finite value is a typo → the fallback as well; a bare `Number()` would
+ * have produced `NaN`, and `NaN > 0` is false, so `initSentry` silently dropped the profiling
+ * integration for a value the operator believed was set.
+ *
+ * In-range-but-wrong values are CLAMPED into [0,1] rather than falling back: Sentry expects a
+ * rate, so a typo'd `10` means "always" instead of sailing through as 1000%.
+ *
+ * The browser has the same shape in `apps/web/src/lib/sentry-sample-rate.ts` (kept separate:
+ * this package imports `@sentry/node` and must not enter the browser bundle). See #1034 — the
+ * browser copy is where an equivalent gap actually disabled replays and tracing in production.
+ */
+function sampleRate(raw: string | undefined, fallback: number): number {
+  const value = raw?.trim();
+  if (!value) return fallback;
+  const n = Number(value);
+  // Finite check BEFORE the clamp — Math.min(1, Math.max(0, NaN)) is NaN.
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(1, Math.max(0, n));
+}
+
 /** Performance tracing sample rate. 0 (off) unless explicitly configured. */
-export function sentryTracesSampleRate(env: NodeJS.ProcessEnv = process.env): number {
-  return Number(env.SENTRY_TRACES_SAMPLE_RATE ?? "0");
+export function sentryTracesSampleRate(
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  return sampleRate(env.SENTRY_TRACES_SAMPLE_RATE, 0);
 }
 
 /** CPU profiling sample rate. 0 (off) unless explicitly configured; requires tracing on. */
-export function sentryProfilesSampleRate(env: NodeJS.ProcessEnv = process.env): number {
-  return Number(env.SENTRY_PROFILES_SAMPLE_RATE ?? "0");
+export function sentryProfilesSampleRate(
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  return sampleRate(env.SENTRY_PROFILES_SAMPLE_RATE, 0);
 }
 
 /**

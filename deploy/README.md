@@ -285,7 +285,10 @@ And, if you use Firebase login / browser Sentry, set repo **variables** (same pa
 at image build): `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`,
 `VITE_FIREBASE_PROJECT_ID`, `VITE_FIREBASE_STORAGE_BUCKET`,
 `VITE_FIREBASE_MESSAGING_SENDER_ID`, `VITE_FIREBASE_APP_ID`, `VITE_SENTRY_DSN`,
-`VITE_SENTRY_TRACES_SAMPLE_RATE`. Unset ⇒ those features are simply off, as before.
+`VITE_SENTRY_TRACES_SAMPLE_RATE`. Unset `VITE_SENTRY_DSN` ⇒ browser Sentry is off
+entirely. With the DSN set, an unset **rate** now means "use the built-in default"
+(#1034): tracing samples 10% of transactions and a session replay is kept whenever an
+error occurs — set the rate variables explicitly to change either.
 (The server `.env` copies of `VITE_*` are ignored in this variant — the web image is
 already built when it reaches the box.)
 
