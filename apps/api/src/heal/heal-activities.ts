@@ -137,12 +137,17 @@ export function makeHealActivities(deps: {
       );
 
       const diff = diffGraphs(current.graph, proposed as GraphDef);
+      // `edgesChanged` (#1020) is load-bearing here, not cosmetic: a condition-only edit — moving a
+      // threshold, which is a whole class of fix the healer proposes — used to land in
+      // edgesAdded + edgesRemoved. Leaving it out of this sum would score such a proposal as zero
+      // and drop it as "no change", making exactly that fix unreachable.
       const total =
         diff.nodesAdded.length +
         diff.nodesRemoved.length +
         diff.nodesChanged.length +
         diff.edgesAdded.length +
         diff.edgesRemoved.length +
+        diff.edgesChanged.length +
         (diff.startNodeChanged ? 1 : 0) +
         (diff.edgesReordered ? 1 : 0);
 
@@ -172,6 +177,7 @@ export function makeHealActivities(deps: {
               add: diff.nodesAdded.length + diff.edgesAdded.length,
               chg:
                 diff.nodesChanged.length +
+                diff.edgesChanged.length +
                 (diff.startNodeChanged ? 1 : 0) +
                 (diff.edgesReordered ? 1 : 0),
               del: diff.nodesRemoved.length + diff.edgesRemoved.length,

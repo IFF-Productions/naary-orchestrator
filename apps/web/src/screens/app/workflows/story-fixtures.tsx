@@ -264,8 +264,23 @@ const DIFF = {
   nodesChanged: [
     {
       id: "classify",
-      fields: ["model"],
-      before: { id: "classify", type: "agent", config: {} },
+      fields: ["config"],
+      // The field-level breakdown (#1020) is what makes this row reviewable: "config" alone told
+      // the reviewer only that something inside the node moved.
+      details: [
+        {
+          path: "config.model",
+          kind: "changed",
+          before: '"claude-sonnet-5"',
+          after: '"claude-opus-4-8"',
+        },
+      ],
+      detailsOmitted: 0,
+      before: {
+        id: "classify",
+        type: "agent",
+        config: { model: "claude-sonnet-5" },
+      },
       after: {
         id: "classify",
         type: "agent",
@@ -275,6 +290,7 @@ const DIFF = {
   ],
   edgesAdded: [{ from: "classify", to: "gate" }],
   edgesRemoved: [],
+  edgesChanged: [],
   edgesReordered: false,
   startNodeChanged: false,
 };
@@ -324,11 +340,39 @@ const evalRuns = [
 ];
 
 const evalCases = [
-  { caseName: "refund under threshold auto-approves", executionId: "wh-1", verdict: "pass", score: 1, costUsd: 0.0091, latencyMs: 1840 },
-  { caseName: "refund over threshold routes to human", executionId: "wh-2", verdict: "pass", score: 1, costUsd: 0.0102, latencyMs: 2110 },
+  {
+    caseName: "refund under threshold auto-approves",
+    executionId: "wh-1",
+    verdict: "pass",
+    score: 1,
+    costUsd: 0.0091,
+    latencyMs: 1840,
+  },
+  {
+    caseName: "refund over threshold routes to human",
+    executionId: "wh-2",
+    verdict: "pass",
+    score: 1,
+    costUsd: 0.0102,
+    latencyMs: 2110,
+  },
   // The two that make v9 an 18/20 — the card has to render a failure legibly, not just a tick.
-  { caseName: "duplicate request is de-duplicated", executionId: "wh-3", verdict: "fail", score: 0, costUsd: 0.0088, latencyMs: 1990 },
-  { caseName: "missing amount is rejected", executionId: "wh-4", verdict: "fail", score: 0, costUsd: null, latencyMs: null },
+  {
+    caseName: "duplicate request is de-duplicated",
+    executionId: "wh-3",
+    verdict: "fail",
+    score: 0,
+    costUsd: 0.0088,
+    latencyMs: 1990,
+  },
+  {
+    caseName: "missing amount is rejected",
+    executionId: "wh-4",
+    verdict: "fail",
+    score: 0,
+    costUsd: null,
+    latencyMs: null,
+  },
 ];
 
 export const workflowHandlers = [
