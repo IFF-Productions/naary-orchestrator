@@ -1,13 +1,23 @@
 /**
  * Backend sample-rate parsing (#1034 — the browser half is apps/web/test/sentry-sample-rate.spec.ts).
  *
- * The browser bug was that an unset value parsed to 0 and made the documented default
- * unreachable. The backend does NOT share that failure: its intended default IS 0, so
- * `Number(env.X ?? "0")` returning 0 for an unset var was already the right answer, and the
- * deploy `unset`s the empty-string secrets (deploy.yml) on top of a `${…:-0}` compose default.
+ * The browser bug was that an unset value parsed to 0, making every documented default
+ * unreachable. The backend does NOT share that failure, for two independent reasons:
+ *
+ *   1. its intended default IS 0, so `Number(env.X ?? "0")` returning 0 was already right; and
+ *   2. it never actually sees the empty string in the deployed path. `docker-compose.yml`
+ *      writes `${SENTRY_TRACES_SAMPLE_RATE:-0}`, and `:-` substitutes when the variable is
+ *      unset **or empty** (`${VAR-0}`, without the colon, is the unset-only form), so an unset
+ *      repo secret — which CI does render as `""` — reaches the container as `"0"`.
+ *      `deploy.yml` also `unset`s the empty ones first.
+ *
  * What it DID share is the missing guards: a typo'd value produced `NaN`, and `NaN > 0` is
- * false, so `initSentry` would disable profiling while looking configured; and an
- * out-of-range value was passed to Sentry verbatim.
+ * false, so `initSentry` disabled profiling while looking configured; and an out-of-range
+ * value was passed to Sentry verbatim.
+ *
+ * The `""` / whitespace rows below are still worth pinning — a caller CAN produce them
+ * (`docker run -e SENTRY_TRACES_SAMPLE_RATE=`, an exported-but-empty var, a direct call) —
+ * they just aren't how production gets an unset value.
  *
  * These rows pin both the unchanged defaults (no quota surprise on the backend) and the new
  * guards.
@@ -19,7 +29,9 @@ import {
 } from "../src/config";
 
 // Both readers take `env` as a parameter, so pass a literal — no process.env mutation needed.
-const env = (v: Record<string, string>): NodeJS.ProcessEnv => v;
+// Typed as ProcessEnv (`string | undefined` values), not `Record<string, string>`: pretending
+// every key always has a value is the exact assumption this bug came from.
+const env = (v: NodeJS.ProcessEnv): NodeJS.ProcessEnv => v;
 
 describe.each([
   [
@@ -47,7 +59,10 @@ describe.each([
     {
       raw: "",
       expected: 0,
-      why: "compose renders an unset var as empty → off",
+      // NOT how compose delivers an unset var — `${VAR:-0}` already substitutes 0 for an
+      // EMPTY one. This is `docker run -e VAR=` / an exported-but-empty var, which nothing
+      // sanitises on the way in.
+      why: "explicitly empty (no :- default in front of it) → off",
     },
     { raw: "   ", expected: 0, why: "whitespace-only → off" },
     // ── explicit values ─────────────────────────────────────────────────────────────────

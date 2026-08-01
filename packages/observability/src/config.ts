@@ -51,19 +51,29 @@ export function sentryRelease(
 /**
  * Parse a sample rate from the environment.
  *
- * Empty / whitespace / absent means "not configured" → the fallback, because docker-compose
- * renders an unset variable as the empty string (`${SENTRY_TRACES_SAMPLE_RATE:-0}` only
- * defaults when the var is *absent*, and CI passes unset secrets through as `""`). A
- * non-numeric or non-finite value is a typo → the fallback as well; a bare `Number()` would
- * have produced `NaN`, and `NaN > 0` is false, so `initSentry` silently dropped the profiling
- * integration for a value the operator believed was set.
+ * Empty / whitespace / absent means "not configured" → the fallback. Note this is NOT how the
+ * deployed backend receives an unset value, and the difference is the whole point of #1034:
+ * `docker-compose.yml` writes `${SENTRY_TRACES_SAMPLE_RATE:-0}`, and `:-` substitutes the
+ * default when the variable is **unset OR empty** — only the colon-less `${VAR-0}` is the
+ * unset-only form. So an unset repo secret, which CI does render as `""`, still reaches the
+ * container as `"0"` (verified with `docker compose config`), and `deploy.yml` additionally
+ * `unset`s the empty ones before compose runs. The empty case here is therefore defense in
+ * depth for the paths that bypass compose — `docker run -e SENTRY_TRACES_SAMPLE_RATE=`, or an
+ * exported-but-empty var when running the worker directly — not a live production failure.
+ *
+ * The browser has no such substitution layer: Vite inlines the build arg VERBATIM, so an unset
+ * secret arrives as a literal `""`. That is why the same parsing gap silently disabled replays
+ * and tracing in the SPA (#1034) and not here. The browser copy of this helper lives in
+ * `apps/web/src/lib/sentry-sample-rate.ts`, kept separate because this package imports
+ * `@sentry/node` and must not enter the browser bundle.
+ *
+ * What this package DID share is the missing guards, which is why it changed at all: a
+ * non-numeric or non-finite value produced `NaN` from a bare `Number()`, and `NaN > 0` is
+ * false, so `initSentry` silently dropped the profiling integration for a value the operator
+ * believed was set. Those now take the fallback.
  *
  * In-range-but-wrong values are CLAMPED into [0,1] rather than falling back: Sentry expects a
  * rate, so a typo'd `10` means "always" instead of sailing through as 1000%.
- *
- * The browser has the same shape in `apps/web/src/lib/sentry-sample-rate.ts` (kept separate:
- * this package imports `@sentry/node` and must not enter the browser bundle). See #1034 — the
- * browser copy is where an equivalent gap actually disabled replays and tracing in production.
  */
 function sampleRate(raw: string | undefined, fallback: number): number {
   const value = raw?.trim();
