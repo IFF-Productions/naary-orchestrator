@@ -123,3 +123,23 @@ a {
     animation: none;
   }
 }
+
+/* Off-screen text that stays IN the accessibility tree — the standard sr-only recipe, whose
+   declarations work TOGETHER: `position: absolute` + a 1px box + a negative margin take it out of
+   layout so it can never move a rect; `overflow: hidden` + `clip-path: inset(50%)` hide the glyphs
+   that box would otherwise still paint; `white-space: nowrap` stops the text wrapping into
+   something tall enough to add a scrollbar. Never `display: none` / `visibility: hidden` — both
+   remove the node from the accessibility tree, which is the one thing this must not do.
+   (canvas/TopBar.tsx carries the same recipe as a local style object; folding that in is a
+   follow-up, not this change.) */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

@@ -1,14 +1,11 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { GraphDef, NodeType } from "@naary/dsl";
 import { Button } from "../../components";
 import { api } from "../../lib/api";
 import { nodeDisplayLabel } from "../../lib/graph-model";
 import { PHONE_QUERY, useMediaQuery } from "../../lib/useMediaQuery";
-import {
-  nextProgressMessage,
-  PROGRESS_MESSAGES,
-} from "../../lib/progress-messages";
+import { useRotatingProgressMessage } from "../../lib/use-progress-message";
 import { AutomationEditor } from "./AutomationEditor";
 
 const EXAMPLES = [
@@ -39,18 +36,7 @@ export function NewAutomation() {
   // Live streaming state.
   const [steps, setSteps] = useState<LiveStep[]>([]);
   const [liveName, setLiveName] = useState<string | null>(null);
-  const [genMessage, setGenMessage] = useState<string>(PROGRESS_MESSAGES[0]);
-
-  // Rotate the playful message on a ~2.5s timer while building (no immediate repeat).
-  useEffect(() => {
-    if (!busy) return;
-    setGenMessage((prev) => nextProgressMessage(prev));
-    const id = setInterval(
-      () => setGenMessage((prev) => nextProgressMessage(prev)),
-      2500,
-    );
-    return () => clearInterval(id);
-  }, [busy]);
+  const genMessage = useRotatingProgressMessage(busy);
 
   async function generate() {
     if (prompt.trim().length < 3) return;

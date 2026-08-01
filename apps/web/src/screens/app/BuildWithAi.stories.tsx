@@ -287,7 +287,18 @@ export const EditWorkflowUnavailable: Story = {
   ),
 };
 
-/** Turn accepted, first frame not in yet — typing dots, pill = Building. */
+/**
+ * Turn accepted, first frame not in yet — pill = Building, dots in the thread, and beside them the
+ * SAME rotating status copy the canvas shows over its stage (`nextProgressMessage`, ~2.5s, never
+ * the same line twice running).
+ *
+ * This is the only window it appears in. It is the widest dead gap on the screen and dots say
+ * nothing about it; the moment `plan` exists, the Building card below is describing REAL frames and
+ * real information wins — see the Building story, which has no rotating copy anywhere in it.
+ *
+ * A static story shows one frame of the rotation; the line it happens to catch will differ between
+ * loads, which is the point.
+ */
 export const Thinking: Story = {
   render: () => <BuildWithAiView state={TYPING} {...viewHandlers} />,
 };

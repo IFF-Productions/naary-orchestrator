@@ -34,10 +34,7 @@ import type { GraphDef, NodeDef } from "@naary/dsl";
 import { api } from "../../lib/api";
 import { builderApi, type BuilderSession } from "../../lib/api/builder";
 import { decompileGraph } from "../../lib/decompile-graph";
-import {
-  nextProgressMessage,
-  PROGRESS_MESSAGES,
-} from "../../lib/progress-messages";
+import { useRotatingProgressMessage } from "../../lib/use-progress-message";
 import type { BuildPhase, ChatMsg } from "../app/build-ai/ConversationPanel";
 import { asEdgeDef, asNodeDef, planFromStream } from "../app/build-ai/model";
 import {
@@ -249,7 +246,7 @@ export function useAiBuilder({
 
   // Playful rotating status while streaming, + how many nodes have landed on the canvas. Both feed
   // the canvas's own progress pill, which is what the user watches while the panel scrolls.
-  const [genMessage, setGenMessage] = useState<string>(PROGRESS_MESSAGES[0]);
+  const genMessage = useRotatingProgressMessage(generating);
   const [genNodeCount, setGenNodeCount] = useState(0);
 
   /* ---------------- provider (BYOK), shared with the Build with AI screen ---------------- */
@@ -293,17 +290,6 @@ export function useAiBuilder({
   }
 
   /* ---------------- effects that follow the stream ---------------- */
-
-  // Rotate the playful message on a ~2.5s timer while generating (no immediate repeat).
-  useEffect(() => {
-    if (!generating) return;
-    setGenMessage((prev) => nextProgressMessage(prev));
-    const id = setInterval(
-      () => setGenMessage((prev) => nextProgressMessage(prev)),
-      2500,
-    );
-    return () => clearInterval(id);
-  }, [generating]);
 
   // `fitView` (the prop) only fits ONCE at init. While streaming, refit as nodes land so
   // the growing graph stays in frame instead of marching off-screen. Debounced a beat so
