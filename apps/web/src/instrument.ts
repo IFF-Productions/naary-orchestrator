@@ -24,6 +24,7 @@ import {
 } from "react-router-dom";
 import { useEffect } from "react";
 import { nameEventRejection } from "./lib/sentry-rejections";
+import { sampleRate } from "./lib/sentry-sample-rate";
 import { redactSecrets } from "./lib/sentry-scrub";
 
 const dsn = import.meta.env.VITE_SENTRY_DSN as string | undefined;
@@ -36,12 +37,6 @@ function safeScrub<T>(value: T): T | null {
   } catch {
     return null;
   }
-}
-
-/** A VITE_-inlined sample rate with a default; NaN (a typo'd value) falls back too. */
-function sampleRate(raw: unknown, fallback: number): number {
-  const n = Number((raw as string | undefined) ?? "");
-  return Number.isFinite(n) ? n : fallback;
 }
 
 const profilesSampleRate = sampleRate(
