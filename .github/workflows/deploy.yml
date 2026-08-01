@@ -245,6 +245,13 @@ jobs:
           SANDBOX_IMAGE_CURSOR: ${{ needs.sandbox-images.outputs.cursor }}
           SANDBOX_IMAGE_COPILOT: ${{ needs.sandbox-images.outputs.copilot }}
           SANDBOX_IMAGE_GEMINI: ${{ needs.sandbox-images.outputs.gemini }}
+          # How many releases of each app image the box keeps as rollback targets (#993). Plumbed
+          # THROUGH to the remote shell below, unlike the DEPLOY_IMAGE_KEEP_HOURS it replaces:
+          # that one was read on the box but never appeared in the ssh env list, so it could not be
+          # set from anywhere and its 336h default was hardcoded in practice. A knob that cannot be
+          # turned reads as a supported override in review and isn't one — hence the vars fallback
+          # here AND the `${…:-2}` default on the box, so both ends have an answer.
+          DEPLOY_IMAGE_KEEP_RELEASES: ${{ vars.DEPLOY_IMAGE_KEEP_RELEASES || '2' }}
         run: |
           install -d -m 700 ~/.ssh
           printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
@@ -260,7 +267,7 @@ jobs:
             deploy/sandbox \
             | $SSH "mkdir -p /opt/naary && tar xzf - -C /opt/naary"
 
-          $SSH "DEPLOY_REF='$DEPLOY_REF' IMAGE_BASE='$IMAGE_BASE' GHCR_TOKEN='$GHCR_TOKEN' GHCR_USER='$GHCR_USER' SENTRY_DSN='$SENTRY_DSN' SENTRY_DSN_API='$SENTRY_DSN_API' SENTRY_DSN_WORKER='$SENTRY_DSN_WORKER' SENTRY_TRACES_SAMPLE_RATE='$SENTRY_TRACES_SAMPLE_RATE' SENTRY_PROFILES_SAMPLE_RATE='$SENTRY_PROFILES_SAMPLE_RATE' OTEL_EXPORTER_OTLP_ENDPOINT='$OTEL_EXPORTER_OTLP_ENDPOINT' OTEL_EXPORTER_OTLP_HEADERS='$OTEL_EXPORTER_OTLP_HEADERS' OTEL_EXPORTER_OTLP_PROTOCOL='$OTEL_EXPORTER_OTLP_PROTOCOL' SANDBOX_IMAGE_CLAUDE='$SANDBOX_IMAGE_CLAUDE' SANDBOX_IMAGE_CURSOR='$SANDBOX_IMAGE_CURSOR' SANDBOX_IMAGE_COPILOT='$SANDBOX_IMAGE_COPILOT' SANDBOX_IMAGE_GEMINI='$SANDBOX_IMAGE_GEMINI' bash -s" <<'REMOTE'
+          $SSH "DEPLOY_REF='$DEPLOY_REF' IMAGE_BASE='$IMAGE_BASE' GHCR_TOKEN='$GHCR_TOKEN' GHCR_USER='$GHCR_USER' SENTRY_DSN='$SENTRY_DSN' SENTRY_DSN_API='$SENTRY_DSN_API' SENTRY_DSN_WORKER='$SENTRY_DSN_WORKER' SENTRY_TRACES_SAMPLE_RATE='$SENTRY_TRACES_SAMPLE_RATE' SENTRY_PROFILES_SAMPLE_RATE='$SENTRY_PROFILES_SAMPLE_RATE' OTEL_EXPORTER_OTLP_ENDPOINT='$OTEL_EXPORTER_OTLP_ENDPOINT' OTEL_EXPORTER_OTLP_HEADERS='$OTEL_EXPORTER_OTLP_HEADERS' OTEL_EXPORTER_OTLP_PROTOCOL='$OTEL_EXPORTER_OTLP_PROTOCOL' SANDBOX_IMAGE_CLAUDE='$SANDBOX_IMAGE_CLAUDE' SANDBOX_IMAGE_CURSOR='$SANDBOX_IMAGE_CURSOR' SANDBOX_IMAGE_COPILOT='$SANDBOX_IMAGE_COPILOT' SANDBOX_IMAGE_GEMINI='$SANDBOX_IMAGE_GEMINI' DEPLOY_IMAGE_KEEP_RELEASES='$DEPLOY_IMAGE_KEEP_RELEASES' bash -s" <<'REMOTE'
           set -euo pipefail
           cd /opt/naary
           # Ensure swap exists BEFORE the rolling replace. docker-rollout scales a service
@@ -390,21 +397,58 @@ jobs:
           # "no space left on device" (v0.0.29). Running here, before the pull, is what actually
           # makes room for the incoming images.
           #
-          # `-a` is required to touch tagged images, but it only ever removes images NOT USED by
-          # a container — the running release is protected by its own containers. KEEP_HOURS
-          # preserves recent tags so a rollback (`Deploy` with an older tag) still finds its
-          # image locally instead of re-pulling; older ones re-pull on demand, which is slower
-          # but never wrong. `|| true` so a prune hiccup never fails an otherwise-good deploy.
+          # RETENTION IS COUNTED IN RELEASES, NOT DAYS (#993).
           #
-          # `label!=com.naary.sandbox=1` EXCLUDES the codeAgent sandbox images. They would otherwise
-          # be swept every time: `-a` collects tagged images no CONTAINER references, and sandbox
-          # containers are `--rm`, so nothing references them between runs — the deploy would delete
-          # the image the next codeAgent run needs and re-pull ~1.7GiB. Verified locally that a
-          # `label!=` filter ANDs with `until` and spares the labelled image. Stale sandbox images
-          # are reclaimed instead by the targeted sweep at the end of this script.
-          KEEP_HOURS="${DEPLOY_IMAGE_KEEP_HOURS:-336}" # 14 days of rollback targets
+          # This used to be `prune -af --filter until=${KEEP_HOURS}h` with KEEP_HOURS=336 — "14
+          # days of rollback targets". Days only equal releases at a fixed cadence, and this repo's
+          # cadence is not fixed: 60 releases landed in the last 14 days, 8 of them on one day. So
+          # NOTHING on the box was ever old enough to be eligible, the prune reclaimed exactly 0
+          # bytes on every deploy (identical df before/after in the logs), and images grew until a
+          # release hit the pre-pull guard below and stopped:
+          #
+          #     Images   57 total, 6 active, 54.45GB, 46.86GB reclaimable (86%)
+          #     Build Cache                            0B  0B
+          #
+          # 86% of the image store was collectable the whole time. That `Build Cache 0B` line is
+          # also why the `builder prune` below has never reclaimed anything and never will on this
+          # box — it PULLS from GHCR, it does not build. Kept because it costs nothing and is
+          # correct the day something does build here.
+          #
+          # Two releases are retained as rollback targets (`Deploy` with an older tag finds the
+          # image locally instead of re-pulling; anything older re-pulls on demand — slower, never
+          # wrong). Deliberately small: at 8 releases/day a generous window is how this failed.
+          #
+          # Scoping the listing to the APP repositories is what protects the codeAgent sandbox
+          # images, and it protects them structurally rather than by a `label!=` filter someone has
+          # to remember. They live in a different repository (naary-sandbox-runner) so they are
+          # never listed here at all. That matters because sandbox containers are `--rm`, so
+          # nothing references their images between runs and a blanket `prune -a` deletes the image
+          # the next codeAgent run needs (~1.7GiB re-pull). Stale sandbox images are reclaimed by
+          # the targeted sweep at the end of this script.
+          #
+          # No `-f` on the rmi: docker refuses to remove an image a container uses, so the RUNNING
+          # release survives even when a rollback has left it older than the newest N. `|| true`
+          # everywhere, so a reclaim hiccup never fails an otherwise-good deploy.
+          KEEP_RELEASES="${DEPLOY_IMAGE_KEEP_RELEASES:-2}"
           echo "disk before reclaim:"; df -h / | tail -1
-          docker image prune -af --filter "until=${KEEP_HOURS}h" --filter "label!=com.naary.sandbox=1" >/dev/null 2>&1 || true
+          for repo in naary-backend naary-web; do
+            # `{{.CreatedAt}}` is fixed-width and leads the line, so a plain reverse string sort is
+            # newest-first. `$NF` is the ref (it can contain no spaces). Untagged (`:<none>`) rows
+            # are dropped — they are not rollback targets and `docker rmi` cannot take that ref;
+            # the dangling prune below is what collects them. The whole pipeline is `|| true`'d
+            # because this script runs under `set -euo pipefail`, where `grep` matching nothing is
+            # a nonzero status that would abort the deploy on a box with no images yet.
+            stale="$(docker image ls --format '{{.CreatedAt}}\t{{.Repository}}:{{.Tag}}' "$IMAGE_BASE/$repo" 2>/dev/null \
+              | grep -v ':<none>$' \
+              | sort -r \
+              | awk -v keep="$KEEP_RELEASES" 'NR > keep { print $NF }' || true)"
+            for ref in $stale; do
+              docker rmi "$ref" >/dev/null 2>&1 || true
+            done
+          done
+          # Collects the layers the rmi's just orphaned. No `-a`: dangling only, so it cannot
+          # touch a retained release or a sandbox image.
+          docker image prune -f >/dev/null 2>&1 || true
           docker builder prune -af >/dev/null 2>&1 || true
           echo "disk after reclaim:"; df -h / | tail -1
 
