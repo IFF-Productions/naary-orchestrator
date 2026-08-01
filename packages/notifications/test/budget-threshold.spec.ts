@@ -55,18 +55,26 @@ describe("budget_threshold formatter", () => {
     expect(notificationActions(INPUT, { runUrl: LINKS.runUrl })).toEqual([]);
   });
 
-  it("Slack blocks: cap/spend fields grid (no Workflow/Run pair) + a usage button", () => {
+  it("Slack blocks: a prose headline + a context line — never a fields grid (#987)", () => {
     const { blocks, actions } = notificationBlocks(INPUT, LINKS);
-    const fieldsBlock = blocks.find(
+    // No `fields` array anywhere — that is the two-column form the redesign removed.
+    expect(
+      blocks.some((b) => (b as { fields?: unknown }).fields !== undefined),
+    ).toBe(false);
+    const section = blocks.find(
       (b) => (b as { type: string }).type === "section",
-    ) as { fields: { text: string }[] };
-    const texts = fieldsBlock.fields.map((f) => f.text).join("\n");
-    expect(texts).toContain("*Monthly cap*");
-    expect(texts).toContain("$400.00");
-    expect(texts).toContain("*Spend (incl. reserved)*");
-    expect(texts).toContain("$321.40");
-    expect(texts).not.toContain("*Workflow*");
-    expect(texts).not.toContain("*Run*");
+    ) as { text: { text: string } };
+    expect(section.text.text).toBe(
+      "Workspace spend is *$321.40* of the *$400.00* monthly cap.\nRuns keep running until the cap is reached.",
+    );
+    const context = blocks.find(
+      (b) => (b as { type: string }).type === "context",
+    ) as { elements: { text: string }[] };
+    expect(context.elements[0].text).toBe(
+      "Alert threshold 80% · spend includes reserved",
+    );
+    // Tenant-scoped: the crossing reservation's run is incidental and never named.
+    expect(JSON.stringify(blocks)).not.toContain("wh-t1-crossing");
     expect(actions.map((a) => a.label)).toEqual(["View usage & budgets"]);
   });
 

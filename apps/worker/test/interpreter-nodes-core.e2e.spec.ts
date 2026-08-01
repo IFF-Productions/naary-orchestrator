@@ -388,11 +388,16 @@ describe("runGraph interpreter — per-node behavior: data, http, sql, sub-workf
       );
       expect(err.cause?.message).toMatch(/halt: bad input/);
       // the failure fired a best-effort run_failed notification for the tenant
-      expect(
-        notifyCalls.some(
-          (n) => n.kind === "run_failed" && n.tenantId === "t-stop",
-        ),
-      ).toBe(true);
+      const notice = notifyCalls.find(
+        (n) => n.kind === "run_failed" && n.tenantId === "t-stop",
+      );
+      expect(notice).toBeTruthy();
+      // …carrying WHAT went wrong (#987). This used to be the literal "failed", which only
+      // restated the "❌ Run failed" header while the real message, the failure type and the
+      // failing node all sat in the workflow and were thrown away.
+      expect(notice?.detail).toMatch(/halt: bad input/);
+      expect(notice?.errorType).toBe("STOP_AND_ERROR");
+      expect(notice?.failedNodeId).toBe("boom");
     });
   });
 
