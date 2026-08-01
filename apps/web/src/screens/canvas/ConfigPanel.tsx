@@ -75,7 +75,7 @@ const SAMPLE_INPUT_PLACEHOLDER: Partial<Record<NodeType, string>> = {
  */
 const SAMPLE_INPUT_HELP: Partial<Record<NodeType, string>> = {
   start:
-    "Used when a run starts with no input of its own. An API or manual run that sends a body uses that instead.",
+    "Only used when you run this manually or via the API with no body of its own — a scheduled run always starts empty.",
   webhookTrigger:
     "Only used when you run this manually — a real webhook call always passes its own request body.",
   formTrigger:

@@ -10,12 +10,25 @@ import type { ArgBinding } from "./core";
  * way to declare anything better (#983). One shared shape rather than a per-node copy, so a trigger
  * added later inherits the field instead of silently missing it.
  *
- * Deliberately NOT on `scheduleTrigger`/`pollTrigger`. Their real trigger genuinely passes `{}`, so
- * there is nothing to be faithful TO — and a sample there would be honored unevenly: a schedule made
- * by `POST /schedules` reads `startSampleInput`, while the one `syncCronSchedule`/`syncPollSchedule`
- * auto-create on save passes a literal `{}`. Offering a field that one of a graph's two schedules
- * ignores would re-create #979's "manual run ≠ real trigger" divergence by hand. The FALLBACK rule
- * stays uniform for every node type; schedule/poll simply never carry a sample.
+ * Deliberately NOT on `scheduleTrigger`/`pollTrigger` — but READ WHY, because the reason changed
+ * category in #991 and is no longer a safety mechanism:
+ *
+ *  - It was load-bearing. A sample used to be honored UNEVENLY — a schedule made by
+ *    `POST /schedules` read `startSampleInput` while the one `syncCronSchedule`/`syncPollSchedule`
+ *    auto-create on save passed a literal `{}` — so a graph's two schedules could start the same
+ *    run two different ways. Excluding these two node types was what kept that unreachable.
+ *  - It is now a product judgment. #991 removed the input parameter from the schedule action
+ *    builder outright: EVERY schedule of every kind now starts its run with `{}`. A sample
+ *    smuggled onto one of these node types (a graph written straight to the DB) is uniformly
+ *    ignored by all four paths, and `apps/api/test/schedules.poll.spec.ts` pins exactly that. So
+ *    the exclusion no longer prevents a divergence — it declines to offer a field that would be
+ *    meaningless. A schedule/poll trigger's production payload really is `{}`, so a sample could
+ *    only make "Run now" unlike every real firing (#979's own shape, hand-typed), and a
+ *    `pollTrigger`'s data isn't the run input at all — `{ changed, body }` comes out of its fetch.
+ *
+ * Adding the field here is therefore SAFE but not USEFUL. If a scheduled run ever needs real
+ * parameters, that is a `Schedule.input` column with its own UI, not the graph's test data.
+ * The FALLBACK rule stays uniform for every node type; schedule/poll simply never carry a sample.
  */
 export interface TriggerSampleInputConfig {
   /** Test payload for a manual run. The real trigger's data always wins when there is any. */

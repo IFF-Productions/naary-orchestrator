@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import type { GraphDef } from "@naary/dsl";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -24,6 +26,7 @@ vi.mock("@naary/db", () => ({
 vi.mock("@naary/usage", () => ({ getBudget: async () => null }));
 
 import { SchedulesService } from "../src/schedules/schedules.service";
+import { startSampleInput } from "../src/executions/executions.helpers";
 
 const create = vi.fn();
 const del = vi.fn();
@@ -318,6 +321,130 @@ describe("create (user cron schedule, env-scoped)", () => {
       cron: "0 9 * * *",
     });
     expect(view.id).toBe(opts.scheduleId);
+  });
+});
+
+/**
+ * #991 — ALL FOUR schedule-creation paths start their run with `{}`.
+ *
+ * #982's body claimed all four already resolved `body.input → sampleInput → {}`. Two did:
+ * `create` and the legacy reconcile called `startSampleInput`, while `syncPollSchedule` and
+ * `syncCronSchedule` passed a literal `{}` and never consulted it. One graph's two schedules
+ * (the cron auto-synced on save, plus any made with `POST /schedules`) could therefore start the
+ * SAME run with two different inputs.
+ *
+ * The fix deletes the `input` parameter from the action builder, so `{}` is the only thing any
+ * path can pass. A schedule carries no trigger data — nothing arrives when a cron fires — and
+ * `sampleInput` is the MANUAL-run default only, exactly as the canvas tells the author ("Only used
+ * when you run this manually"). Feeding it to a schedule would INVERT #979: a production 9am
+ * firing carrying whatever an author typed into a field labelled "sample input".
+ *
+ * Every graph below declares a sample, INCLUDING the schedule/poll ones whose node types refuse
+ * the field in the DSL (#990's exclusion) — a graph written straight to the DB could still carry
+ * one. That is the point: it pins that the exclusion is no longer the thing holding the
+ * divergence shut, so re-opening the field can never silently re-open the split.
+ */
+describe("scheduled runs carry NO input (#991)", () => {
+  /** #979's payload, verbatim — the one a manual run used to inject into a scheduled workflow. */
+  const SAMPLE = { message: "I was charged twice this month" };
+
+  /** The same graph, with a `sampleInput` declared on its start node. */
+  function withSample(g: GraphDef): GraphDef {
+    return {
+      ...g,
+      nodes: g.nodes.map((n) =>
+        n.id === g.startNodeId
+          ? { ...n, config: { ...(n.config ?? {}), sampleInput: SAMPLE } }
+          : n,
+      ),
+    };
+  }
+
+  /** A webhook graph is the case that is reachable TODAY: `POST /schedules` works on ANY graph,
+   *  and #990 gave webhook triggers a `sampleInput`, so its cron used to fire carrying it. */
+  const webhookGraph: GraphDef = {
+    startNodeId: "hook",
+    nodes: [
+      { id: "hook", type: "webhookTrigger" },
+      { id: "end", type: "end" },
+    ],
+    edges: [{ from: "hook", to: "end" }],
+  };
+
+  const legacyUserRow = {
+    id: "sched-t-1-wf-deadbeef", // pre-env-scoped id → the boot reconcile recreates it
+    tenantId: "t-1",
+    environmentId: "e1",
+    workflowKey: "wf",
+    cron: "0 9 * * *",
+    paused: false,
+    createdAt: new Date("2026-01-02"),
+  };
+
+  it("all four paths pass {} — even when the graph declares a sampleInput", async () => {
+    /** [which path, the run input it handed Temporal]. args = [graph, input, ctx]. */
+    const fired: Array<[string, unknown]> = [];
+    const drain = (path: string) => {
+      for (const call of create.mock.calls)
+        fired.push([path, call[0].action.args[1]]);
+      create.mockClear();
+    };
+    const serving = (g: GraphDef) =>
+      makeService(async () => ({ graph: g, contentHash: "h", version: 1 }));
+
+    // 1. POST /schedules on a sample-declaring graph (reachable today).
+    await serving(withSample(webhookGraph)).create(
+      "t-1",
+      "e1",
+      "wf",
+      "0 9 * * *",
+    );
+    drain("POST /schedules");
+
+    // 2. The interval schedule auto-synced when a poll graph is saved.
+    const poll = withSample(pollGraph(60));
+    await serving(poll).syncPollSchedule("t-1", "e1", "poller", poll);
+    drain("syncPollSchedule");
+
+    // 3. The cron schedule auto-synced when a scheduleTrigger graph is saved.
+    const cron = withSample(cronGraph("0 9 * * *"));
+    await serving(cron).syncCronSchedule("t-1", "e1", "reporter", cron);
+    drain("syncCronSchedule");
+
+    // 4. The one-time boot reconcile recreating a legacy user schedule.
+    findMany.mockResolvedValue([legacyUserRow]);
+    await serving(withSample(webhookGraph)).reconcileLegacyScheduleIds();
+    drain("legacy reconcile");
+
+    // Labelled so a regression names the path that leaked instead of just showing an object.
+    expect(fired).toEqual([
+      ["POST /schedules", {}],
+      ["syncPollSchedule", {}],
+      ["syncCronSchedule", {}],
+      ["legacy reconcile", {}],
+    ]);
+  });
+
+  it("a manual run STILL gets the sample — this narrows schedules, not the field", async () => {
+    // The counterweight: if `sampleInput` stopped reaching manual runs too, #983 would be undone
+    // and the field would be dead config. `startExecution` is the one reader left.
+    expect(startSampleInput(withSample(webhookGraph))).toEqual(SAMPLE);
+  });
+
+  it("the schedules service no longer reads the sample at all", () => {
+    // `startSampleInput` is now the answer to exactly one question — "what does a MANUAL run
+    // send" — so the schedules service has no business importing it. A future edit that reaches
+    // for it again is the split reopening.
+    const src = readFileSync(
+      resolve(__dirname, "../src/schedules/schedules.service.ts"),
+      "utf8",
+    );
+    // Import LINES only — the file's own prose explains the history and mentions the name, and a
+    // whole-file regex would dump 700 lines into the failure diff instead of naming the import.
+    const offending = src
+      .split("\n")
+      .filter((l) => l.startsWith("import ") && l.includes("startSampleInput"));
+    expect(offending).toEqual([]);
   });
 });
 

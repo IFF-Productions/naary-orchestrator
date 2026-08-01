@@ -41,9 +41,12 @@ describe("trigger sample input (#983)", () => {
   });
 
   it("schedule/poll triggers deliberately do NOT accept one", () => {
-    // Their real trigger passes `{}` — there is nothing to be faithful to — and a sample there
-    // would be honored unevenly (POST /schedules reads it; the schedule syncCronSchedule/
-    // syncPollSchedule auto-create on save passes a literal `{}`), re-creating #979 by hand.
+    // Their real trigger passes `{}`, so there is nothing to be faithful to — a sample could only
+    // make "Run now" unlike every real firing. NOTE the reason narrowed in #991: the exclusion is
+    // no longer load-bearing (it used to be the only thing keeping a sample from being honored by
+    // one of a graph's two schedules and ignored by the other). Every schedule now starts its run
+    // with `{}` regardless of what the graph declares — pinned in
+    // apps/api/test/schedules.poll.spec.ts — so this assertion is a product judgment, not a guard.
     for (const t of ["scheduleTrigger", "pollTrigger"] as NodeType[]) {
       expect(acceptsSampleInput(t), t).toBe(false);
       expect(nodeConfigKeys(t), t).not.toContain("sampleInput");
