@@ -3,7 +3,12 @@ import {
   BlockedEgressError,
   MissingConnectionTokenError,
 } from "@naary/connections";
-import { __setObjectStore, MemoryObjectStore } from "@naary/storage";
+import {
+  __setObjectStore,
+  isClaimCheck,
+  maybeOffload,
+  MemoryObjectStore,
+} from "@naary/storage";
 import {
   __firestoreDeps,
   type FirestoreQueryConfig,
@@ -49,6 +54,7 @@ const DOC = {
   fields: { email: { stringValue: "a@b.co" }, count: { integerValue: "5" } },
 };
 
+let store: MemoryObjectStore;
 const originals = { ...__firestoreDeps };
 
 beforeEach(() => {
@@ -64,7 +70,8 @@ beforeEach(() => {
   __firestoreDeps.assertEgressAllowed = assertEgressAllowed as never;
   __firestoreDeps.fetch = fetchMock as never;
   __firestoreDeps.emulatorHost = () => undefined;
-  __setObjectStore(new MemoryObjectStore());
+  store = new MemoryObjectStore();
+  __setObjectStore(store);
 });
 
 afterEach(() => {
@@ -192,12 +199,44 @@ describe("callFirestoreQuery", () => {
       expect(out.truncated).toBe(false);
     });
 
+    it("caps TOTAL documents across pages, not just the page count", async () => {
+      // The bound the config field promises is documents. Capping only pages would let
+      // limit:1000 x maxPages:100 return 100_000 documents.
+      fetchMock.mockResolvedValue(
+        res(200, {
+          documents: [DOC, DOC, DOC, DOC, DOC],
+          nextPageToken: "more",
+        }),
+      );
+      const out = await callFirestoreQuery(
+        {
+          ...QUERY,
+          action: "list",
+          documentId: undefined,
+          limit: 7,
+          maxPages: 50,
+        },
+        null,
+        META,
+      );
+      expect(out.count).toBe(7);
+      expect(out.truncated).toBe(true);
+      // Stopped as soon as the document cap was reached — 2 pages of 5, sliced to 7.
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
     it("clamps maxPages to the hard maximum", async () => {
       fetchMock.mockResolvedValue(
         res(200, { documents: [DOC], nextPageToken: "more" }),
       );
       await callFirestoreQuery(
-        { ...QUERY, action: "list", documentId: undefined, maxPages: 10_000 },
+        {
+          ...QUERY,
+          action: "list",
+          documentId: undefined,
+          limit: 1000, // high enough that the PAGE bound is what trips
+          maxPages: 10_000,
+        },
         null,
         META,
       );
@@ -262,6 +301,48 @@ describe("callFirestoreWrite", () => {
       nonRetryable: true,
     });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("claim-checked bindings", () => {
+  it("resolves an offloaded document value instead of writing the REFERENCE", async () => {
+    // An upstream node whose output was large gets offloaded to object storage, so a
+    // `data.*` binding arrives as a {__claimCheck} reference. Without resolving it the
+    // codec would faithfully encode the reference object into the user's document.
+    const big = "x".repeat(2_000_000);
+    const ref = await maybeOffload(big, store, { keyPrefix: "test" });
+    expect(isClaimCheck(ref)).toBe(true);
+
+    await callFirestoreWrite({ ...WRITE, data: { blob: ref } }, null, META);
+
+    const body = JSON.parse(
+      (fetchMock.mock.calls[0]?.[1] as { body: string }).body,
+    ) as { fields: { blob: { stringValue?: string } } };
+    expect(body.fields.blob.stringValue).toBe(big);
+    expect(JSON.stringify(body)).not.toContain("__claimCheck");
+  });
+
+  it("resolves an offloaded FILTER value before querying for it", async () => {
+    const big = "y".repeat(2_000_000);
+    const ref = await maybeOffload(big, store, { keyPrefix: "test" });
+    fetchMock.mockResolvedValue(res(200, [{ document: DOC }]));
+
+    await callFirestoreQuery(
+      {
+        ...QUERY,
+        action: "query",
+        documentId: undefined,
+        filters: [{ field: "blob", op: "==", value: ref }],
+      },
+      null,
+      META,
+    );
+
+    const body = JSON.parse(
+      (fetchMock.mock.calls[0]?.[1] as { body: string }).body,
+    ) as unknown;
+    expect(JSON.stringify(body)).not.toContain("__claimCheck");
+    expect(JSON.stringify(body)).toContain(big);
   });
 });
 

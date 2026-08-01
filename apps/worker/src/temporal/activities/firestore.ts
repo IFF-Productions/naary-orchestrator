@@ -29,7 +29,11 @@ import {
   parseRunQueryResponse,
   resolveEmulatorBaseUrl,
 } from "@naary/firestore";
-import { getObjectStore, maybeOffload } from "@naary/storage";
+import {
+  getObjectStore,
+  maybeOffload,
+  resolveClaimChecks,
+} from "@naary/storage";
 import {
   activityDuration,
   activityRuns,
@@ -148,22 +152,41 @@ const WRITE_ACTIONS: readonly FirestoreWriteAction[] = [
  * unrecognized value has to be rejected — with a message naming the valid actions,
  * rather than a cast that would let it fall through to a confusing Firestore 400.
  */
-function readSpec(cfg: FirestoreQueryConfig): FirestoreQuerySpec {
+async function readSpec(
+  cfg: FirestoreQueryConfig,
+): Promise<FirestoreQuerySpec> {
   if (!READ_ACTIONS.includes(cfg.action as FirestoreReadAction)) {
     throw new FirestoreRequestError(
       `Unknown firestoreQuery action "${cfg.action}" — use ${READ_ACTIONS.join(", ")}`,
     );
   }
-  return { ...cfg, action: cfg.action as FirestoreReadAction };
+  // A bound filter value may be a claim-check REFERENCE (the upstream output was
+  // offloaded). Resolve it back to the real value, or we would query for the reference
+  // object and match nothing. Same step callSqlQuery does for its params.
+  const filters = cfg.filters
+    ? ((await resolveClaimChecks(cfg.filters, getObjectStore())) as NonNullable<
+        FirestoreQueryConfig["filters"]
+      >)
+    : undefined;
+  return { ...cfg, filters, action: cfg.action as FirestoreReadAction };
 }
 
-function writeSpec(cfg: FirestoreWriteConfig): FirestoreWriteSpec {
+async function writeSpec(
+  cfg: FirestoreWriteConfig,
+): Promise<FirestoreWriteSpec> {
   if (!WRITE_ACTIONS.includes(cfg.action as FirestoreWriteAction)) {
     throw new FirestoreRequestError(
       `Unknown firestoreWrite action "${cfg.action}" — use ${WRITE_ACTIONS.join(", ")}`,
     );
   }
-  return { ...cfg, action: cfg.action as FirestoreWriteAction };
+  // CRITICAL: a `data.*` binding from an OFFLOADED upstream output arrives as a
+  // `{__claimCheck}` reference. Without this the codec would faithfully encode the
+  // reference object and write THAT into the user's document — silent corruption.
+  const data = (await resolveClaimChecks(
+    cfg.data ?? {},
+    getObjectStore(),
+  )) as Record<string, unknown>;
+  return { ...cfg, data, action: cfg.action as FirestoreWriteAction };
 }
 
 /**
@@ -348,7 +371,7 @@ export async function callFirestoreQuery(
 
     if (cfg.action === "get") {
       const raw = await callFirestore(
-        buildQueryRequest(readSpec(cfg), baseUrl),
+        buildQueryRequest(await readSpec(cfg), baseUrl),
         headers,
         timeoutMs,
         emulator,
@@ -356,16 +379,22 @@ export async function callFirestoreQuery(
       documents = [parseDocument(raw as Parameters<typeof parseDocument>[0])];
     } else if (cfg.action === "query") {
       const raw = await callFirestore(
-        buildQueryRequest(readSpec(cfg), baseUrl),
+        buildQueryRequest(await readSpec(cfg), baseUrl),
         headers,
         timeoutMs,
         emulator,
       );
       documents = parseRunQueryResponse(raw);
-      // runQuery applies `limit` server-side, so a full page means there may be more.
-      truncated = documents.length >= (buildLimit(cfg) ?? 0);
+      // runQuery applies `limit` server-side, so a full result set means there may be
+      // more. HEURISTIC: a collection holding exactly `limit` matches reports truncated
+      // — deliberately erring toward "you may not have everything".
+      truncated = documents.length >= buildLimit(cfg);
     } else {
-      // list — walk pages up to maxPages, then stop and SAY we stopped.
+      // list — walk pages until EITHER bound trips, then stop and SAY we stopped.
+      // Two bounds apply, and both must: `limit` caps total documents (that is what the
+      // config field promises) and `maxPages` caps requests. Capping only pages would
+      // make `limit: 1000, maxPages: 100` return up to 100_000 documents.
+      const limit = buildLimit(cfg);
       const maxPages = Math.max(
         1,
         Math.min(cfg.maxPages ?? DEFAULT_MAX_PAGES, MAX_MAX_PAGES),
@@ -373,7 +402,7 @@ export async function callFirestoreQuery(
       let pageToken: string | undefined;
       for (let page = 0; page < maxPages; page++) {
         const raw = await callFirestore(
-          buildQueryRequest(readSpec(cfg), baseUrl, pageToken),
+          buildQueryRequest(await readSpec(cfg), baseUrl, pageToken),
           headers,
           timeoutMs,
           emulator,
@@ -381,10 +410,17 @@ export async function callFirestoreQuery(
         const parsed = parseListResponse(raw);
         documents = documents.concat(parsed.documents);
         pageToken = parsed.nextPageToken;
-        if (!pageToken) break;
+        if (documents.length >= limit) {
+          // Hit the document cap: we dropped something if this page overshot it, or if
+          // Firestore says there is another page waiting.
+          truncated = documents.length > limit || Boolean(pageToken);
+          documents = documents.slice(0, limit);
+          break;
+        }
+        if (!pageToken) break; // the collection simply ran out
       }
-      // Firestore still had more to give when we hit the page bound.
-      truncated = Boolean(pageToken);
+      // Fell out on the PAGE bound with Firestore still holding more.
+      if (!truncated) truncated = Boolean(pageToken);
     }
 
     const count = documents.length;
@@ -462,7 +498,7 @@ export async function callFirestoreWrite(
     const headers = await authHeaders(meta.tenantId, cfg.connectionId, baseUrl);
 
     const raw = await callFirestore(
-      buildWriteRequest(writeSpec(cfg), baseUrl),
+      buildWriteRequest(await writeSpec(cfg), baseUrl),
       headers,
       timeoutFor(cfg),
       emulator,

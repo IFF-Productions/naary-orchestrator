@@ -402,6 +402,11 @@ export function decodeValue(value: FirestoreValue): unknown {
  * named `__proto__`, and a plain `out[key] = …` would run the prototype setter (#591).
  * Every key is installed with `Object.defineProperty`, which makes it an ordinary own
  * property — so the data survives intact AND nothing is polluted. Nothing is dropped.
+ *
+ * ONE-WAY CAVEAT to the round-trip guarantee: such a document READS fine, but the DSL's
+ * save-gate (`dataKey` in registry.ts) refuses `__proto__`/`constructor`/`prototype` as a
+ * literal config key, so it cannot be authored back through a firestoreWrite node. Reading
+ * a legacy document with such a field is supported; round-tripping one is not.
  */
 export function decodeFields(
   fields: Record<string, FirestoreValue>,
