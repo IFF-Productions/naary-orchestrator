@@ -25,8 +25,13 @@ import { makePublicCors } from "./common/public-cors";
 import { AppModule } from "./app.module";
 import { AllExceptionsFilter } from "./common/all-exceptions.filter";
 import { AppLogger } from "./common/app-logger";
+import { applyCacheHardening } from "./common/cache-headers";
 import { buildOpenApiConfig } from "./swagger/openapi-config";
-import { browserCorsOrigins, port as configuredPort, swaggerDisabled } from "./config";
+import {
+  browserCorsOrigins,
+  port as configuredPort,
+  swaggerDisabled,
+} from "./config";
 
 async function bootstrap(): Promise<void> {
   // rawBody: true exposes req.rawBody (Buffer) for webhook HMAC verification,
@@ -45,6 +50,13 @@ async function bootstrap(): Promise<void> {
   // CSP today, so nothing blocks the Cloudflare widget script. IF a SPA-side CSP is ever added, it
   // must allow `https://challenges.cloudflare.com` in `script-src` + `frame-src`.
   app.use(helmet());
+
+  // No ETag, and `Cache-Control: no-store` by DEFAULT (#1038). Without both, an authenticated,
+  // per-tenant response is heuristically cacheable and can come back as a 304 the SPA can't use
+  // (that is what left the Runs page on its skeleton). Handlers that deliberately cache — the
+  // content-addressed form assets, node audio, the SSE streams — set their own value and win;
+  // see cache-headers.ts for the full exemption list.
+  applyCacheHardening(app);
 
   // CORS on the ANONYMOUS public embed ingress (/forms/:id, /chat/:id) BEFORE the app's allowlist
   // below — lets tenants embed a form/chat natively (their own JS). Safe: no cookies, so ACAO:*

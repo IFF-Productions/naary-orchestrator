@@ -28,13 +28,21 @@ import {
   getActiveWorkspace,
   HttpError,
   MfaRequiredError,
+  notModifiedError,
   UnauthorizedError,
 } from "./http";
 import type { paths } from "./schema";
 
 /** The typed client. `baseUrl: BASE` ("/api") + the spec's internal path (e.g. `/executions`)
- *  = the correct browser URL; Vite (dev) and nginx (prod) proxy `/api` → the API, stripping it. */
-export const client = createClient<paths>({ baseUrl: BASE });
+ *  = the correct browser URL; Vite (dev) and nginx (prod) proxy `/api` → the API, stripping it.
+ *
+ *  `cache: "no-store"` is forwarded into every `Request` this client builds — the same guard
+ *  http() applies, and the one that matters most, since `GET /executions` (the Runs list) comes
+ *  through here. See the NO_STORE note in ./http for why a cached API response is never wanted. */
+export const client = createClient<paths>({
+  baseUrl: BASE,
+  cache: "no-store",
+});
 
 // Inject the same headers http() sends, on every request. Mirrors http()'s header block:
 // a fresh bearer token (Firebase ID token or the pasted nry_ token), plus the active
@@ -64,6 +72,29 @@ export const authMiddleware: Middleware = {
 
 client.use(authMiddleware);
 
+/**
+ * Re-issue a 304 past every cache (#1038).
+ *
+ * `no-store` above stops the BROWSER revalidating, but a proxy/CDN in front of the API can still
+ * answer 304 on its own. openapi-fetch hands that response to `unwrap()`, where `!response.ok`
+ * is true and the body is empty — the exact dead end that left the Runs page with nothing to show.
+ * One `cache: "reload"` retry turns it back into real data; only if THAT is 304 too does
+ * `unwrap()` throw (with a stated reason). Safe methods only — a POST must not be replayed.
+ *
+ * `options.fetch` (not `globalThis.fetch`) so the retry uses the same fetch as the original call.
+ */
+export const notModifiedRetry: Middleware = {
+  async onResponse({ request, response, options }) {
+    if (response.status !== 304) return undefined;
+    const method = request.method.toUpperCase();
+    if (method !== "GET" && method !== "HEAD") return undefined;
+    const doFetch = options?.fetch ?? globalThis.fetch;
+    return await doFetch(new Request(request, { cache: "reload" }));
+  },
+};
+
+client.use(notModifiedRetry);
+
 /** The error body shape the API returns (Nest's exception filter): a `code` marker and a
  *  message that can be a string or a class-validator string[]. */
 interface ApiErrorBody {
@@ -83,6 +114,12 @@ export function unwrap<T>(result: {
 }): T {
   const { data, error, response } = result;
   if (response.status === 401) throw new UnauthorizedError();
+  // Before `!response.ok`, which is true for 3xx too. A 304 that survived the retry middleware has
+  // no body to unwrap, and the generic branch below would throw `HttpError("304 <url>")` — a status
+  // with no reason, which is what #1038 looked like on screen. Say what happened instead.
+  if (response.status === 304) {
+    throw notModifiedError(`${response.url || "request"} → 304`);
+  }
   if (!response.ok) {
     const body = (error ?? undefined) as ApiErrorBody | undefined;
     // A 403 carrying the access-allowlist marker → the NotAvailable screen (exact code only).

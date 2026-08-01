@@ -59,6 +59,44 @@ export class MfaRequiredError extends Error {
 
 export const BASE = "/api";
 
+/**
+ * Every API request goes out with `cache: "no-store"` (#1038).
+ *
+ * The API is authenticated, per-tenant and environment-scoped; none of it is safely reusable from
+ * a cache. Production nonetheless answered `GET /executions` with a **304 Not Modified** — the API
+ * sent an `ETag` (Express's default) and no `Cache-Control`, which makes a response heuristically
+ * cacheable, so the browser revalidated. `fetch()` does NOT transparently serve the cached copy on
+ * a 304 the way a document load does: it hands the bare, body-less 304 straight to the caller, and
+ * `Response.ok` is false for it — so it fell into the error branch meant for 4xx/5xx.
+ *
+ * `no-store` means the request is never conditional in the first place. The server-side fix (no
+ * `ETag`, `Cache-Control: no-store`) removes the other half; this is the client's own guard.
+ */
+const NO_STORE: RequestCache = "no-store";
+/** The retry's cache mode: bypass every cache and force a full response. */
+const RELOAD: RequestCache = "reload";
+
+/** Only a safe, idempotent method may be re-issued — a POST must never be sent twice. */
+function isSafeMethod(method?: string): boolean {
+  const m = (method ?? "GET").toUpperCase();
+  return m === "GET" || m === "HEAD";
+}
+
+/**
+ * The error a 304 produces once the retry has also failed. A 304 carries no body by definition, so
+ * there is nothing to hand a caller that asked for data — but the caller MUST be told, and told
+ * why: silently resolving with `undefined` would crash a screen mid-render, and the old bare
+ * `HttpError(304)` (no message at all) left nothing to show or report.
+ */
+export const NOT_MODIFIED_REASON =
+  "The server answered 304 Not Modified. A 304 has no body, and nothing was cached here to show " +
+  "instead — a cache or proxy in front of the API is answering a request that must not be cached.";
+
+/** Build that error, appending the request context (which route, which status). */
+export function notModifiedError(context: string): HttpError {
+  return new HttpError(`${NOT_MODIFIED_REASON} (${context})`, 304);
+}
+
 // The active workspace, sent as `X-Workspace-Id` so the server scopes every request to the
 // selected workspace (multi-workspace model). The WorkspaceProvider sets this once it has
 // resolved the caller's workspaces; it's persisted so a reload keeps the selection. When
@@ -134,8 +172,10 @@ export function subscribeActiveEnvironment(onChange: () => void): () => void {
 
 export async function http<T>(path: string, init?: RequestInit): Promise<T> {
   const token = await getBearerToken();
-  const res = await fetch(`${BASE}${path}`, {
+  const url = `${BASE}${path}`;
+  const requestInit: RequestInit = {
     ...init,
+    cache: NO_STORE,
     headers: {
       "content-type": "application/json",
       ...(token ? { authorization: `Bearer ${token}` } : {}),
@@ -145,8 +185,21 @@ export async function http<T>(path: string, init?: RequestInit): Promise<T> {
         : {}),
       ...init?.headers,
     },
-  });
+  };
+  let res = await fetch(url, requestInit);
+  // A 304 from a request we asked NOT to be cached can only come from something in front of the
+  // API (proxy/CDN). Ask once more, past every cache, so the caller gets the data it wanted rather
+  // than an error about plumbing. Safe methods only — a POST must not be replayed.
+  if (res.status === 304 && isSafeMethod(init?.method)) {
+    res = await fetch(url, { ...requestInit, cache: RELOAD });
+  }
   if (res.status === 401) throw new UnauthorizedError();
+  // Checked BEFORE `!res.ok` (which is true for 3xx as well as 4xx/5xx): a 304 has no body, so the
+  // error branch below would `res.json()` on nothing, swallow the rejection, and throw a
+  // message-less HttpError. The screen must get a stated reason instead.
+  if (res.status === 304) {
+    throw notModifiedError(`${init?.method ?? "GET"} ${path} → 304`);
+  }
   if (!res.ok) {
     const body = (await res.json().catch(() => null)) as {
       code?: string;
@@ -226,6 +279,7 @@ export async function introspectPost<T>(
   const token = await getBearerToken();
   const res = await fetch(`${BASE}${path}`, {
     method: "POST",
+    cache: NO_STORE,
     headers: {
       "content-type": "application/json",
       ...(token ? { authorization: `Bearer ${token}` } : {}),
@@ -237,6 +291,9 @@ export async function introspectPost<T>(
     body: JSON.stringify(body),
   });
   if (res.status === 401) throw new UnauthorizedError();
+  // Same 3xx blind spot as http() above: `!res.ok` is true for a 304, whose empty body would leave
+  // the user with "Introspection failed (304)" and no idea why. Not retried — this is a POST.
+  if (res.status === 304) throw new Error(NOT_MODIFIED_REASON);
   if (!res.ok) {
     const parsed = (await res.json().catch(() => null)) as {
       message?: string;
