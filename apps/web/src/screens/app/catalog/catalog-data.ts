@@ -160,6 +160,8 @@ const NODE_IPATH: Partial<Record<NodeType, string>> = {
     "M5 6c0-1.5 3-2.5 7-2.5S19 4.5 19 6m-14 0v12c0 1.5 3 2.5 7 2.5s7-1 7-2.5V6m-14 6c0 1.5 3 2.5 7 2.5s7-1 7-2.5",
   sqlExec:
     "M5 6c0-1.5 3-2.5 7-2.5S19 4.5 19 6v12c0 1.5-3 2.5-7 2.5m-7-9c0 1.5 3 2.5 7 2.5M9 18l2 2 4-4",
+  firestoreQuery: "M12 3 4 17h16zM12 3v18M7.5 11.5h9M8 20l4-3 4 3",
+  firestoreWrite: "M12 3 4 17h16zM12 3v18M7.5 11.5h9M9 19l2 2 4-4",
   rssRead:
     "M5 19a1 1 0 1 0 0-2 1 1 0 0 0 0 2zM5 13a6 6 0 0 1 6 6M5 7a12 12 0 0 1 12 12",
   vectorUpsert: "M12 3v18M5 7l7 4 7-4M5 12l7 4 7-4",

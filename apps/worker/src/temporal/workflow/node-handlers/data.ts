@@ -9,6 +9,8 @@ import {
   resolveGraphQL,
   resolveSqlQuery,
   resolveSqlExec,
+  resolveFirestoreQuery,
+  resolveFirestoreWrite,
   resolveRss,
   asNodeConfig,
 } from "@naary/dsl/dist/workflow";
@@ -19,6 +21,8 @@ import {
   callGraphQL,
   callSqlQuery,
   callSqlExec,
+  callFirestoreQuery,
+  callFirestoreWrite,
   callRssRead,
   callVectorUpsert,
   callVectorQuery,
@@ -142,6 +146,57 @@ export const handleSqlExec: NodeHandler = async ({
   ctx[node.id] = {
     rowsAffected: result.rowsAffected,
   } satisfies NodeOutputMap["sqlExec"];
+  return { costUsd: result.costUsd };
+};
+
+export const handleFirestoreQuery: NodeHandler = async ({
+  cfg,
+  ctx,
+  node,
+  metaFor,
+}) => {
+  // Binding resolution is deterministic graph work (pure ctx path-reads); the OAuth token
+  // read, the egress-guarded HTTPS call, and the typed-value decoding all happen in the
+  // activity. Reads are idempotent, so this kind honours the per-node retry policy.
+  const fsCfg = asNodeConfig(cfg, "firestoreQuery");
+  const over = retryOverride(node.retry, 150_000);
+  const result = await (over?.callFirestoreQuery ?? callFirestoreQuery)(
+    resolveFirestoreQuery(fsCfg, ctx),
+    ctx.__input,
+    metaFor(node.id),
+  );
+  // Expose {documents, count, truncated} so edges branch on `<nodeId>.count` — or on
+  // `<nodeId>.truncated`, which is why a dropped-document bound is in the OUTPUT and not
+  // merely a log line.
+  ctx[node.id] = {
+    documents: result.documents,
+    count: result.count,
+    truncated: result.truncated,
+  } satisfies NodeOutputMap["firestoreQuery"];
+  return { costUsd: result.costUsd };
+};
+
+export const handleFirestoreWrite: NodeHandler = async ({
+  cfg,
+  ctx,
+  node,
+  metaFor,
+}) => {
+  // A WRITE (set/create/update/delete). No retryOverride: the activity runs at-most-once
+  // because `create` has Firestore assign the id, so a retry would create a second
+  // document. The plain-JSON → typed-value encoding happens in the activity.
+  const writeCfg = asNodeConfig(cfg, "firestoreWrite");
+  const result = await callFirestoreWrite(
+    resolveFirestoreWrite(writeCfg, ctx),
+    ctx.__input,
+    metaFor(node.id),
+  );
+  // Expose {name, documentId, deleted} so a downstream node can address what was written.
+  ctx[node.id] = {
+    name: result.name,
+    documentId: result.documentId,
+    deleted: result.deleted,
+  } satisfies NodeOutputMap["firestoreWrite"];
   return { costUsd: result.costUsd };
 };
 

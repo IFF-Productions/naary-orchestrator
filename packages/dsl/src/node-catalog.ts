@@ -160,6 +160,20 @@ export const NODE_CATALOG: Record<NodeType, NodeCatalogEntry> = {
       "SQL write (INSERT/UPDATE/DELETE) in a txn; output {rowsAffected}. At-most-once.",
     config: "{ connectionId, sql, paramBindings? }",
   },
+  firestoreQuery: {
+    group: "data-source",
+    summary:
+      "Read Cloud Firestore (get one document / list a collection / query it with filters); output {documents,count,truncated}. Each document's `data` is PLAIN JSON — the node converts Firestore's typed values both ways.",
+    config:
+      "{ connectionId, projectId, collection, action?:'get'|'list'|'query', documentId?, filters?, orderBy?, limit? }",
+  },
+  firestoreWrite: {
+    group: "data-source",
+    summary:
+      "Write ONE Cloud Firestore document (set/create/update/delete); output {name,documentId,deleted}. `data` is plain JSON. At-most-once.",
+    config:
+      "{ connectionId, projectId, collection, action?:'set'|'create'|'update'|'delete', documentId?, data?, updateMask? }",
+  },
   rssRead: {
     group: "data-source",
     summary: "Fetch + parse an RSS/Atom feed; output {items,count}.",

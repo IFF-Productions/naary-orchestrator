@@ -43,6 +43,7 @@ const TYPE_LABEL: Record<ConnectionType, string> = {
   postgres: "Postgres",
   mssql: "SQL Server",
   mysql: "MySQL",
+  firestore: "Cloud Firestore",
   signing: "signing-key",
   smtp: "SMTP",
 };

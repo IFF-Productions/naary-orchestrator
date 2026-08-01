@@ -13,7 +13,7 @@ import type { CreateConnectionInput } from "@naary/connections";
 
 // Types whose serverUrl is a NON-SECRET display label (host / name), not an https
 // URL — the real secret (DSN / signing key) rides in `token`.
-const NON_URL_TYPES = ["postgres", "mssql", "signing", "smtp"];
+const NON_URL_TYPES = ["postgres", "mssql", "signing", "smtp", "firestore"];
 
 /**
  * serverUrl is validated by connection kind:
@@ -47,6 +47,7 @@ export class CreateConnectionDto implements CreateConnectionInput {
       "custom",
       "postgres",
       "mssql",
+      "firestore",
       "signing",
       "smtp",
     ],
@@ -59,6 +60,7 @@ export class CreateConnectionDto implements CreateConnectionInput {
     "custom",
     "postgres",
     "mssql",
+    "firestore",
     "signing",
     "smtp",
   ])

@@ -136,6 +136,8 @@ export const ERRORABLE_KINDS = new Set<NodeType>([
   "httpRequest",
   "sqlQuery",
   "sqlExec",
+  "firestoreQuery",
+  "firestoreWrite",
   "sendEmail",
   "rssRead",
   "xml",

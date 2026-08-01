@@ -271,7 +271,7 @@ export interface ScheduleRow {
   nextRunAt: string | null;
 }
 
-/** Connection type — MCP/app servers plus SQL databases (the sqlQuery node). */
+/** Connection type — MCP/app servers, SQL databases (the sqlQuery node), and Firestore. */
 export type ConnectionType =
   | "github"
   | "atlassian"
@@ -279,6 +279,7 @@ export type ConnectionType =
   | "postgres"
   | "mssql"
   | "mysql"
+  | "firestore"
   | "signing"
   | "smtp";
 export type ConnectionAuthMode =

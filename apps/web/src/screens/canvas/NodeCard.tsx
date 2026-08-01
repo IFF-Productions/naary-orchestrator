@@ -68,6 +68,8 @@ export function nodeIconFor(kind: NodeType): IconName {
       return "http";
     case "sqlQuery":
     case "sqlExec":
+    case "firestoreQuery":
+    case "firestoreWrite":
       return "chart";
     case "wait":
       return "clock";

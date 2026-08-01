@@ -13,6 +13,7 @@ export class ConnectionResponse {
       "postgres",
       "mssql",
       "mysql",
+      "firestore",
       "signing",
       "smtp",
     ],

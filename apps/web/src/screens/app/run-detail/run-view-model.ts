@@ -158,6 +158,8 @@ export function nodeIcon(type: NodeType): IconName {
       return "http";
     case "sqlQuery":
     case "sqlExec":
+    case "firestoreQuery":
+    case "firestoreWrite":
       return "grid";
     case "if":
     case "switch":

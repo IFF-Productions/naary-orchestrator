@@ -24,6 +24,10 @@ import {
   httpBranchGraph,
   sqlGraph,
   sqlExecGraph,
+  firestoreQueryGraph,
+  firestoreWriteGraph,
+  firestoreQueryCalls,
+  firestoreWriteCalls,
   setGraph,
   subParentGraph,
   subStartParentGraph,
@@ -209,6 +213,60 @@ describe("runGraph interpreter — per-node behavior: data, http, sql, sub-workf
       const call = sqlExecCalls[sqlExecCalls.length - 1];
       expect(call.sql).toBe("UPDATE users SET seen = true WHERE id = $1");
       expect(call.params).toEqual([7]); // bound from trigger.userId, not the SQL text
+    });
+  });
+
+  it("firestoreQuery: dispatches the node + exposes {documents,count,truncated} in ctx", async () => {
+    const worker = await makeWorker(env);
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [firestoreQueryGraph, { userId: "ada" }, { tenantId: "t-fsq" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-firestore-query",
+      });
+      const result = await handle.result();
+      expect(result.status).toBe("completed");
+      // NODE_HANDLERS is a Partial<Record<>> with a trailing `return null`, so a missing
+      // handler makes the node a SILENT no-op that still reports "completed". Asserting
+      // the ctx output — not just the run status — is what catches that.
+      expect(result.ctx.lookup).toEqual({
+        documents: [
+          { id: "ada", name: "…/users/ada", data: { email: "a@b.co" } },
+        ],
+        count: 1,
+        truncated: false,
+      });
+      // The documentId was bound from the trigger, not hard-coded in the config.
+      const call = firestoreQueryCalls[firestoreQueryCalls.length - 1];
+      expect(call.documentId).toBe("ada");
+      expect(call.action).toBe("get");
+      expect(call.collection).toBe("users");
+    });
+  });
+
+  it("firestoreWrite: dispatches the write + binds a document FIELD from upstream", async () => {
+    const worker = await makeWorker(env);
+    await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [firestoreWriteGraph, { userId: 42 }, { tenantId: "t-fsw" }],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-firestore-write",
+      });
+      const result = await handle.result();
+      expect(result.status).toBe("completed");
+      expect(result.ctx.write).toEqual({
+        name: "projects/p/databases/(default)/documents/users/ada",
+        documentId: "ada",
+        deleted: false,
+      });
+      const call = firestoreWriteCalls[firestoreWriteCalls.length - 1];
+      // A `data.*` binding fills one document field and leaves the static ones alone —
+      // the same binding shape httpRequest uses for `body.*`.
+      expect(call.data).toEqual({
+        email: "static@example.com",
+        userId: 42,
+      });
+      expect(call.action).toBe("set");
     });
   });
 

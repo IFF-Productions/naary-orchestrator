@@ -239,6 +239,38 @@ const mockActivities = {
     sqlExecCalls.push(cfg);
     return { status: "ok", rowsAffected: 2, costUsd: 0 };
   },
+  callFirestoreQuery: async (
+    cfg: activities.FirestoreQueryConfig,
+    _input: unknown,
+    _meta: activities.AgentMeta,
+  ): Promise<activities.FirestoreQueryResult> => {
+    firestoreQueryCalls.push(cfg);
+    return {
+      status: "ok",
+      // Plain JSON, as the real activity returns it — the typed wire values are
+      // decoded inside the activity, never in workflow code.
+      documents: [
+        { id: "ada", name: "…/users/ada", data: { email: "a@b.co" } },
+      ],
+      count: 1,
+      truncated: false,
+      costUsd: 0,
+    };
+  },
+  callFirestoreWrite: async (
+    cfg: activities.FirestoreWriteConfig,
+    _input: unknown,
+    _meta: activities.AgentMeta,
+  ): Promise<activities.FirestoreWriteResult> => {
+    firestoreWriteCalls.push(cfg);
+    return {
+      status: "ok",
+      name: "projects/p/databases/(default)/documents/users/ada",
+      documentId: "ada",
+      deleted: cfg.action === "delete",
+      costUsd: 0,
+    };
+  },
   computeDateTime: async (input: {
     base: string | number | null;
     addSeconds?: number;
@@ -482,7 +514,8 @@ const mockActivities = {
     workflowKey?: string;
   }): Promise<boolean> => {
     selfHealCalls.push(meta);
-    if (harnessState.selfHealThrows) throw new Error("self-heal lookup exploded");
+    if (harnessState.selfHealThrows)
+      throw new Error("self-heal lookup exploded");
     return harnessState.selfHealEnabled;
   },
   // Slice 3: the post-resume budget re-read. Mutable result so a test can model the
@@ -643,6 +676,8 @@ const resumeSnapshots: { workflowId: string; stepCount: number }[] = [];
 const graphqlCalls: activities.ResolvedGraphQL[] = [];
 const sqlCalls: activities.SqlQueryConfig[] = [];
 const sqlExecCalls: activities.SqlExecConfig[] = [];
+const firestoreQueryCalls: activities.FirestoreQueryConfig[] = [];
+const firestoreWriteCalls: activities.FirestoreWriteConfig[] = [];
 
 // webhook → httpRequest → branch on status: <400 ends; ≥400 routes to an agent.
 const httpBranchGraph: GraphDef = {
@@ -717,6 +752,62 @@ const sqlExecGraph: GraphDef = {
         connectionId: "db-1",
         sql: "UPDATE users SET seen = true WHERE id = $1",
         paramBindings: { 1: { from: "trigger", path: "userId" } },
+      },
+    },
+    { id: "end", type: "end" },
+  ],
+  edges: [
+    { from: "trigger", to: "write" },
+    { from: "write", to: "end" },
+  ],
+};
+
+// webhook → firestoreQuery → end. Proves the READ node dispatches and its documents
+// land in ctx. Without a NODE_HANDLERS entry the interpreter silently no-ops the node
+// and the run still reports success, so this assertion is the only thing standing
+// between "wired" and "quietly does nothing".
+const firestoreQueryGraph: GraphDef = {
+  startNodeId: "trigger",
+  nodes: [
+    { id: "trigger", type: "webhookTrigger" },
+    {
+      id: "lookup",
+      type: "firestoreQuery",
+      config: {
+        connectionId: "fs-1",
+        action: "get",
+        projectId: "proj",
+        collection: "users",
+        argumentBindings: { documentId: { from: "trigger", path: "userId" } },
+      },
+    },
+    { id: "end", type: "end" },
+  ],
+  edges: [
+    { from: "trigger", to: "lookup" },
+    { from: "lookup", to: "end" },
+  ],
+};
+
+// webhook → firestoreWrite → end. Proves the WRITE node dispatches, that a binding
+// fills a document field, and that {name,documentId,deleted} lands in ctx.
+const firestoreWriteGraph: GraphDef = {
+  startNodeId: "trigger",
+  nodes: [
+    { id: "trigger", type: "webhookTrigger" },
+    {
+      id: "write",
+      type: "firestoreWrite",
+      config: {
+        connectionId: "fs-1",
+        action: "set",
+        projectId: "proj",
+        collection: "users",
+        documentId: "ada",
+        data: { email: "static@example.com" },
+        argumentBindings: {
+          "data.userId": { from: "trigger", path: "userId" },
+        },
       },
     },
     { id: "end", type: "end" },
@@ -1348,11 +1439,15 @@ export {
   graphqlCalls,
   sqlCalls,
   sqlExecCalls,
+  firestoreQueryCalls,
+  firestoreWriteCalls,
   // graph fixtures
   pollGraph,
   httpBranchGraph,
   sqlGraph,
   sqlExecGraph,
+  firestoreQueryGraph,
+  firestoreWriteGraph,
   setGraph,
   subChildGraph,
   subThrowChildGraph,

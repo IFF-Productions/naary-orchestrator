@@ -59,6 +59,7 @@ export { getNodeOutput } from "./node-output";
 export { resolveHttpRequest } from "./http-request";
 export { resolveGraphQL } from "./graphql";
 export { resolveSqlQuery, resolveSqlExec } from "./sql-query";
+export { resolveFirestoreQuery, resolveFirestoreWrite } from "./firestore";
 export { resolveRss } from "./rss";
 export { resolveIf } from "./if-node";
 export { resolveJson } from "./json-node";

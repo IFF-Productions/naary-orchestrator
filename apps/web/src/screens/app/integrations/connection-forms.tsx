@@ -252,6 +252,107 @@ export function SmtpForm({
   );
 }
 
+export function FirestoreForm({
+  tenant,
+  onChanged,
+}: {
+  tenant: string;
+  onChanged: () => Promise<void> | void;
+}) {
+  const [label, setLabel] = useState("");
+  const [token, setToken] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  async function submit() {
+    setBusy(true);
+    setMsg(null);
+    try {
+      await api.createConnection(tenant, {
+        type: "firestore",
+        label: label.trim(),
+        // Non-secret display name — Firestore's host is fixed, so there is no URL to set.
+        serverUrl: label.trim(),
+        // The stored secret is a Google OAuth ACCESS token, sent as a bearer by the
+        // activity via the shared resolveAuthHeader path (same as every api_token
+        // connection). Google supports neither RFC-8414 discovery nor dynamic client
+        // registration, so the interactive `oauth` consent flow cannot be used here.
+        authMode: "api_token",
+        token: token.trim(),
+      });
+      setLabel("");
+      setToken("");
+      setMsg("Saved ✓");
+      await onChanged();
+    } catch (e) {
+      setMsg(
+        e instanceof Error && /400/.test(e.message)
+          ? "Check the fields."
+          : "Could not save the Firestore connection.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const ready = Boolean(label.trim() && token.trim());
+
+  return (
+    <>
+      <div style={{ marginBottom: 10 }}>
+        <span style={fieldLabel}>Label</span>
+        <input
+          style={fieldStyle}
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          placeholder="prod-firestore"
+        />
+      </div>
+      <div style={{ marginBottom: 10 }}>
+        <span style={fieldLabel}>
+          Google OAuth access token (stored encrypted)
+        </span>
+        <input
+          style={fieldStyle}
+          type="password"
+          value={token}
+          onChange={(e) => setToken(e.target.value)}
+          placeholder="ya29.…"
+        />
+      </div>
+      <div
+        style={{
+          fontSize: "var(--text-xs)",
+          lineHeight: "var(--leading-snug)",
+          color: "var(--ink-3)",
+          marginBottom: 12,
+        }}
+      >
+        Used by the Firestore Read and Firestore Write nodes. Needs the{" "}
+        <code>https://www.googleapis.com/auth/datastore</code> scope — a Google
+        API <em>key</em> will not work, because keys travel in a{" "}
+        <code>?key=</code> query parameter and these nodes only send an{" "}
+        <code>Authorization</code> header. The project id is set per node, so
+        one connection can address several projects.
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <Button
+          variant="primary"
+          disabled={busy || !ready}
+          onClick={() => void submit()}
+        >
+          {busy ? "Saving…" : "Save"}
+        </Button>
+        {msg && (
+          <span style={{ fontSize: "var(--text-sm)", color: "var(--ink-2)" }}>
+            {msg}
+          </span>
+        )}
+      </div>
+    </>
+  );
+}
+
 export function SigningForm({
   tenant,
   onChanged,

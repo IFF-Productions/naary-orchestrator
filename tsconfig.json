@@ -9,6 +9,7 @@
     { "path": "./packages/connections" },
     { "path": "./packages/storage" },
     { "path": "./packages/sql" },
+    { "path": "./packages/firestore" },
     { "path": "./packages/observability" },
     { "path": "./packages/logging" },
     { "path": "./packages/notifications" },
