@@ -250,6 +250,84 @@ describe("runGraph interpreter — durable pause → signal → resume", () => {
     ).resolves.toBeUndefined();
   });
 
+  it("#1019: the approval notification carries the gate's title RESOLVED against the run — and keeps an unresolvable reference legible", async () => {
+    // The reported prompt, as a graph: a templated title referencing the trigger's output, plus
+    // one reference the run cannot satisfy. Slack/Teams/email all render whatever `title` the
+    // interpreter sends, so this is the assertion that covers those three surfaces.
+    //
+    // Two DIFFERENT bugs live here. `execNodeInner` already resolves a node's config before the
+    // switch, so the resolvable references were never literal in a notification — but a MISSING
+    // one was resolved to "" by the config rule, so the title read "… issue #42 in a/b — " with
+    // the last clause silently amputated. Both halves are asserted below.
+    const templatedGraph: GraphDef = {
+      startNodeId: "start",
+      nodes: [
+        { id: "start", type: "start" },
+        {
+          id: "appr",
+          type: "humanApproval",
+          config: {
+            title:
+              "Approve automated fix for issue #{{ start.issueNumber }} in " +
+              "{{ start.owner }}/{{ start.repo }} — {{ start.nope }}",
+            // Tiny offset (real-time env): fires the REMINDER site too, which is a second,
+            // separately-gated call — one run covers both notification call sites.
+            remindAfterHours: [0.0002],
+          },
+        },
+        { id: "e", type: "end" },
+      ],
+      edges: [
+        { from: "start", to: "appr" },
+        { from: "appr", to: "e" },
+      ],
+    };
+    const worker = await makeWorker(env);
+    const history = await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(runGraph, {
+        args: [
+          templatedGraph,
+          { issueNumber: 42, owner: "IFF-Productions", repo: "naary" },
+          { tenantId: "t-templated" },
+        ],
+        taskQueue: TASK_QUEUE,
+        workflowId: "e2e-approve-templated",
+      });
+      await waitFor(async () =>
+        notifyCalls.some(
+          (n) => n.tenantId === "t-templated" && n.flavor === "reminder",
+        ),
+      );
+      const expected =
+        "Approve automated fix for issue #42 in IFF-Productions/naary — " +
+        "{{ start.nope }}";
+      const mine = notifyCalls.filter((n) => n.tenantId === "t-templated");
+      // Initial pause notification AND the reminder — both resolved, identically.
+      expect(mine.map((n) => n.flavor ?? "initial")).toEqual([
+        "initial",
+        "reminder",
+      ]);
+      for (const n of mine) {
+        expect(n.title).toBe(expected);
+        // Never a half-substituted sentence, never the word "undefined".
+        expect(n.title).not.toContain("undefined");
+        expect(n.title).not.toMatch(/— $/);
+      }
+      await handle.signal(approvalSignal, { approved: true });
+      expect((await handle.result()).status).toBe("completed");
+      return handle.fetchHistory();
+    });
+    // DETERMINISM (Tier-1 rule 2): resolving is a pure read of ctx the workflow already holds —
+    // no command added, none reordered, and no second patched() gate. The history proves it.
+    await expect(
+      Worker.runReplayHistory(
+        { workflowsPath: WORKFLOWS_PATH },
+        history,
+        "e2e-approve-templated",
+      ),
+    ).resolves.toBeUndefined();
+  });
+
   it("Slice 1 invariant: an OLD-STYLE gate (no new fields) emits NO new commands — no prepareApproval, no timers — and its history replays", async () => {
     const plainGraph: GraphDef = {
       startNodeId: "s",

@@ -40,6 +40,7 @@ import { RegionTraceSection } from "./run-detail/RegionTraceSection";
 import { RunGraph } from "./run-detail/RunGraph";
 import { type LogEntry, LogPanel, useRunHistory } from "./run-detail/RunLog";
 import {
+  approvalPromptView,
   computeStepStates,
   fmtAge,
   fmtStepDuration,
@@ -428,9 +429,15 @@ function RunView({ id }: { id: string }) {
   const currentNodeLabel = currentNode
     ? nodeDisplayLabel(currentNode.type, currentNode.config)
     : null;
+  // #1019: the hero shows the gate's prompt RENDERED against this run — the config comes off the
+  // graph snapshot, so `title: "Approve fix for issue #{{ start.issueNumber }}"` used to reach the
+  // screen with the token intact. See approvalPromptView.
   const approval: ApprovalInfo | null =
     awaiting && currentNode?.type === "humanApproval"
-      ? ((currentNode.config ?? {}) as ApprovalInfo)
+      ? approvalPromptView(
+          (currentNode.config ?? {}) as ApprovalInfo,
+          state?.ctx,
+        )
       : null;
 
   // Trigger line: the snapshot's entry node names how this run started.

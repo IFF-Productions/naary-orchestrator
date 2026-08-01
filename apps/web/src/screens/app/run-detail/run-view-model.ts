@@ -3,6 +3,7 @@
  * states derived from the REAL execution state (ctx keys = executed nodes),
  * step ordering, time formatting, and edge branch labels. No I/O, no JSX.
  */
+import { resolvePromptText } from "@naary/dsl";
 import type { EdgeCondition, GraphDef, NodeType } from "@naary/dsl";
 import type { IconName } from "../../../components";
 import type { HttpFailure, RunEvent } from "../../../lib/api";
@@ -355,8 +356,7 @@ export function stepOutputView(
 ): { output: unknown; isTriggerInput: boolean; hasCtxOutput: boolean } {
   const hasCtxOutput = selectedId in ctx;
   const isEntry = selectedId === startNodeId;
-  const isTriggerInput =
-    isEntry && (hasCtxOutput || ctx.__input !== undefined);
+  const isTriggerInput = isEntry && (hasCtxOutput || ctx.__input !== undefined);
   return {
     // A node's own ctx entry wins; the entry node falls back to the run input for older runs,
     // recorded before `start` published anything.
@@ -367,5 +367,34 @@ export function stepOutputView(
         : undefined,
     isTriggerInput,
     hasCtxOutput,
+  };
+}
+
+/**
+ * The paused gate's config as the approval hero should SHOW it (#1019) — the authored
+ * `title`/`instructions` rendered against this run's ctx.
+ *
+ * The hero reads the humanApproval node's config straight off the run's graph snapshot, which
+ * is why `title: "Approve fix for issue #{{ start.issueNumber }}"` reached the screen with the
+ * token intact. It renders through `resolvePromptText` — the interpreter's own resolver — so it
+ * agrees with the approval inbox, the signed approve/reject page and the Slack/Teams/email
+ * notification, all of which now render the same string. `{{ $secrets.NAME }}` stays literal
+ * (never resolved outside the activity that needs it) and a reference this run cannot satisfy
+ * stays a visible token instead of a blank.
+ *
+ * ABSENCE IS PRESERVED: a gate with no title still has no title (the hero hides the block
+ * entirely rather than showing a generic "Approval required" heading), and every other field is
+ * passed through untouched — this renders text, it does not invent facts.
+ */
+export function approvalPromptView<
+  T extends { title?: string; instructions?: string },
+>(config: T | null | undefined, ctx?: Record<string, unknown> | null): T {
+  const cfg = (config ?? {}) as T;
+  return {
+    ...cfg,
+    ...(cfg.title ? { title: resolvePromptText(cfg.title, ctx) } : {}),
+    ...(cfg.instructions
+      ? { instructions: resolvePromptText(cfg.instructions, ctx) }
+      : {}),
   };
 }

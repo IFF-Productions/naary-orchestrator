@@ -109,6 +109,7 @@ export async function opRemindContext(
     row.environmentId,
     row.workflowKey,
     state.currentNodeId,
+    state.ctx ?? {}, // #1019 — the signed link's title names what is actually being approved
   );
   const environmentId =
     row.environmentId ?? (await deps.environments.defaultEnvId(tenantId));

@@ -69,6 +69,12 @@ export {
   type TemplateWarning,
   type UnresolvedRef,
 } from "./template";
+// The approval prompt's DISPLAY rendering (#1019) — same resolver, never-blank rule.
+export {
+  resolvePromptText,
+  resolveApprovalPrompt,
+  type ApprovalPromptText,
+} from "./approval-prompt";
 export { isPureNode, runPureNode } from "./pure-node";
 // Items model (design ITEMS-MODEL.md) — Slice 1 normalize primitive only; no interpreter change yet.
 export { type Item, toItems, itemsJson } from "./items";
