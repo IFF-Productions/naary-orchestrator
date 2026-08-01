@@ -16,10 +16,11 @@ export function jsonErrorText(
   err: unknown,
   lead = "That isn't valid JSON",
 ): string {
-  const detail = (
-    err instanceof Error ? err.message : String(err ?? "")
-  ).trim();
-  return detail ? `${lead} — ${detail}` : `${lead}.`;
+  const detail = err instanceof Error ? err.message : String(err ?? "");
+  // Trim to decide whether there is anything to say; append the ORIGINAL. Trimming the appended
+  // value would be a small reshape of engine output, which is the thing this function promises
+  // not to do — "verbatim" has to mean verbatim or the next reader can't rely on it.
+  return detail.trim() ? `${lead} — ${detail}` : `${lead}.`;
 }
 
 /** Which top-level shapes a JSON field accepts once the text parses. */
@@ -40,11 +41,15 @@ export function parseJsonField(
   text: string,
   shape: JsonFieldShape,
 ): JsonFieldResult {
-  const trimmed = text.trim();
-  if (!trimmed) return { ok: true, value: undefined };
+  if (!text.trim()) return { ok: true, value: undefined };
   let parsed: unknown;
   try {
-    parsed = JSON.parse(trimmed);
+    // Parse the RAW text, not a trimmed copy. Whitespace around a JSON document is insignificant
+    // to the parser, so the two agree on the verdict — but not on the `position N (line L column
+    // C)` in the message, which counts from the start of the string it was handed. Parsing a
+    // trimmed copy would report a position into a string the user never typed, off by however
+    // much leading whitespace they had.
+    parsed = JSON.parse(text);
   } catch (e) {
     return { ok: false, error: jsonErrorText(e) };
   }

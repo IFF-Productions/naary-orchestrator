@@ -40,6 +40,17 @@ describe("jsonErrorText", () => {
 
   it("falls back to the lead alone when there is no message to add", () => {
     expect(jsonErrorText(new SyntaxError(""))).toBe("That isn't valid JSON.");
+    expect(jsonErrorText(new SyntaxError("   \n"))).toBe(
+      "That isn't valid JSON.",
+    );
+  });
+
+  it("appends the message verbatim — the emptiness check trims, the output does not", () => {
+    // "Verbatim" has to be literally true or the next reader can't build on it: whitespace is the
+    // cheapest observable reshape, and if we strip that, nothing stops the next transformation.
+    expect(jsonErrorText(new SyntaxError("  boom  "))).toBe(
+      "That isn't valid JSON —   boom  ",
+    );
   });
 });
 
@@ -64,6 +75,17 @@ describe("parseJsonField", () => {
     for (const fragment of detail.match(/position \d+|line \d+ column \d+/g) ??
       [])
       expect(result.error).toContain(fragment);
+  });
+
+  it("reports the position in the text the USER typed, not in a trimmed copy", () => {
+    // Leading whitespace is insignificant to the parser but not to its position counter. Parsing
+    // a trimmed copy pointed at "line 1 column 17" for an error that is on line 3 — a pointer
+    // into a string the user never typed.
+    const padded = '\n\n  {"data":[1,2,3],}';
+    const result = parseJsonField(padded, "object");
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toContain(engineMessage(padded));
   });
 
   it("keeps the shape errors, which are not parse failures", () => {
