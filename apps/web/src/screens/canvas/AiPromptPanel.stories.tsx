@@ -449,6 +449,37 @@ export const FixCanvasDoesNotCompile: Story = {
 };
 
 /**
+ * The workflow could not be OPENED at all (#1006) — the third way into `blocked`, and the one
+ * where the other two sentences are both false.
+ *
+ * `/graphs/<key>` rejected, so `CanvasPage` set a status line and stopped: the nodes were never
+ * replaced and the canvas still holds the SEED graph (start → approval → end). That graph COMPILES
+ * — which is why `canEdit` is true here, unlike the two blocked stories above, and why the mode
+ * chooser renders. It is also precisely the trap: read as "the canvas has loaded", the seed becomes
+ * the thing the failure is described against, and the prompt comes out naming a step "no longer in
+ * the workflow" under a banner claiming the fix applies to the workflow the user came from.
+ *
+ * So the sentence has to say the one true thing: what is on screen is not that workflow.
+ */
+export const FixWorkflowFailedToOpen: Story = {
+  args: {
+    initialMode: "edit",
+    // The SEED graph compiles, so the panel really is editable — a failed open does not disable
+    // the canvas, it just means the canvas isn't the user's workflow.
+    canEdit: true,
+    initialPrompt: "",
+    fixNotice: {
+      runId: "exec-t-demo-ce20c38b",
+      drift: null,
+      includedNodeIds: [],
+      error: null,
+      stage: "blocked",
+      canvasLoadFailed: true,
+    },
+  },
+};
+
+/**
  * Terminal, not a wait: the canvas finished loading with nothing on it to change, so no
  * description is coming. A spinner here would promise one forever.
  */

@@ -39,6 +39,13 @@ import { expect, type Page, type Route, test } from "@playwright/test";
  *      confident falsehood, in the feature that exists to prevent one. Fixed by waiting for the
  *      workflow fetch to SETTLE (`canvasLoaded`) rather than for a graph to compile — which also
  *      made the `loading-canvas` stage reachable, having been dead for the same reason.
+ *   7. THE SAME DESCRIPTION, VIA A FAILED OPEN (#1006). Waiting for the workflow fetch to SETTLE
+ *      closed the race but not the case where it settles by FAILING: the nodes are never replaced,
+ *      so the seed is still on the canvas, compiling, and "settled" read as "this is the
+ *      workflow". Fixed by making the load a three-state value — loading / loaded / failed — so
+ *      failure stays terminal (no spinner) without being mistaken for a loaded workflow, and by
+ *      giving `blocked` a third sentence, since the two it had are both false about a canvas that
+ *      is neither empty nor broken.
  *
  * DELAYED ROUTE STUBS ARE THE WHOLE TECHNIQUE. An instantly-fulfilled route gives no observable
  * window, so an assertion about a loading state cannot fail and the test is vacuous — it would
@@ -48,7 +55,7 @@ import { expect, type Page, type Route, test } from "@playwright/test";
  *
  * WHERE THE FAILING RUN COMES FROM. It is stubbed, not executed. A real failing Temporal run would
  * need a workflow seeded to fail, a poll to terminal, and would still hand us a run whose error
- * text, ctx and timing we do not control — and none of the five bugs above is about the
+ * text, ctx and timing we do not control — and none of the bugs above is about the
  * orchestrator producing a failure correctly. What they are about is the SPA's handling of a
  * failed run's data, so the run's data is the input, and stubbing it is what makes the error text,
  * the executed-version drift, and above all the RESPONSE TIMING assertable at all. The stubs are
@@ -216,9 +223,11 @@ function apiPath(suffix: string): RegExp {
  * `Failed at node: "notify" (no longer in the workflow)` under a banner naming the workflow on
  * screen.
  *
- * `useFixFromRun` now waits for `canvasLoaded` — the workflow fetch having SETTLED — rather than
- * for whatever happens to compile, so neither ordering can build against the seed. The throw is
- * gone with the race, and the inverted ordering has its own test below.
+ * `useFixFromRun` now waits for `canvasLoad === "loaded"` — the workflow fetch having SUCCEEDED —
+ * rather than for whatever happens to compile, so neither ordering can build against the seed. The
+ * throw is gone with the race, and the inverted ordering has its own test below. (Waiting for the
+ * fetch to merely SETTLE was the intermediate step, and `graphFails` below is the case that showed
+ * why it was not enough: a settled failure leaves the same seed behind — #1006.)
  */
 interface StubOptions {
   /** How long the canvas's workflow fetch takes. Free of `runDelayMs` since #998 — see above. */
@@ -229,6 +238,17 @@ interface StubOptions {
   historyDelayMs?: number;
   /** The graph the canvas loads. Pass NON_COMPILING_GRAPH for the `blocked` case. */
   canvasGraph?: unknown;
+  /**
+   * FAIL the workflow read instead of fulfilling it — bug 7.
+   *
+   * A different stub SHAPE, not another delay: the route answers 500 (after `graphDelayMs`, so the
+   * `loading-canvas` window is still real), the api client throws, and `CanvasPage` sets its status
+   * line without ever replacing the nodes. The canvas is left holding SEED_NODES, which is the
+   * whole point of the case. 500 rather than 401 — `UnauthorizedError` is handled globally and
+   * would take the page somewhere else entirely — and rather than `route.abort()`, which is a
+   * network-layer failure the app never sees from a real server.
+   */
+  graphFails?: boolean;
   /** The canvas's saved version vs the version the run executed — the drift banner compares them. */
   canvasVersion?: number;
   runVersion?: number;
@@ -258,10 +278,20 @@ async function stubFixPath(page: Page, opts: StubOptions = {}): Promise<void> {
     canvasVersion = 7,
     runVersion = 3,
     omitCurrentNodeId = false,
+    graphFails = false,
   } = opts;
 
-  await page.route(apiPath(`/graphs/${KEY}`), (route) =>
-    json(
+  await page.route(apiPath(`/graphs/${KEY}`), async (route) => {
+    if (graphFails) {
+      if (graphDelayMs > 0) await sleep(graphDelayMs);
+      await route.fulfill({
+        status: 500,
+        contentType: "application/json",
+        body: JSON.stringify({ message: "E2E: the workflow read failed" }),
+      });
+      return;
+    }
+    await json(
       route,
       {
         workflowKey: KEY,
@@ -270,8 +300,8 @@ async function stubFixPath(page: Page, opts: StubOptions = {}): Promise<void> {
         graph: canvasGraph,
       },
       graphDelayMs,
-    ),
-  );
+    );
+  });
 
   const state = omitCurrentNodeId
     ? { ...RUN_STATE, currentNodeId: "" }
@@ -475,6 +505,62 @@ test("fix: a canvas that doesn't COMPILE is told so — not told there's no work
   await expect(page.locator(".react-flow__node")).toHaveCount(
     NON_COMPILING_GRAPH.nodes.length,
   );
+});
+
+test("fix: a workflow that FAILS to open is said so — the seed canvas is never described as it", async ({
+  page,
+}) => {
+  // BUG 7. The workflow read fails, so `CanvasPage` writes a status line and stops — the nodes are
+  // never replaced and the canvas keeps SEED_NODES, which COMPILE. The run reads land instantly,
+  // so a settled/not-settled flag hands that seed to the description as though it were the
+  // workflow. The 400ms is what makes `loading-canvas` a real window rather than a frame.
+  await stubFixPath(page, {
+    graphFails: true,
+    graphDelayMs: 400,
+    runDelayMs: 0,
+  });
+  await page.goto(`/app/canvas?key=${KEY}&fix=${RUN}`);
+
+  // The wait is real first — a failed open is not instant, and this is the state it comes out of.
+  await expect(page.getByText("Opening the workflow…")).toBeVisible();
+
+  // `blocked`, with the sentence that is TRUE of this canvas. The failure is terminal, so it has
+  // to answer rather than spin.
+  // `blocked`, with the sentence that is TRUE of this canvas — and the SYNC POINT for the
+  // assertions below: it can only appear once the load has settled, which is exactly when the
+  // seed-built description used to land in the box. Asserting the box before it would pass
+  // vacuously on the bug, since the box is empty until then either way.
+  await expect(
+    page.getByText(/That workflow couldn't be opened/),
+  ).toBeVisible();
+
+  // THE ASSERTIONS THAT FAIL ON THE BUG, not merely on the missing copy. Before the fix the
+  // description was built against the seed and landed in the box, reading
+  // `Failed at node: "notify" (no longer in the workflow)` — the exact falsehood #998 removed from
+  // the race, arriving by a different door.
+  const box = await promptBox(page);
+  await expect(box).toHaveValue("");
+  await expect(box).not.toHaveValue(/no longer in the workflow/);
+
+  // Neither of the other two `blocked` sentences may be used here, and each is false for its own
+  // reason: three nodes are visibly on the canvas, and they compile fine. Without these negatives,
+  // collapsing this branch back into either of them would pass.
+  await expect(
+    page.getByText(/There's no workflow on the canvas to change/),
+  ).toHaveCount(0);
+  await expect(page.getByText(/The canvas doesn't compile/)).toHaveCount(0);
+
+  // Terminal: nothing is left promising a description that isn't coming.
+  await expect(page.getByText(/^Reading the run/)).toHaveCount(0);
+  await expect(page.getByText("Opening the workflow…")).toHaveCount(0);
+
+  // What makes the copy above matter: the SEED graph really is rendered — start → approval → end —
+  // so a sentence claiming there is nothing on the canvas would be false about what is on screen.
+  await expect(page.locator(".react-flow__node")).toHaveCount(3);
+  // …and the screen's own report of the failed open is still there, unchanged by any of this.
+  await expect(
+    page.getByText(`Couldn't open workflow '${KEY}'.`),
+  ).toBeVisible();
 });
 
 test("fix: a run that executed an older version says so", async ({ page }) => {

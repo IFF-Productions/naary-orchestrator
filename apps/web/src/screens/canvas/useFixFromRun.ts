@@ -47,21 +47,43 @@ export interface FixFromRun {
  * compiles, a `loading` boolean would spin forever — a spinner that promises something is coming
  * and never delivers is a worse version of the very complaint being fixed. Once the canvas has
  * finished LOADING and still has no graph, that is an answer, not a wait.
+ *
+ * `blocked` DOES NOT MEAN "no graph", though, and reading it that way is how #1006 shipped: a
+ * workflow that failed to OPEN also blocks, with a graph — the seed left on the canvas, compiling.
+ * Two routes in, and the panel needs both apart to say anything true (see {@link blockedReason}).
  */
 export type FixStage =
   "idle" | "loading-canvas" | "reading-run" | "blocked" | "done";
 
+/**
+ * How the canvas's workflow fetch went — THREE states, not a settled/not-settled boolean (#1006).
+ *
+ * A boolean could only say whether the fetch had finished, and that was deliberate: reporting
+ * "settled" for a failed open is what stops `fixStage` spinning forever on the one path that most
+ * needs to say what went wrong. But it made a failed open indistinguishable from a successful one,
+ * and the two leave the canvas in completely different states. On failure `CanvasPage` only sets a
+ * status line — the nodes are never replaced — so the canvas still holds SEED_NODES
+ * (start → approval → end), which COMPILE. Read as "loaded", that seed becomes the graph the
+ * failure is described against, and the prompt comes out saying
+ * `Failed at node: "notify" (no longer in the workflow)` beneath a banner claiming the fix applies
+ * to the workflow the user came from. The same confident falsehood #998 fixed for the race.
+ *
+ * `failed` keeps the failure TERMINAL — no spinner, an answer — while stopping it from being read
+ * as "this is what the canvas has".
+ */
+export type CanvasLoad = "loading" | "loaded" | "failed";
+
 export function fixStage({
   fixRunId,
   hasGraph,
-  canvasLoaded,
+  canvasLoad,
   doneFor,
 }: {
   fixRunId: string | null;
   /** The canvas has compiled — the thing the description gets built against. */
   hasGraph: boolean;
-  /** The workflow fetch has SETTLED (either way). Distinguishes "not yet" from "never". */
-  canvasLoaded: boolean;
+  /** How the workflow fetch went. Distinguishes "not yet" from "never" from "it failed". */
+  canvasLoad: CanvasLoad;
   /** The run whose description has been handed to the panel, successfully or with a reason. */
   doneFor: string | null;
 }): FixStage {
@@ -80,11 +102,62 @@ export function fixStage({
    * the workflow, and the effect below, reading the same condition, would build the description
    * against the seed canvas.
    *
-   * A graph is not THE workflow. `canvasLoaded` is the only signal that separates "the canvas
+   * A graph is not THE workflow. `canvasLoad` is the only signal that separates "the canvas
    * hasn't loaded yet" from "this is what the canvas has", so it is asked first.
    */
-  if (!canvasLoaded) return "loading-canvas";
+  if (canvasLoad === "loading") return "loading-canvas";
+  /**
+   * THE WORKFLOW COULD NOT BE OPENED (#1006) — and `hasGraph` cannot answer this one either, for
+   * exactly the same reason it cannot answer the wait: the seed still on screen compiles, so
+   * asking it here returns `reading-run` and the description gets built against the seed.
+   *
+   * Terminal, like the other `blocked` cases, and the panel has its own sentence for it — the two
+   * that already existed are both false here. "There's no workflow on the canvas" would be false
+   * about three visibly-rendered nodes (bug 3, again), and "the canvas doesn't compile" would be
+   * false about a seed that compiles fine.
+   */
+  if (canvasLoad === "failed") return "blocked";
   return hasGraph ? "reading-run" : "blocked";
+}
+
+/**
+ * WHY `blocked` WAS REACHED, in the user's terms — three situations, three sentences, none reused.
+ *
+ * `blocked` is terminal, so it has to ANSWER, and the answer has to be true of what the user is
+ * looking at. Not a stylistic point: this branch has already shipped a sentence that was plainly
+ * false about a visible canvas, which is the exact class of bug `?fix=` exists to prevent, so the
+ * cases stay separate rather than being generalised into one apology.
+ *
+ *   1. The workflow FAILED TO OPEN (#1006). The canvas is neither empty nor broken — the fetch
+ *      rejected, the nodes were never replaced, and the SEED graph (start → approval → end) is
+ *      still mounted and still compiles. Both other sentences are false here; what is wrong is
+ *      that what's on screen is not the user's workflow, so that is what this one says.
+ *   2. A workflow IS here and does not compile. Naming the compile error makes it fixable.
+ *   3. Nothing on the canvas at all — the only case where "there's no workflow" is true.
+ *
+ * ORDER IS THE WHOLE FUNCTION. (1) compiles, so unless it is asked first it falls through to (3)
+ * and tells someone there is no workflow on a canvas with three nodes rendered on it.
+ *
+ * Lives here rather than in `AiPromptPanel` because the panel's `error` sentences already do — the
+ * panel renders what this flow decided to say, it doesn't decide it — and because a hook module is
+ * importable by the unit suite, while the panel drags in the component barrel.
+ */
+export function blockedReason({
+  canvasLoadFailed,
+  canvasError,
+}: {
+  /** The workflow fetch REJECTED — see {@link CanvasLoad}. */
+  canvasLoadFailed?: boolean;
+  /** The canvas has nodes on it that don't compile, and why. */
+  canvasError?: string | null;
+}): string {
+  if (canvasLoadFailed) {
+    return "That workflow couldn't be opened — the steps on the canvas are a new flow's starting point, not it — so that run couldn't be described here. Reload to try again, or say what you'd like changed instead.";
+  }
+  if (canvasError) {
+    return `The canvas doesn't compile — ${canvasError} — so that run couldn't be described here. Fix that, or say what you'd like changed.`;
+  }
+  return "There's no workflow on the canvas to change, so that run couldn't be described here — say what you'd like changed instead.";
 }
 
 /** What the fetch produced. Kept apart from `drift`, which also depends on live canvas state. */
@@ -151,7 +224,7 @@ export function useFixFromRun({
   fixRunId,
   currentGraph,
   currentVersion,
-  canvasLoaded,
+  canvasLoad,
   setAiPrompt,
   setAiMode,
   setShowAi,
@@ -162,19 +235,26 @@ export function useFixFromRun({
    *
    * NOT a signal that the workflow has arrived: the canvas mounts with SEED_NODES, which compile,
    * so this is defined from the first render (#998). Undefined only means nothing on the canvas
-   * compiles right now. `canvasLoaded` is what says whether it is the workflow.
+   * compiles right now. `canvasLoad` is what says whether it is the workflow.
    */
   currentGraph: GraphDef | undefined;
   currentVersion: number | null;
   /**
-   * Whether the workflow fetch has SETTLED — the gate on the build below, and what lets
-   * `fixStage` stop waiting.
+   * How the workflow fetch went — the gate on the build below, and what lets `fixStage` stop
+   * waiting. Only `loaded` means the canvas is showing the workflow; see {@link CanvasLoad} for
+   * why `failed` needs to be told apart from it rather than folded into "settled".
    *
-   * "Settled", not "succeeded": a workflow that failed to open is an answer too. The gap that
-   * leaves — a failed `/graphs` read still shows the seed canvas, which this then treats as the
-   * canvas — is #1006; it is a load failure the screen already reports, not the silent race.
+   * ONE PLACE `loaded` DOES NOT MEAN "the workflow is on the canvas": a canvas opened with no
+   * `?key=` and no `?template=` has nothing to fetch, so `CanvasPage` reports it loaded
+   * immediately — with SEED_NODES mounted. `/app/canvas?fix=<runId>` with no key would therefore
+   * build the description against the seed. It is not reachable from the product — RunDetail
+   * renders "Fix with AI" behind `runWorkflowKey &&` (truthy, so `""` is excluded) and builds the
+   * URL from that same value — and it is a much weaker version of the bug — with no workflow loaded there is no version banner to
+   * contradict, and "no longer in the workflow" is TRUE of a blank draft. Noted rather than
+   * guarded, so the reliance on that gating is at least visible; see the same note at the
+   * `setCanvasLoad` call in CanvasPage.
    */
-  canvasLoaded: boolean;
+  canvasLoad: CanvasLoad;
   setAiPrompt: (v: string) => void;
   setAiMode: (m: "edit" | "create") => void;
   setShowAi: (v: boolean) => void;
@@ -243,13 +323,16 @@ export function useFixFromRun({
      * under a banner naming the workflow on screen — a confident falsehood, in the feature that
      * exists to stop the user re-describing a failure from memory.
      *
-     * Gating on `canvasLoaded` makes the ordering irrelevant rather than merely unlikely: it is
-     * set only once the workflow fetch has SETTLED, which is after the state update that puts
-     * the workflow on the canvas, so no render can pair `canvasLoaded` with the seed. Nothing
-     * about how fast the run reads come back can change that. It also removes the teardown +
-     * re-run this effect used to depend on.
+     * Gating on `canvasLoad` makes the ordering irrelevant rather than merely unlikely: it turns
+     * `loaded` only in the branch that has just put the workflow on the canvas, so no render can
+     * pair `loaded` with the seed. Nothing about how fast the run reads come back can change
+     * that. It also removes the teardown + re-run this effect used to depend on.
+     *
+     * `failed` is held out here too (#1006): a workflow that could not be opened leaves the seed
+     * on the canvas, and a settled/not-settled boolean let that seed through this gate. The
+     * ordering was never what made the seed wrong — being the seed was.
      */
-    if (!canvasLoaded) return;
+    if (canvasLoad !== "loaded") return;
     // Nothing on the canvas compiles — `fixStage` reports `blocked`, and there is nothing to
     // describe the failing step against. (Never a wait once the canvas has loaded.)
     if (!currentGraph) return;
@@ -363,7 +446,7 @@ export function useFixFromRun({
        */
       if (!handedOver) builtFor.current = null;
     };
-  }, [fixRunId, currentGraph, canvasLoaded]);
+  }, [fixRunId, currentGraph, canvasLoad]);
 
   // Derived HERE, against the version the canvas has now — see the header. A run that executed
   // v3 of a workflow that is now v7 is the case the banner exists for, and it is only knowable
@@ -375,7 +458,7 @@ export function useFixFromRun({
     stage: fixStage({
       fixRunId,
       hasGraph: currentGraph !== undefined,
-      canvasLoaded,
+      canvasLoad,
       doneFor,
     }),
   };

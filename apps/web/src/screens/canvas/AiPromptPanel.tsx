@@ -27,7 +27,7 @@ import type {
   ProviderOption,
 } from "../app/build-ai/providers";
 import type { AiMode } from "./useAiBuilder";
-import type { FixStage } from "./useFixFromRun";
+import { blockedReason, type FixStage } from "./useFixFromRun";
 
 /** What the panel says when the prompt below was written FROM a failed run (`?fix=<runId>`). */
 export interface FixNotice {
@@ -41,9 +41,17 @@ export interface FixNotice {
   /** How far along the description is (see useFixFromRun) — the box is empty until `done`. */
   stage: FixStage;
   /**
-   * Why the canvas has no graph, when `stage` is `blocked`. Two different situations reach that
-   * stage — nothing on the canvas at all, and a canvas that doesn't compile — and only one of
-   * them is "there's no workflow here". Building this feature hit the second twice.
+   * The workflow could not be OPENED, when `stage` is `blocked` (#1006). Read FIRST of the two,
+   * because the canvas is not empty in this case and it compiles: the fetch failed, so the nodes
+   * were never replaced and the SEED graph (start → approval → end) is still mounted. Both of the
+   * sentences below are false about it.
+   */
+  canvasLoadFailed?: boolean;
+  /**
+   * Why the canvas has no graph, when `stage` is `blocked`. THREE different situations reach that
+   * stage — the workflow failed to open, nothing is on the canvas at all, and a canvas that
+   * doesn't compile — and only one of them is "there's no workflow here". Building this feature
+   * hit the compile one twice, and the failed open is #1006.
    */
   canvasError?: string | null;
 }
@@ -143,12 +151,7 @@ function FixNoticeBanner({
           so no description is coming. Saying so beats a spinner that never resolves. */}
       {notice.stage === "blocked" && (
         <div style={{ color: "var(--state-paused)", marginTop: 5 }}>
-          {notice.canvasError
-            ? // The workflow IS here, it just doesn't compile — so the failing step can't be
-              // described against it. Naming the compile error makes it fixable; "there's no
-              // workflow on the canvas" would be a plainly false statement about a visible one.
-              `The canvas doesn't compile — ${notice.canvasError} — so that run couldn't be described here. Fix that, or say what you'd like changed.`
-            : "There's no workflow on the canvas to change, so that run couldn't be described here — say what you'd like changed instead."}
+          {blockedReason(notice)}
         </div>
       )}
 
