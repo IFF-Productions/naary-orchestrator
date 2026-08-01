@@ -26,6 +26,7 @@
  *   - activities/http          — callHttpRequest + callGraphQL
  *   - activities/integration   — native integration nodes (GitHub/Jira/…)
  *   - activities/sql           — callSqlQuery / callSqlExec
+ *   - activities/firestore     — callFirestoreQuery / callFirestoreWrite
  *   - activities/map-node      — batched per-item fan-out
  *   - activities/rag           — pgvector vectorUpsert / vectorQuery
  */
@@ -198,6 +199,18 @@ export type {
   SqlExecConfig,
   SqlExecResult,
 } from "./activities/sql";
+
+export {
+  __firestoreDeps,
+  callFirestoreQuery,
+  callFirestoreWrite,
+} from "./activities/firestore";
+export type {
+  FirestoreQueryConfig,
+  FirestoreQueryResult,
+  FirestoreWriteConfig,
+  FirestoreWriteResult,
+} from "./activities/firestore";
 
 export { __mapDeps, mapNode } from "./activities/map-node";
 export type { MapNodeItem, MapNodeResult } from "./activities/map-node";

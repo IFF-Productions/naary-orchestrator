@@ -41,6 +41,8 @@ import type {
   ErrorTriggerNodeConfig,
   ExecuteSubWorkflowNodeConfig,
   FilterNodeConfig,
+  FirestoreQueryNodeConfig,
+  FirestoreWriteNodeConfig,
   ForEachNodeConfig,
   HashNodeConfig,
   HmacNodeConfig,
@@ -493,6 +495,46 @@ const CONFIG_SCHEMAS = {
     params: z.array(z.unknown()).optional(),
     paramBindings: z.record(z.number(), argBinding).optional(),
     statementTimeoutMs: z.number().optional(),
+    costUsd: z.number().optional(),
+  }),
+  firestoreQuery: z.object({
+    connectionId: z.string(),
+    action: z.string().optional(),
+    projectId: z.string(),
+    databaseId: z.string().optional(),
+    collection: z.string(),
+    documentId: z.string().optional(),
+    argumentBindings: z.record(bindingKey, argBinding).optional(),
+    filters: z
+      .array(
+        z.object({
+          field: z.string(),
+          op: z.string(),
+          value: z.unknown().optional(),
+        }),
+      )
+      .optional(),
+    orderBy: z
+      .array(z.object({ field: z.string(), direction: z.string().optional() }))
+      .optional(),
+    limit: z.number().optional(),
+    maxPages: z.number().optional(),
+    typedValues: z.boolean().optional(),
+    timeoutMs: z.number().optional(),
+    costUsd: z.number().optional(),
+  }),
+  firestoreWrite: z.object({
+    connectionId: z.string(),
+    action: z.string().optional(),
+    projectId: z.string(),
+    databaseId: z.string().optional(),
+    collection: z.string(),
+    documentId: z.string().optional(),
+    data: z.record(dataKey, z.unknown()).optional(),
+    argumentBindings: z.record(bindingKey, argBinding).optional(),
+    updateMask: z.array(z.string()).optional(),
+    typedValues: z.boolean().optional(),
+    timeoutMs: z.number().optional(),
     costUsd: z.number().optional(),
   }),
   rssRead: z.object({
@@ -972,6 +1014,12 @@ export type JwtConfig = z.infer<typeof CONFIG_SCHEMAS.jwt>;
 export type TotpConfig = z.infer<typeof CONFIG_SCHEMAS.totp>;
 export type HashConfig = z.infer<typeof CONFIG_SCHEMAS.hash>;
 export type RandomConfig = z.infer<typeof CONFIG_SCHEMAS.random>;
+export type FirestoreQueryConfig = z.infer<
+  typeof CONFIG_SCHEMAS.firestoreQuery
+>;
+export type FirestoreWriteConfig = z.infer<
+  typeof CONFIG_SCHEMAS.firestoreWrite
+>;
 export type SendEmailConfig = z.infer<typeof CONFIG_SCHEMAS.sendEmail>;
 export type StopAndErrorConfig = z.infer<typeof CONFIG_SCHEMAS.stopAndError>;
 
@@ -999,6 +1047,8 @@ const _configParity: {
   graphQL: Exact<GraphQLConfig, GraphQLNodeConfig>;
   sqlQuery: Exact<SqlQueryConfig, SqlQueryNodeConfig>;
   sqlExec: Exact<SqlExecConfig, SqlExecNodeConfig>;
+  firestoreQuery: Exact<FirestoreQueryConfig, FirestoreQueryNodeConfig>;
+  firestoreWrite: Exact<FirestoreWriteConfig, FirestoreWriteNodeConfig>;
   rssRead: Exact<RssReadConfig, RssReadNodeConfig>;
   set: Exact<SetConfig, SetNodeConfig>;
   renameKeys: Exact<RenameKeysConfig, RenameKeysNodeConfig>;
@@ -1056,6 +1106,8 @@ const _configParity: {
   graphQL: true,
   sqlQuery: true,
   sqlExec: true,
+  firestoreQuery: true,
+  firestoreWrite: true,
   rssRead: true,
   set: true,
   renameKeys: true,

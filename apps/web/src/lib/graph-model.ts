@@ -262,6 +262,12 @@ export const NODE_KINDS: NodeKind[] = [
   { type: "sqlExec", label: "SQL Write", group: "Data sources", accent: "var(--node-sqlexec, #c05fa6)",
     description: "Write to your database (INSERT/UPDATE/DELETE) in a transaction.",
     defaultConfig: { connectionId: "", sql: "UPDATE users SET seen = true WHERE id = $1" } },
+  { type: "firestoreQuery", label: "Firestore Read", group: "Data sources", accent: "var(--node-firestore, #f5a623)",
+    description: "Read documents from Cloud Firestore \u2014 one, a whole collection, or a filtered query.",
+    defaultConfig: { connectionId: "", action: "get", projectId: "", collection: "users", documentId: "" } },
+  { type: "firestoreWrite", label: "Firestore Write", group: "Data sources", accent: "var(--node-firestorewrite, #e08f1a)",
+    description: "Create, replace, update or delete one Cloud Firestore document.",
+    defaultConfig: { connectionId: "", action: "set", projectId: "", collection: "users", documentId: "", data: {} } },
   { type: "rssRead", label: "RSS Read", group: "Data sources", accent: "var(--node-rss, #d98a5a)",
     description: "Fetch and parse an RSS/Atom feed into a list of items.",
     defaultConfig: { url: "https://hnrss.org/frontpage" } },
@@ -537,6 +543,14 @@ export function nodeSubtitle(
       : undefined;
     if (conn && snippet) return `${conn} · ${snippet}`;
     return conn || snippet || undefined;
+  }
+  if (kind === "firestoreQuery" || kind === "firestoreWrite") {
+    const action = (config.action as string | undefined) ?? undefined;
+    const collection = config.collection as string | undefined;
+    const docId = config.documentId as string | undefined;
+    const path = collection && docId ? `${collection}/${docId}` : collection;
+    if (action && path) return `${action} \u00b7 ${path}`;
+    return action || path || undefined;
   }
   if (kind === "set") {
     const fields = (config.fields as Record<string, unknown> | undefined) ?? {};

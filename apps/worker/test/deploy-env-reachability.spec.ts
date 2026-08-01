@@ -124,6 +124,17 @@ const RUNTIME_PROVIDED = new Set(["PATH", "HOME", "NODE_ENV", "PWD", "TZ"]);
 const OPT_OUTS: { service: string; name: string; reason: string }[] = [
   {
     service: "worker",
+    name: "FIRESTORE_EMULATOR_HOST",
+    reason:
+      "Deliberate, and wiring it into prod compose would DEFEAT it: FIRESTORE_EMULATOR_HOST points the firestore nodes at a LOCAL Firestore emulator for tests. It is refused unless it names a loopback host (see packages/firestore/src/emulator.ts), so it can never redirect production traffic — but it must also never appear in the prod stack, where any value at all would be wrong. Unset in production is the correct state.",
+  },
+  {
+    service: "worker-heavy",
+    name: "FIRESTORE_EMULATOR_HOST",
+    reason: "Same as `worker` — it runs the same image.",
+  },
+  {
+    service: "worker",
     name: "CORS_ORIGINS",
     reason:
       "Deliberate: the worker is given APP_BASE_URL explicitly (#674) precisely so its documented " +

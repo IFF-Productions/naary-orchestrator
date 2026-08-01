@@ -316,6 +316,9 @@ importers:
       '@naary/dsl':
         specifier: workspace:*
         version: link:../../packages/dsl
+      '@naary/firestore':
+        specifier: workspace:*
+        version: link:../../packages/firestore
       '@naary/logging':
         specifier: workspace:*
         version: link:../../packages/logging
@@ -476,6 +479,16 @@ importers:
       yaml:
         specifier: 2.9.0
         version: 2.9.0
+
+  packages/firestore:
+    dependencies:
+      '@naary/dsl':
+        specifier: workspace:*
+        version: link:../dsl
+    devDependencies:
+      '@types/node':
+        specifier: ^26.1.2
+        version: 26.1.2
 
   packages/flags:
     dependencies:

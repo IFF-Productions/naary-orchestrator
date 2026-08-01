@@ -135,6 +135,12 @@ export {
   type ResolvedSqlExec,
 } from "./sql-query";
 export {
+  resolveFirestoreQuery,
+  type ResolvedFirestoreQuery,
+  resolveFirestoreWrite,
+  type ResolvedFirestoreWrite,
+} from "./firestore";
+export {
   evaluateResume,
   resumeWarningText,
   type ResumeEligibility,

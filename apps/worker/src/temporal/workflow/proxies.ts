@@ -177,6 +177,22 @@ export const { callSqlExec } = wf.proxyActivities<typeof activities>({
 // message to the SMTP server (but lost the ack) would double-send. So this runs
 // AT-MOST-ONCE (no retries): a transient failure fails the node rather than risk
 // spamming the recipient. (A future idempotency-key design could relax this.)
+// Firestore reads are idempotent, so they retry — same shape as callSqlQuery: the
+// per-call HTTP timeout (clamped in the activity) is the real deadline and the
+// start-to-close sits above it.
+export const { callFirestoreQuery } = wf.proxyActivities<typeof activities>({
+  startToCloseTimeout: "150 seconds",
+  retry: { maximumAttempts: 3 },
+});
+
+// A Firestore WRITE is NOT idempotent — `create` has Firestore assign the document id, so
+// a retry after an ambiguous first attempt creates a SECOND document. AT-MOST-ONCE, like
+// callSqlExec/callSendEmail: a failure fails the node rather than risk a duplicate write.
+export const { callFirestoreWrite } = wf.proxyActivities<typeof activities>({
+  startToCloseTimeout: "150 seconds",
+  retry: { maximumAttempts: 1 },
+});
+
 export const { callSendEmail } = wf.proxyActivities<typeof activities>({
   startToCloseTimeout: "60 seconds",
   retry: { maximumAttempts: 1 },

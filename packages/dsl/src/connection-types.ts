@@ -19,6 +19,7 @@ export type ConnectionType =
   | "postgres"
   | "mssql"
   | "mysql"
+  | "firestore"
   | "signing"
   | "smtp";
 
@@ -30,6 +31,8 @@ export const CONNECTION_TYPES: Record<string, ConnectionType[]> = {
   httpRequest: ["github", "atlassian", "custom"],
   sqlQuery: ["postgres", "mssql", "mysql"],
   sqlExec: ["postgres", "mssql", "mysql"],
+  firestoreQuery: ["firestore"],
+  firestoreWrite: ["firestore"],
   sendEmail: ["smtp"],
   hmac: ["signing"],
   jwt: ["signing"],

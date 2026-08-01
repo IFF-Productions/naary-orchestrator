@@ -9,6 +9,7 @@ export type ConnectionType =
   | "postgres"
   | "mssql"
   | "mysql"
+  | "firestore"
   | "signing"
   | "smtp";
 export type AuthMode =

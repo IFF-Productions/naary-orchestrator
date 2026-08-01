@@ -14,6 +14,14 @@ import {
 import { RowHead } from "./PinSection";
 import { SqlEditorField } from "./SqlEditorField";
 
+/** Small muted explainer under a field — the inspector's house note style. */
+const hintStyle = {
+  fontSize: "var(--text-xs)",
+  lineHeight: "var(--leading-snug)",
+  color: "var(--ink-3)",
+  marginBottom: 10,
+} as const;
+
 export function renderDataSections(c: ConfigSectionCtx) {
   const {
     node,
@@ -32,6 +40,228 @@ export function renderDataSections(c: ConfigSectionCtx) {
   } = c;
   return (
     <>
+      {(kind === "firestoreQuery" || kind === "firestoreWrite") && (
+        <>
+          <Labeled label="Firestore connection">
+            <ConnectionSelect
+              connections={connections}
+              types={CONNECTION_TYPES[kind] ?? []}
+              value={str("connectionId")}
+              onChange={(id) => onChange({ connectionId: id })}
+            />
+          </Labeled>
+          <div style={hintStyle}>
+            A Firestore connection holds a Google OAuth access token for the{" "}
+            <code>https://www.googleapis.com/auth/datastore</code> scope. A
+            Google API key will NOT work.
+          </div>
+
+          <Labeled label="Action">
+            <select
+              value={
+                str("action") || (kind === "firestoreWrite" ? "set" : "get")
+              }
+              onChange={(e) => onChange({ action: e.target.value })}
+              style={inputStyle}
+            >
+              {(kind === "firestoreWrite"
+                ? ["set", "create", "update", "delete"]
+                : ["get", "list", "query"]
+              ).map((a) => (
+                <option key={a} value={a}>
+                  {a}
+                </option>
+              ))}
+            </select>
+          </Labeled>
+
+          <Labeled label="Project id">
+            <input
+              value={str("projectId")}
+              onChange={(e) => onChange({ projectId: e.target.value })}
+              style={inputStyle}
+              placeholder="my-gcp-project"
+            />
+          </Labeled>
+
+          <Labeled label="Database id">
+            <input
+              value={str("databaseId")}
+              onChange={(e) =>
+                onChange({ databaseId: e.target.value || undefined })
+              }
+              style={inputStyle}
+              placeholder="(default)"
+            />
+          </Labeled>
+
+          <Labeled label="Collection">
+            <input
+              value={str("collection")}
+              onChange={(e) => onChange({ collection: e.target.value })}
+              style={inputStyle}
+              placeholder="users  (or users/ada/orders)"
+            />
+          </Labeled>
+
+          <Labeled label="Document id">
+            <input
+              value={str("documentId")}
+              onChange={(e) =>
+                onChange({ documentId: e.target.value || undefined })
+              }
+              style={inputStyle}
+              placeholder={
+                kind === "firestoreWrite"
+                  ? "required, except for create"
+                  : "required for get"
+              }
+            />
+          </Labeled>
+
+          {kind === "firestoreWrite" && (
+            <>
+              <JsonField
+                label="Document data (plain JSON)"
+                value={config.data}
+                onChange={(v) =>
+                  onChange({ data: v as Record<string, unknown> })
+                }
+              />
+              <div style={hintStyle}>
+                Write plain JSON — the node wraps each value in its Firestore
+                type. A whole number becomes an <code>integerValue</code>; turn
+                on typed values below to force a double.
+              </div>
+              <JsonArrayField
+                label="Update mask (field paths, JSON array)"
+                value={config.updateMask as unknown[] | undefined}
+                onChange={(v) => onChange({ updateMask: v as string[] })}
+              />
+              <div style={hintStyle}>
+                <strong>update</strong> only. Firestore DELETES fields outside
+                the mask, so this defaults to the data&apos;s own top-level
+                keys.
+              </div>
+            </>
+          )}
+
+          {kind === "firestoreQuery" && (
+            <>
+              <JsonArrayField
+                label="Filters (JSON array of field/op/value)"
+                value={config.filters as unknown[] | undefined}
+                onChange={(v) => onChange({ filters: v })}
+              />
+              <div style={hintStyle}>
+                <strong>query</strong> only, combined with AND.
+              </div>
+              <JsonArrayField
+                label="Order by (JSON array of field/direction)"
+                value={config.orderBy as unknown[] | undefined}
+                onChange={(v) => onChange({ orderBy: v })}
+              />
+              <Labeled label="Limit (documents)">
+                <input
+                  type="number"
+                  min={1}
+                  value={num("limit") ?? ""}
+                  onChange={(e) =>
+                    onChange({
+                      limit: e.target.value
+                        ? Number(e.target.value)
+                        : undefined,
+                    })
+                  }
+                  style={inputStyle}
+                  placeholder="100 (max 1000)"
+                />
+              </Labeled>
+              <Labeled label="Max pages (list)">
+                <input
+                  type="number"
+                  min={1}
+                  value={num("maxPages") ?? ""}
+                  onChange={(e) =>
+                    onChange({
+                      maxPages: e.target.value
+                        ? Number(e.target.value)
+                        : undefined,
+                    })
+                  }
+                  style={inputStyle}
+                  placeholder="10 (max 100)"
+                />
+              </Labeled>
+              <div style={hintStyle}>
+                When a bound stops the read, the output sets{" "}
+                <code>truncated: true</code> — branch on it rather than assuming
+                you got everything.
+              </div>
+            </>
+          )}
+
+          <BindingsEditor
+            bindings={obj("argumentBindings") as Record<string, BindingRow>}
+            upstreamIds={upstreamIds}
+            onChange={(v) => onChange({ argumentBindings: v })}
+          />
+
+          <Labeled label="Typed values">
+            <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <input
+                type="checkbox"
+                checked={Boolean(config.typedValues)}
+                onChange={(e) =>
+                  onChange({ typedValues: e.target.checked || undefined })
+                }
+              />
+              <span style={{ fontSize: "var(--text-sm)" }}>
+                Treat a single-key type-tagged object as a literal Firestore
+                value
+              </span>
+            </label>
+          </Labeled>
+          <div style={hintStyle}>
+            Off by default: a document field really can be named{" "}
+            <code>stringValue</code>, and reinterpreting it would corrupt data.
+          </div>
+
+          <Labeled label="Timeout (ms)">
+            <input
+              type="number"
+              min={0}
+              value={num("timeoutMs") ?? ""}
+              onChange={(e) =>
+                onChange({
+                  timeoutMs: e.target.value
+                    ? Number(e.target.value)
+                    : undefined,
+                })
+              }
+              style={inputStyle}
+              placeholder="30000 (default)"
+            />
+          </Labeled>
+
+          <Labeled label="Cost (USD per call)">
+            <input
+              type="number"
+              min={0}
+              step={0.001}
+              value={num("costUsd") ?? ""}
+              onChange={(e) =>
+                onChange({
+                  costUsd: e.target.value ? Number(e.target.value) : undefined,
+                })
+              }
+              style={inputStyle}
+              placeholder="0.00"
+            />
+          </Labeled>
+        </>
+      )}
+
       {(kind === "sqlQuery" || kind === "sqlExec") && (
         <>
           <Labeled label="Database connection id">

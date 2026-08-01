@@ -14,7 +14,12 @@ import {
   type ConnectionRow,
   type ProviderCredential,
 } from "../../../lib/api";
-import { DatabaseForm, SigningForm, SmtpForm } from "./connection-forms";
+import {
+  DatabaseForm,
+  FirestoreForm,
+  SigningForm,
+  SmtpForm,
+} from "./connection-forms";
 import {
   cardShell,
   EnvChip,
@@ -72,6 +77,14 @@ const CONNECTION_GROUPS: {
     types: ["postgres", "mysql", "mssql"],
     icon: "archive",
     color: "var(--node-mcp)",
+  },
+  {
+    id: "firestore",
+    name: "Cloud Firestore",
+    kind: "Firestore Read · Firestore Write nodes",
+    types: ["firestore"],
+    icon: "archive",
+    color: "var(--node-firestore, #f5a623)",
   },
   {
     id: "smtp",
@@ -502,13 +515,18 @@ export function ProvidersTab({
           title={
             addGroup === "sql"
               ? "Connect a database"
-              : addGroup === "smtp"
-                ? "Configure SMTP (email)"
-                : "Add a signing key"
+              : addGroup === "firestore"
+                ? "Connect Cloud Firestore"
+                : addGroup === "smtp"
+                  ? "Configure SMTP (email)"
+                  : "Add a signing key"
           }
         >
           {groupDef?.id === "sql" && (
             <DatabaseForm tenant={tenant} onChanged={onChanged} />
+          )}
+          {groupDef?.id === "firestore" && (
+            <FirestoreForm tenant={tenant} onChanged={onChanged} />
           )}
           {groupDef?.id === "smtp" && (
             <SmtpForm tenant={tenant} onChanged={onChanged} />

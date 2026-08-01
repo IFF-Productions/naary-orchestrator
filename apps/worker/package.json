@@ -24,6 +24,7 @@
     "@naary/notifications": "workspace:*",
     "@naary/observability": "workspace:*",
     "@naary/secrets": "workspace:*",
+    "@naary/firestore": "workspace:*",
     "@naary/sql": "workspace:*",
     "@naary/storage": "workspace:*",
     "@naary/temporal-config": "workspace:*",

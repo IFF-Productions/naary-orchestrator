@@ -59,6 +59,8 @@ import type {
   ScheduleTriggerConfig,
   SendEmailConfig,
   SetConfig,
+  FirestoreQueryConfig,
+  FirestoreWriteConfig,
   SqlExecConfig,
   SqlQueryConfig,
   StartConfig,
@@ -96,6 +98,8 @@ export interface NodeConfigMap {
   graphQL: GraphQLConfig;
   sqlQuery: SqlQueryConfig;
   sqlExec: SqlExecConfig;
+  firestoreQuery: FirestoreQueryConfig;
+  firestoreWrite: FirestoreWriteConfig;
   set: SetConfig;
   renameKeys: RenameKeysConfig;
   text: TextConfig;

@@ -127,6 +127,10 @@ export interface NodeOutputMap {
   graphQL: { data: unknown; errors: unknown; httpStatus: number };
   sqlQuery: { rows: unknown; rowCount: number };
   sqlExec: { rowsAffected: number };
+  /** `truncated` is the node's own answer to "did I drop documents?" — surfaced in the
+   *  OUTPUT, not just a log, so a graph can branch on it instead of silently under-reading. */
+  firestoreQuery: { documents: unknown; count: number; truncated: boolean };
+  firestoreWrite: { name: string; documentId: string; deleted: boolean };
   sendEmail: { messageId: string };
   rssRead: { items: unknown; count: number };
   /** `childRunId` is the child's Temporal workflowId — the Runs-list key, so a consumer can

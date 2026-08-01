@@ -150,6 +150,101 @@ export interface SqlExecNodeConfig {
   costUsd?: number;
 }
 
+/** A Firestore `where` clause. `field` is a Firestore FIELD path (`address.city`), which is
+ *  unrelated to the document's URL path — it rides in the request body. */
+export interface FirestoreFilterSpec {
+  field: string;
+  /** `==` `!=` `<` `<=` `>` `>=` `array-contains` `array-contains-any` `in` `not-in`. */
+  op: string;
+  /** Compared after the same plain-JSON → typed-value encoding the document data gets. */
+  value?: unknown;
+}
+
+/** A Firestore sort key. `direction` is "asc" (default) or "desc". */
+export interface FirestoreOrderBySpec {
+  field: string;
+  direction?: string;
+}
+
+/**
+ * firestoreQuery node — READ Cloud Firestore. Output is
+ * `{ documents, count, truncated }`, where each document is
+ * `{ id, name, data, createTime?, updateTime? }` and `data` is PLAIN JSON: the node
+ * converts Firestore's typed wire values (`{"integerValue":"5"}`) on the way out, so the
+ * author never sees them.
+ *
+ * SECURITY: `projectId`/`databaseId`/`collection`/`documentId` all land in the REST URL
+ * path, so each is validated and percent-encoded (@naary/firestore's `encodeSegment`) —
+ * a `documentId` containing `/` would otherwise address a different document. This is the
+ * analogue of sqlQuery's "the SQL text is STATIC". Auth is the connection's Google OAuth
+ * access token, resolved + used IN the activity — never in this config, which rides in
+ * workflow history.
+ */
+export interface FirestoreQueryNodeConfig {
+  /** A `firestore` connection holding a Google OAuth access token. */
+  connectionId: string;
+  /** `get` one document, `list` a collection, or `query` it with filters. */
+  action?: string;
+  /** Google Cloud project id. */
+  projectId: string;
+  /** Firestore database id; defaults to `(default)`. */
+  databaseId?: string;
+  /** Collection path — `users`, or a subcollection like `users/ada/orders`. */
+  collection: string;
+  /** Required by `get`. */
+  documentId?: string;
+  /** Bindings for documentId / projectId / collection from upstream node outputs. */
+  argumentBindings?: Record<string, ArgBinding>;
+  /** `query` filters, combined with AND. */
+  filters?: FirestoreFilterSpec[];
+  /** Sort keys (`query` and `list`). */
+  orderBy?: FirestoreOrderBySpec[];
+  /** Max documents (default 100, clamped to 1000). */
+  limit?: number;
+  /** Max `list` pages to walk (default 10, clamped to 100). */
+  maxPages?: number;
+  /** Treat a single-key `{"<type>Value": …}` object as a literal Firestore value. Off by default. */
+  typedValues?: boolean;
+  /** Per-call timeout (ms). */
+  timeoutMs?: number;
+  /** Flat per-call cost metered into the run budget (Arch§4.6). */
+  costUsd?: number;
+}
+
+/**
+ * firestoreWrite node — WRITE one Cloud Firestore document. `data` is PLAIN JSON; the node
+ * wraps each value in its Firestore type. Output is `{ name, documentId, deleted }`.
+ *
+ * SEPARATE from firestoreQuery on purpose, exactly as sqlExec is from sqlQuery: a write is
+ * an explicit intent the canvas and the reviewer can see, and it runs AT-MOST-ONCE (no
+ * Temporal retries) because `create` assigns a server id — a retry would create a SECOND
+ * document.
+ */
+export interface FirestoreWriteNodeConfig {
+  /** A `firestore` connection holding a Google OAuth access token. */
+  connectionId: string;
+  /** `set` (create-or-replace), `create` (server id), `update` (merge), `delete`. */
+  action?: string;
+  projectId: string;
+  databaseId?: string;
+  collection: string;
+  /** Required by set/update/delete; optional for `create` (else Firestore assigns one). */
+  documentId?: string;
+  /** The document, as plain JSON. */
+  data?: Record<string, unknown>;
+  /** Bindings for `data` fields / documentId from upstream node outputs. */
+  argumentBindings?: Record<string, ArgBinding>;
+  /** `update` only — field paths to merge. Defaults to `data`'s own top-level keys.
+   *  Firestore DELETES every field outside the mask, so the default matters. */
+  updateMask?: string[];
+  /** Treat a single-key `{"<type>Value": …}` object as a literal Firestore value. Off by default. */
+  typedValues?: boolean;
+  /** Per-call timeout (ms). */
+  timeoutMs?: number;
+  /** Flat per-call cost metered into the run budget. */
+  costUsd?: number;
+}
+
 /** vectorUpsert (RAG) — embed one or more text chunks and store them in the tenant's vector store
  *  under `collection`. `from`/`path` resolve to a string or string[]. Output `{ upserted }`. */
 export interface VectorUpsertNodeConfig {

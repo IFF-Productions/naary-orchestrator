@@ -18574,6 +18574,7 @@
               "custom",
               "postgres",
               "mssql",
+              "firestore",
               "signing",
               "smtp"
             ],
@@ -18646,6 +18647,7 @@
               "postgres",
               "mssql",
               "mysql",
+              "firestore",
               "signing",
               "smtp"
             ],

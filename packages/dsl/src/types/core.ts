@@ -21,6 +21,8 @@ export type NodeType =
   | "graphQL" // POSTs a GraphQL query/mutation; output is {data,errors,httpStatus}
   | "sqlQuery" // runs a read-only query against a tenant DB; output is {rows,rowCount}
   | "sqlExec" // runs a WRITE (INSERT/UPDATE/DELETE) in a txn; output is {rowsAffected}
+  | "firestoreQuery" // reads Cloud Firestore (get/list/query); output is {documents,count,truncated}
+  | "firestoreWrite" // WRITES a Firestore document (set/create/update/delete); at-most-once
   | "set" // builds a plain object from static fields + upstream bindings (pure, no I/O)
   | "renameKeys" // pure: remap/drop keys of an upstream object
   | "text" // pure: string ops (upper/lower/trim/replace/split/join/substring/regex)
@@ -121,8 +123,9 @@ export interface NodeRetryPolicy {
  * asserts every kind listed here really does route through `retryOverride`.
  *
  * Membership rule: the activity must be idempotent-ish, i.e. re-running it cannot double-act.
- * That excludes the at-most-once kinds `sqlExec`, `sendEmail`, `code`, `codeAgent` and
- * `integration` (its write side is what governs — the read side isn't split out as its own kind).
+ * That excludes the at-most-once kinds `sqlExec`, `firestoreWrite`, `sendEmail`, `code`,
+ * `codeAgent` and `integration` (its write side is what governs — the read side isn't split out
+ * as its own kind).
  * Adding a kind here without an idempotent activity turns one retry into duplicate side effects.
  */
 export const RETRYABLE_NODE_KINDS = [
@@ -132,6 +135,7 @@ export const RETRYABLE_NODE_KINDS = [
   "httpRequest",
   "graphQL",
   "sqlQuery",
+  "firestoreQuery",
   "rssRead",
 ] as const satisfies readonly NodeType[];
 
