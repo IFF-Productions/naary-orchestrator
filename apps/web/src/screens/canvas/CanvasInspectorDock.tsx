@@ -47,6 +47,7 @@ export function CanvasInspectorDock({
   addConnection,
   moveConnection,
   selectEdge,
+  closeEdgeInspector,
   watching,
   pushToast,
   closeInspector,
@@ -89,6 +90,9 @@ export function CanvasInspectorDock({
   moveConnection: (edgeId: string, dir: -1 | 1) => void;
   /** Select an edge, which opens the existing Connection inspector (where conditions live). */
   selectEdge: (edgeId: string) => void;
+  /** Close that inspector WITHOUT clearing the node selection, so the panel it was opened from
+   *  comes back rather than an empty dock. */
+  closeEdgeInspector: () => void;
   /** Live run-watch: the canvas disables drag/connect, so panel edge editing is read-only too. */
   watching: boolean;
   pushToast: (text: string, meta?: string, tone?: "ok" | "warn") => void;
@@ -143,7 +147,7 @@ export function CanvasInspectorDock({
           "warn",
         );
       }}
-      onClose={closeInspector}
+      onClose={closeEdgeInspector}
     />
   ) : undefined;
 

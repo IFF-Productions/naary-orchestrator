@@ -11,6 +11,7 @@
  * whose condition passes, in this order, so the sequence decides which branch starts first and —
  * when two branches both end the run — whose outcome the run reports.
  */
+import { useId, useRef } from "react";
 import type { NodeType } from "@naary/dsl";
 import { Icon } from "../../components";
 import {
@@ -104,6 +105,7 @@ export function ConnectionsSection({
   connect: ConnectEditing;
 }) {
   const { edges, nodes, readOnly } = connect;
+  const sectionRef = useRef<HTMLDivElement>(null);
   const outgoing = outgoingConnections(nodeId, edges);
   const incoming = incomingConnections(nodeId, edges);
   const labelOf = (id: string): string =>
@@ -113,8 +115,26 @@ export function ConnectionsSection({
   // Said only when it is TRUE of this node: with two or more edges the order is doing real work.
   const orderMatters = outgoing.length > 1;
 
+  /**
+   * Removing a row unmounts the button that was pressed, and a browser drops focus to `<body>`
+   * when that happens — so pruning three connections from the keyboard would mean tabbing in from
+   * the top of the page each time. Put the caret back on the first control still in the section
+   * (the target picker, when there is one).
+   */
+  const restoreFocusAfterRemove = (): void => {
+    requestAnimationFrame(() => {
+      const root = sectionRef.current;
+      if (!root || root.contains(document.activeElement)) return;
+      const next =
+        root.querySelector<HTMLElement>("select") ??
+        root.querySelector<HTMLElement>("button:not([disabled])");
+      next?.focus();
+    });
+  };
+
   return (
     <div
+      ref={sectionRef}
       style={{
         border: "1px solid var(--line)",
         borderRadius: "var(--radius-md)",
@@ -262,7 +282,10 @@ export function ConnectionsSection({
                           <button
                             type="button"
                             aria-label={`Remove the connection to ${target}`}
-                            onClick={() => connect.onRemove(edge.id)}
+                            onClick={() => {
+                              connect.onRemove(edge.id);
+                              restoreFocusAfterRemove();
+                            }}
                             style={{
                               ...ICON_BUTTON,
                               color: "var(--state-error)",
@@ -359,7 +382,11 @@ function AddConnection({
   hasCandidates: boolean;
   onAdd: (targetId: string) => void;
 }) {
-  const id = "connect-to-target";
+  // useId, not a literal: two panels can share a document (the Storybook docs page renders every
+  // story at once), and duplicate ids would silently break the label→control association this
+  // section's whole accessibility claim rests on. The FIELD NAME stays a fixed literal so the
+  // FormData read below doesn't depend on a generated string.
+  const id = useId();
   if (options.length === 0) {
     return (
       <div style={{ fontSize: "var(--text-xs)", color: "var(--ink-faint)" }}>
@@ -374,7 +401,7 @@ function AddConnection({
       // Submit (Enter from the select) adds it too — the keyboard path shouldn't need the mouse.
       onSubmit={(e) => {
         e.preventDefault();
-        const value = new FormData(e.currentTarget).get(id);
+        const value = new FormData(e.currentTarget).get("target");
         if (typeof value === "string" && value) onAdd(value);
       }}
       style={{ display: "flex", gap: 6, alignItems: "flex-end" }}
@@ -386,7 +413,7 @@ function AddConnection({
         <span style={{ color: "var(--ink-2)" }}>Connect to</span>
         <select
           id={id}
-          name={id}
+          name="target"
           defaultValue=""
           style={{ ...inputStyle, marginTop: 4 }}
         >

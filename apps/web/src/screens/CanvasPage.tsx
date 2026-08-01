@@ -906,14 +906,28 @@ export function CanvasPage() {
     setEdges((es) => moveEdgeOrder(es, edgeId, dir));
   }
 
-  /** Select an edge (and only it) — raises the existing Connection inspector, where conditions
-   *  are edited. The panel routes there instead of keeping a second condition editor. */
+  /**
+   * Select an edge — raises the existing Connection inspector, where conditions are edited. The
+   * panel routes there instead of keeping a second condition editor.
+   *
+   * The NODE selection is deliberately left alone, so closing the overlay returns to the node
+   * whose panel opened it (see `closeEdgeInspector`) instead of an empty dock. Clicking an edge on
+   * the canvas already clears the node selection itself, so that path is unchanged.
+   */
   function selectEdge(id: string): void {
-    setNodes((ns) =>
-      ns.map((n) => (n.selected ? { ...n, selected: false } : n)),
+    setEdges((es) =>
+      es.map((e) =>
+        e.selected === (e.id === id) ? e : { ...e, selected: e.id === id },
+      ),
     );
-    setEdges((es) => es.map((e) => ({ ...e, selected: e.id === id })));
   }
+
+  /** Close the Connection inspector only: the node underneath stays selected. */
+  const closeEdgeInspector = useCallback((): void => {
+    setEdges((es) =>
+      es.map((e) => (e.selected ? { ...e, selected: false } : e)),
+    );
+  }, []);
 
   const addNode = useCallback(
     (kind: NodeType, preset?: Record<string, unknown>) => {
@@ -1240,6 +1254,7 @@ export function CanvasPage() {
       addConnection={addConnection}
       moveConnection={moveConnection}
       selectEdge={selectEdge}
+      closeEdgeInspector={closeEdgeInspector}
       watching={watching}
       pushToast={pushToast}
       closeInspector={closeInspector}
