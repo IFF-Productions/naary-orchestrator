@@ -83,8 +83,10 @@ describe("diffGraphs", () => {
     expect(graphsEqual(base, reordered)).toBe(true);
   });
 
-  it("treats EDGE order as significant (traversal precedence) → flags a reorder", () => {
-    // Same edge SET, different order — a real behaviour-affecting change (first-match wins).
+  it("treats EDGE order as significant → flags a reorder", () => {
+    // Same edge SET, different order — a real behaviour-affecting change. Both of these two edges
+    // fire (nextNodes returns EVERY passing edge, not the first); what their order decides is the
+    // fan-out START order and which branch's terminal wins. See GraphDiff.edgesReordered.
     const branchy: GraphDef = {
       startNodeId: "start",
       nodes: [
@@ -400,7 +402,8 @@ describe("diffGraphs — secret references", () => {
 /**
  * #1020's second defect. `edgeKey` used to include the condition, so editing a threshold reported
  * one edge REMOVED and one ADDED — routing torn out and rebuilt, for an edit that moved nothing.
- * Edge ORDER stays significant throughout (the interpreter takes the first matching outgoing edge).
+ * Edge ORDER stays significant throughout — via fan-out start order and first-terminal-wins, NOT
+ * via first-match traversal; see GraphDiff.edgesReordered for the verified mechanism.
  */
 describe("diffGraphs — edges", () => {
   const branchy = (a: number, b: number): GraphDef => ({

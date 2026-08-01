@@ -103,10 +103,24 @@ export interface GraphDiff {
   /** Edges that kept their from → to but changed condition. See EdgeChange. */
   edgesChanged: EdgeChange[];
   /**
-   * True when the edge SET is unchanged but its ORDER differs. Edge order is semantically
-   * significant here — the interpreter takes the FIRST matching outgoing edge (walk.ts precedence)
-   * and canonicalize()/contentHash preserve it — so a pure reorder is a real, behaviour-affecting
-   * change, not a no-op.
+   * True when the edge SET is unchanged but its ORDER differs — a real, behaviour-affecting
+   * change, not a no-op, which is why it gets a flag of its own.
+   *
+   * WHY ORDER IS SEMANTIC. Not because the interpreter takes the first matching outgoing edge —
+   * it does not. `nextNodes` (branch.ts) collects EVERY outgoing edge whose condition passes, in
+   * declared order, with no early return; >1 is a parallel fan-out. (An earlier version of this
+   * comment cited walk.ts's first-match traversal, which has no consumer on the execution path.
+   * The conclusion was right and the mechanism was invented — and it was quoted onward as fact
+   * before anyone checked, which is the specific harm of a confident wrong comment.)
+   *
+   * The order matters for two real reasons, both in the worker's exec-chain.ts:
+   *   1. FAN-OUT START ORDER — `Promise.all(nexts.map(…))` starts branches in edge order.
+   *   2. FIRST TERMINAL WINS — the results are then walked in that same edge order
+   *      (`for (const r of results) if (r !== null) return r;`), so when two branches both reach
+   *      a terminal, the earlier-declared edge decides the run's outcome.
+   *
+   * canonicalize()/contentHash preserve array order for the same reason, so a reorder is a
+   * different graph by identity as well as by behaviour.
    */
   edgesReordered: boolean;
   startNodeChanged: boolean;
@@ -418,7 +432,8 @@ function diffEdges(from: EdgeDef[], to: EdgeDef[]): EdgeDiff {
     if (!toGroups.has(key)) removed.push(...froms);
   }
 
-  // Order matters (traversal precedence). With the SET identical, a genuine reorder is exactly
+  // Order matters (fan-out start order + first-terminal-wins — see edgesReordered for the actual
+  // mechanism, which is NOT first-match traversal). With the SET identical, a genuine reorder is exactly
   // "the matched source positions are no longer ascending when read in target order" — which also
   // catches a swap of two edges that share a from → to pair, where the pair sequence alone can't.
   const byTarget = [...matched].sort((x, y) => x.toIndex - y.toIndex);

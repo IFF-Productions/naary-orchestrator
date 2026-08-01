@@ -388,8 +388,10 @@ export function GraphDiffBody({ diff }: { diff: GraphDiff }) {
           detail="the workflow now starts from a different node"
         />
       )}
-      {/* Edge ORDER is semantically significant — the interpreter takes the first matching
-          outgoing edge — so a pure reorder is a real behaviour change, not cosmetic. */}
+      {/* Edge ORDER is semantically significant, so a pure reorder is a real behaviour change,
+          not cosmetic. NOT because the interpreter takes the first matching outgoing edge — it
+          takes EVERY passing one (nextNodes) — but because edge order sets fan-out start order
+          and decides which branch's terminal wins. See GraphDiff.edgesReordered. */}
       {diff.edgesReordered && (
         <DiffRow
           kind="chg"
