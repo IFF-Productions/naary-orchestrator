@@ -285,6 +285,33 @@ describe("start (trigger input)", () => {
     expect(inputOf(startGraph)).toEqual({});
     expect(JSON.stringify(inputOf(startGraph))).not.toMatch(/charged|message/i);
   });
+
+  // #983 closed the gap the comment above names: entry nodes OTHER than `start` can now declare a
+  // sample. Deliberately a LOCK, not a regression test — it passes on the old code too, because
+  // `startSampleInput` always read `graph.startNodeId`'s config regardless of node type. That is
+  // the point worth pinning: the fix was in the DSL schema and the canvas, and this asserts the
+  // service keeps needing no special case per trigger type.
+  it("reads a WEBHOOK trigger's sampleInput on a manual run (one rule, any entry node)", async () => {
+    const { service, getLatest, startGraph } = makeService();
+    getLatest.mockResolvedValue({
+      ...SNAP_LATEST,
+      graph: {
+        startNodeId: "hook",
+        nodes: [
+          {
+            id: "hook",
+            type: "webhookTrigger",
+            config: { sampleInput: { event: "ticket.created" } },
+          },
+        ],
+        edges: [],
+      },
+    });
+
+    await service.start("t1", "e1", undefined, "on-ticket");
+
+    expect(inputOf(startGraph)).toEqual({ event: "ticket.created" });
+  });
 });
 
 // RBAC G1 (§4): manual starts carry an actor and are `run`-gated; trigger paths

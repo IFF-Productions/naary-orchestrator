@@ -246,6 +246,8 @@ export function JsonField({
   placeholder,
   onChange,
   allowArray = false,
+  fill,
+  help,
 }: {
   label: string;
   value: unknown;
@@ -254,6 +256,13 @@ export function JsonField({
   /** Accept a top-level JSON ARRAY as well as an object (e.g. an integration `json` field
    *  like Notion's block `children`). Default: object-only (mcpTool args, etc.). */
   allowArray?: boolean;
+  /** Optional one-click prefill (the trigger sample derived from a form's fields, #983). Handled
+   *  HERE rather than by the caller because the textarea's text is local state seeded once from
+   *  `value` — a caller-side `onChange` would update the graph while the box still showed the old
+   *  text. Omitted ⇒ no button, exactly the field that shipped before. */
+  fill?: { label: string; value: unknown };
+  /** Explanatory line under the box (what the value is used for). */
+  help?: string;
 }) {
   const [text, setText] = useState(
     value !== undefined && value !== null ? JSON.stringify(value, null, 2) : "",
@@ -314,6 +323,36 @@ export function JsonField({
           }}
         >
           {error}
+        </div>
+      )}
+      {fill && (
+        <button
+          type="button"
+          onClick={() => commit(JSON.stringify(fill.value, null, 2))}
+          style={{
+            marginTop: 6,
+            border: "1px dashed var(--line-2)",
+            background: "transparent",
+            color: "var(--ink-2)",
+            borderRadius: "var(--radius-md)",
+            padding: "6px 8px",
+            fontSize: "var(--text-xs)",
+            cursor: "pointer",
+          }}
+        >
+          {fill.label}
+        </button>
+      )}
+      {help && (
+        <div
+          style={{
+            fontSize: "var(--text-xs)",
+            color: "var(--ink-3)",
+            marginTop: 6,
+            lineHeight: 1.5,
+          }}
+        >
+          {help}
         </div>
       )}
     </div>

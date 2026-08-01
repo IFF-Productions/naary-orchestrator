@@ -186,10 +186,14 @@ export {
   NODE_CATALOG,
   NODE_TYPES,
   CONDITION_OPS,
+  acceptsSampleInput,
   nodeCatalogPrompt,
   type NodeCatalogEntry,
   type NodeGroup,
 } from "./node-catalog";
+// Derives a trigger's sample input from its own declaration (#983). Runtime-free, so the canvas
+// can import it — see the module header for why the derive happens in the EDITOR, not the service.
+export { deriveSampleInput } from "./trigger-sample";
 // `evaluateCondition`/`nextNodes` are interpreter hot path; `validateGraph` is a SAVE GATE and the
 // only one of the three that needs the integration catalog. They were one module until #910, which
 // meant every node transition's `require("./branch")` dragged all 161KB of catalog into the

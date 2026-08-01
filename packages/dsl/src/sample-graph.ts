@@ -66,7 +66,21 @@ export const sampleGraph: GraphDef = {
 export const webhookSampleGraph: GraphDef = {
   startNodeId: "trigger",
   nodes: [
-    { id: "trigger", type: "webhookTrigger" },
+    {
+      id: "trigger",
+      type: "webhookTrigger",
+      // What a manual "Run now" sends, shaped like the event a real webhook delivers here (#983).
+      // Until entry nodes could declare one, this graph got `{}` on a manual run — the residual gap
+      // #982 left behind — and the agent below summarized an empty object. Sample data belongs to
+      // the sample, visible on the canvas, not injected by the service (#979).
+      config: {
+        sampleInput: {
+          event: "ticket.created",
+          id: "TCK-4821",
+          subject: "I was charged twice this month",
+        },
+      },
+    },
     {
       id: "agent",
       type: "agent",

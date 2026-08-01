@@ -28,6 +28,16 @@ export interface NodeCatalogEntry {
   config?: string;
   /** Entry nodes can be a graph's `startNodeId` (exactly one per graph). */
   entry?: boolean;
+  /**
+   * This entry node accepts `config.sampleInput` — the payload a manual run falls back to (#983).
+   * A subset of `entry`, not a synonym: schedule/poll triggers are entries whose real trigger
+   * passes `{}`, so they carry no sample (see `TriggerSampleInputConfig`).
+   *
+   * The canvas gates its "Sample input (JSON)" field on this rather than on a hand-written node
+   * list, so a trigger added later can't quietly ship without the field. Lives HERE, not in
+   * ./registry, because the web imports it — registry pulls zod into the browser bundle.
+   */
+  sampleInput?: boolean;
 }
 
 export const NODE_CATALOG: Record<NodeType, NodeCatalogEntry> = {
@@ -35,19 +45,25 @@ export const NODE_CATALOG: Record<NodeType, NodeCatalogEntry> = {
   start: {
     group: "trigger",
     entry: true,
+    sampleInput: true,
     summary: "Manual/API entry point. config.sampleInput seeds test runs.",
+    config: "{ sampleInput? }",
   },
   webhookTrigger: {
     group: "trigger",
     entry: true,
+    sampleInput: true,
     summary:
       "Started by an inbound HTTP webhook; its output IS the event payload.",
+    config: "{ sampleInput? }",
   },
   errorTrigger: {
     group: "trigger",
     entry: true,
+    sampleInput: true,
     summary:
       "Entry of an error-handler workflow; runs when another flow fails.",
+    config: "{ sampleInput? }",
   },
   pollTrigger: {
     group: "trigger",
@@ -66,24 +82,27 @@ export const NODE_CATALOG: Record<NodeType, NodeCatalogEntry> = {
   formTrigger: {
     group: "trigger",
     entry: true,
+    sampleInput: true,
     summary:
       "Started by a hosted public form; its output IS the submitted fields {key: value}.",
     config:
-      "{ title?, description?, submitLabel?, fields: [{ key, label, type: text|textarea|number|email|select, required?, options? }] }",
+      "{ title?, description?, submitLabel?, fields: [{ key, label, type: text|textarea|number|email|select, required?, options? }], sampleInput? }",
   },
   chatTrigger: {
     group: "trigger",
     entry: true,
+    sampleInput: true,
     summary:
       "Started by a hosted chat message; its output IS { message, sessionId }.",
-    config: "{ title?, description?, placeholder?, greeting? }",
+    config: "{ title?, description?, placeholder?, greeting?, sampleInput? }",
   },
   mcpServerTrigger: {
     group: "trigger",
     entry: true,
+    sampleInput: true,
     summary:
       "Hosts this workflow as a tool on naary's MCP server; an external agent invokes it and its output IS the invocation args.",
-    config: "{ toolName?, description? }",
+    config: "{ toolName?, description?, sampleInput? }",
   },
   // --- AI ---
   agent: {
@@ -379,6 +398,18 @@ export const NODE_CATALOG: Record<NodeType, NodeCatalogEntry> = {
 
 /** Every node type, from the catalog (exhaustive by construction). */
 export const NODE_TYPES = Object.keys(NODE_CATALOG) as NodeType[];
+
+/**
+ * Does this node type accept `config.sampleInput` (#983)? The canvas asks before rendering the
+ * "Sample input (JSON)" field. Own-property check, not `NODE_CATALOG[type]?.sampleInput`, so a
+ * hostile deserialized type like `"constructor"` reads as false rather than walking the prototype.
+ */
+export function acceptsSampleInput(type: NodeType): boolean {
+  return (
+    Object.prototype.hasOwnProperty.call(NODE_CATALOG, type) &&
+    NODE_CATALOG[type].sampleInput === true
+  );
+}
 
 // Exhaustive list of edge/predicate operators (Record → keys enforces all ConditionOp members).
 const CONDITION_OP_PRESENCE: Record<ConditionOp, true> = {

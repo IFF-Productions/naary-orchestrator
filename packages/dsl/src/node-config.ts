@@ -24,6 +24,7 @@ import type {
   CsvConfig,
   DateTimeConfig,
   EncodeConfig,
+  ErrorTriggerConfig,
   ExecuteSubWorkflowConfig,
   FilterConfig,
   ForEachConfig,
@@ -67,15 +68,20 @@ import type {
   TextToSpeechConfig,
   TotpConfig,
   WaitConfig,
+  WebhookTriggerConfig,
   XmlConfig,
 } from "./registry";
 
-/** node type → its config shape (registry-derived). Config-less entry/exit nodes map to an open
+/** node type → its config shape (registry-derived). Config-less structural nodes map to an open
  *  record. Exhaustiveness is enforced by `_mapCoversAllNodes` below. */
 export interface NodeConfigMap {
   start: StartConfig;
-  webhookTrigger: Record<string, unknown>;
-  errorTrigger: Record<string, unknown>;
+  // Both were open records until #983 gave every entry node a `sampleInput`. Narrowing them is
+  // safe for the interpreter: neither handler reads config at all (they publish `ctx.__input` as
+  // their output), and `sampleInput` is a control-plane concern — it is resolved into the run
+  // input before the workflow starts, never read by workflow code.
+  webhookTrigger: WebhookTriggerConfig;
+  errorTrigger: ErrorTriggerConfig;
   pollTrigger: PollTriggerConfig;
   scheduleTrigger: ScheduleTriggerConfig;
   formTrigger: FormTriggerConfig;

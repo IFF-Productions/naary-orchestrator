@@ -1,6 +1,10 @@
 // Node inspector body: common header, test/pin UI, and per-type config section dispatch (extracted from CanvasPage).
 import type { Node } from "@xyflow/react";
-import type { NodeType } from "@naary/dsl";
+import {
+  acceptsSampleInput,
+  deriveSampleInput,
+  type NodeType,
+} from "@naary/dsl";
 import { ExpressionField } from "../../components/ExpressionField";
 import type { ConnectionRow, TestNodeResult } from "../../lib/api";
 import { useFlag } from "../../workspace/FlagsProvider";
@@ -48,6 +52,47 @@ export interface ConfigSectionCtx {
   /** Feature-gated (#491): show the HTTP/GraphQL node import tools (cURL/OpenAPI/introspect). */
   showImportTools: boolean;
 }
+
+/**
+ * Placeholder JSON for an entry node's sample input — shaped like what its REAL trigger sends, so
+ * the empty box says what belongs in it. Partial: a type with no bespoke example falls back below.
+ */
+const SAMPLE_INPUT_PLACEHOLDER: Partial<Record<NodeType, string>> = {
+  start: '{\n  "message": "I was charged twice"\n}',
+  webhookTrigger: '{\n  "event": "issue.opened",\n  "id": 42\n}',
+  formTrigger: '{\n  "email": "user@example.com",\n  "message": ""\n}',
+  chatTrigger: '{\n  "message": "Hello",\n  "sessionId": "sample-session"\n}',
+  mcpServerTrigger: '{\n  "query": "open incidents"\n}',
+  errorTrigger:
+    '{\n  "failedWorkflowId": "exec-…",\n  "status": "failed",\n  "error": { "message": "…" }\n}',
+};
+
+/**
+ * What actually uses this value. Said per trigger because the honest answer differs: on `start` the
+ * sample IS the run's input whenever the caller sends none, while on the automatic triggers it only
+ * ever applies to a manual run — the real event always wins. Spelling that out is the point; #979
+ * happened because a manual run silently carried data the real trigger never sends.
+ */
+const SAMPLE_INPUT_HELP: Partial<Record<NodeType, string>> = {
+  start:
+    "Used when a run starts with no input of its own. An API or manual run that sends a body uses that instead.",
+  webhookTrigger:
+    "Only used when you run this manually — a real webhook call always passes its own request body.",
+  formTrigger:
+    "Only used when you run this manually — a real submission always passes its own fields.",
+  chatTrigger:
+    "Only used when you run this manually — a real chat message always passes its own { message, sessionId }.",
+  mcpServerTrigger:
+    "Only used when you run this manually — an MCP client's tool call always passes its own arguments.",
+  errorTrigger:
+    "Only used when you run this manually — a real failure always passes { failedWorkflowId, workflowKey, status, error }.",
+};
+
+/** Label for the one-click prefill, for the triggers whose shape the graph already declares. */
+const SAMPLE_INPUT_FILL_LABEL: Partial<Record<NodeType, string>> = {
+  formTrigger: "Fill from the form's fields",
+  chatTrigger: "Fill with a sample chat message",
+};
 
 /** Per-type config editor for the selected node — matches the design's inspector.
  *  Only the types with meaningful config (agent, mcpTool) expose fields; others
@@ -418,14 +463,31 @@ export function ConfigPanel({
       {renderLogicSections(sectionCtx)}
       {renderControlSections(sectionCtx)}
 
-      {kind === "start" && (
-        <JsonField
-          label="Sample input (JSON)"
-          value={obj("sampleInput")}
-          placeholder={'{\n  "message": "I was charged twice"\n}'}
-          onChange={(v) => onChange({ sampleInput: v })}
-        />
-      )}
+      {/* Sample input on EVERY entry node that accepts one, not just `start` (#983). The gate is
+          the DSL's own flag, so a trigger added later can't ship without the field. formTrigger and
+          chatTrigger also get a one-click fill derived from what the node already declares — in the
+          EDITOR, so the payload is visible and editable rather than injected by the service (#982). */}
+      {acceptsSampleInput(kind) &&
+        (() => {
+          const derived = deriveSampleInput(kind, config);
+          const fillLabel = SAMPLE_INPUT_FILL_LABEL[kind];
+          return (
+            <JsonField
+              label="Sample input (JSON)"
+              value={obj("sampleInput")}
+              placeholder={
+                SAMPLE_INPUT_PLACEHOLDER[kind] ?? '{\n  "key": "value"\n}'
+              }
+              help={SAMPLE_INPUT_HELP[kind]}
+              fill={
+                derived && fillLabel
+                  ? { label: fillLabel, value: derived }
+                  : undefined
+              }
+              onChange={(v) => onChange({ sampleInput: v })}
+            />
+          );
+        })()}
 
       {kind === "webhookTrigger" && <WebhookInfo hookUrls={hookUrls} />}
 
