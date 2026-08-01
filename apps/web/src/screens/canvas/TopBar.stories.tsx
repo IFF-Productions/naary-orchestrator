@@ -151,3 +151,92 @@ export const PhoneMenuOpen: Story = {
     ).toBeInTheDocument();
   },
 };
+
+const tablet = { viewport: { defaultViewport: "tablet" } };
+
+/**
+ * TABLET (iPad portrait, 834px) — the width #989 is about, and the state a real session is
+ * actually in. The phone stories above under-report it: none of them sets `status`, `runCapUsd`
+ * or `env`, and all three are on the tablet bar because everything there is gated on `!phone`.
+ *
+ * Measured on the built Storybook at 834×844, before -> after (`getBoundingClientRect`):
+ *
+ *                       name width       "Save & run" right edge (viewport 834)
+ *   Tablet ............... 60  ->  142      1114 (+280 out)  ->  806
+ *   TabletAiOpen ......... 60  ->  142      1074 (+240 out)  ->  806
+ *   TabletInvalid ........ 60  ->  142      1215 (+381 out)  ->  806
+ *   TabletQuiet .......... 80  ->  197       923  (+89 out)  ->  806
+ *   WithIssues ........... 60  ->  197       974 (+140 out)  ->  806
+ *
+ * 60px is the name input's `minWidth` floor on the non-phone branch — the workflow you are
+ * editing was ~7 characters wide — and the primary CTA sat 89 to 381px past the right edge of a
+ * root that is `overflow-x: hidden`, so it could not be scrolled to either (#511's trap). Over
+ * the whole `Canvas/TopBar` set the responsive audit goes 28 clipped elements / 19 unreachable
+ * controls -> 0 / 0 at this width. Storybook builds with no `VITE_SENTRY_DSN`, so the 34px
+ * "Send feedback" button is absent from these numbers; re-measured with it present, the same
+ * stories fit at 768 and 834 (the workflow name takes the difference: 142 -> 98).
+ *
+ * What the tablet tier gives up (and why): the mono `key · v19` meta (~200px — a reference detail
+ * with its own desktop home), the RUN CAP chip (Settings → Usage & budgets states the policy), and
+ * the `✨ Build with AI` LABEL — the button stays, as an icon. What it keeps is every action plus
+ * the env chip: the canvas is a sibling route of `/app`, so the shell's own env chip is NOT on
+ * screen here, and "which environment does Save & run hit" is the one question worth the pixels.
+ */
+export const Tablet: Story = {
+  args: {
+    name: "pagerduty-incident-triage",
+    issuesCount: 3,
+    issuesSevere: false,
+    canReview: true,
+    showReview: false,
+    onToggleReview: () => {},
+    env: { name: "production", accent: "#f2622e", isProd: true },
+    runCapUsd: 2.5,
+    status: 'Saved as "PagerDuty incident triage" (pagerduty-incident-triage).',
+  },
+  parameters: tablet,
+  globals: { viewport: { value: "tablet" } },
+};
+
+/** Same width, nothing to report — the floor case, and it overflowed by 89px too. */
+export const TabletQuiet: Story = {
+  parameters: tablet,
+  globals: { viewport: { value: "tablet" } },
+};
+
+/**
+ * …and where the tablet bar's `✨` goes. Icon-only from a tap, not hidden: AI authoring is the
+ * differentiator, and #964's lesson was that a control with no other surface must not simply
+ * disappear at a narrower width.
+ */
+export const TabletAiOpen: Story = {
+  ...Tablet,
+  args: { ...Tablet.args, showAi: true },
+};
+
+/**
+ * The one piece of UNBOUNDED text left in the bar: the validity pill's label is
+ * `graphError ?? "invalid"`, so a long lint message renders at whatever width it wants.
+ *
+ * It is deliberately NOT hidden at tablet, unlike its neighbours — it is the only visible answer
+ * to "why is Save disabled", and the fallback the file's older comment claims (a toast on save)
+ * does not exist: `save()` puts "Graph is not runnable." into `status`, which is the FIRST thing
+ * this row squeezes to zero — and Save is disabled while the graph is invalid, so it cannot even
+ * be pressed to get there. So the pill has to stay, and its worst case has to be measured rather
+ * than assumed: 202px of pill put "Save & run" at 1215 in an 834px viewport. At compact the pill
+ * now states the state and the message rides in its `title`.
+ *
+ * HONEST DATA: this story is still 48px over at 1440. That is the SAME unbounded label on the
+ * DESKTOP bar, which #989's compact tier does not touch — measured identical before and after —
+ * and it is left visible on purpose rather than tuned out of the story. Tracked as #997, with
+ * the 1025–~1200 desktop band it shares a cause with.
+ */
+export const TabletInvalid: Story = {
+  ...Tablet,
+  args: {
+    ...Tablet.args,
+    graphValid: false,
+    graphError: "Start node has no outgoing edge",
+    status: null,
+  },
+};
