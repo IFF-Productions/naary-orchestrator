@@ -87,6 +87,37 @@ const monoLabel: React.CSSProperties = {
   color: "var(--ink-3)",
 };
 
+/**
+ * Text for assistive tech only — off-screen, zero layout cost, still in the accessibility tree.
+ *
+ * Used where the COMPACT tier shortens a label that a screen reader still needs in full. Note
+ * `aria-label` is NOT the tool for that here: the element carrying the truncated text is a plain
+ * `<span>` (role `generic`), and ARIA prohibits naming a generic element — support is
+ * inconsistent and axe flags it. On the two PILLS, which are real `<button>`s, `aria-label` IS
+ * authoritative and is what they use instead.
+ *
+ * The declarations are the standard sr-only recipe and they work TOGETHER, not as alternatives:
+ * `position: absolute` + a 1px box + negative margin take it out of layout so it can never move
+ * a rect; `overflow: hidden` + `clip-path: inset(50%)` hide the glyphs that box would otherwise
+ * still paint; `white-space: nowrap` stops the text wrapping into something tall enough to add a
+ * scrollbar. `clip-path` specifically — not the deprecated `clip: rect(…)` the older version of
+ * this recipe used.
+ *
+ * Do NOT reach for `display: none` or `visibility: hidden` instead: both remove the node from the
+ * accessibility tree, which is the one thing this must not do.
+ */
+const srOnly: React.CSSProperties = {
+  position: "absolute",
+  width: 1,
+  height: 1,
+  margin: -1,
+  padding: 0,
+  border: 0,
+  overflow: "hidden",
+  clipPath: "inset(50%)",
+  whiteSpace: "nowrap",
+};
+
 /** Rule between groups in the "…" menu (also used above the workflow switcher). */
 const menuDivider: React.CSSProperties = {
   borderTop: "1px solid var(--line)",
@@ -420,14 +451,24 @@ export function CanvasTopBar({
           cannot be pressed to get there.
 
           Its LABEL is bounded there instead. `graphError` is the one piece of unbounded text left
-          in the bar, and a pill cannot shrink: measured at 834px, "Start node has no outgoing
-          edge" rendered a 202px pill and put the row 17px past the edge at 768. At compact the
-          pill states the STATE and the message rides in the wrapper's `title`; the issues pill
-          and its panel, right next door, are the surface built for the detail (#832 / #835). */}
+          in the bar, and a pill cannot shrink: "Start node has no outgoing edge" — 31 characters,
+          not a pathological one — renders a 202px pill. With EVERYTHING ELSE in this tier already
+          paid for, that alone still put 768px 25px over (drop the `compact ? "invalid"` branch
+          below and re-run `responsive-audit.mjs --width 768` on `TabletInvalid` to reproduce);
+          834 fits either way, so the bound is what makes the rest of the compact band safe rather
+          than only the iPad-portrait one. At compact the pill states the STATE and the message
+          rides alongside it.
+
+          It rides in `srOnly` text, NOT only in `title`. A `title` is a pointer affordance: it
+          needs a hover, which a touch screen does not have — and the compact tier IS the touch
+          tier, so "the detail is in the tooltip" would mean the reason the graph is invalid is
+          unavailable to exactly the users this tier was built for, sighted or not. The off-screen
+          copy is in the accessibility tree at every width and costs no layout. `title` stays for
+          the pointer case. */}
       {!phone && (
         <span
           title={!graphValid && graphError ? graphError : undefined}
-          style={{ flex: "none", display: "inline-flex" }}
+          style={{ flex: "none", display: "inline-flex", alignItems: "center" }}
         >
           <StatusPill
             state={generating ? "running" : graphValid ? "done" : "error"}
@@ -441,6 +482,9 @@ export function CanvasTopBar({
                     : (graphError ?? "invalid")
             }
           />
+          {compact && !generating && !graphValid && graphError && (
+            <span style={srOnly}>{graphError}</span>
+          )}
         </span>
       )}
       {/* `hasVerdict` is why this isn't just `issuesCount > 0`: a CLEAN dry run has no issues but
@@ -463,6 +507,20 @@ export function CanvasTopBar({
         <button
           type="button"
           onClick={onToggleIssues}
+          // A button's accessible name is its CONTENT, and at compact that content is `⚠ 3` — or,
+          // for a verdict, a bare `✓` / `✗` that names nothing at all. `title` does not rescue it:
+          // a title is only consulted as a name when there is no content, and there is. So the
+          // name is stated outright. Given at EVERY width, not just compact — the desktop content
+          // ends in a `▼` glyph that is chrome, not name, and one name is easier to keep true
+          // than two.
+          aria-label={
+            issuesCount > 0
+              ? `${issuesCount} issue${issuesCount > 1 ? "s" : ""} found`
+              : verdictOk
+                ? "Check passed"
+                : "Check failed"
+          }
+          aria-expanded={showIssues}
           title={
             issuesCount > 0
               ? "Show details of every issue"
@@ -482,9 +540,10 @@ export function CanvasTopBar({
           style={{ border: "none", cursor: "pointer", flex: "none" }}
         >
           {/* The short glyph form runs to the whole `compact` range, not just a phone (#989): at
-              834px "⚠ 3 issues ▼" is 88px and "⚠ 3" is ~40, and the pill's `title` already says
-              the same thing to a pointer. Shortening a LABEL is the cheap trade; hiding the pill
-              is the expensive one this file spent a paragraph above refusing to make. */}
+              834px "⚠ 3 issues ▼" is 88px and "⚠ 3" is ~40. Shortening a LABEL is the cheap
+              trade; hiding the pill is the expensive one this file spent a paragraph above
+              refusing to make. What shrinks is the VISIBLE label only — the `aria-label` above
+              carries the same sentence at every width, so the trade costs pixels, not meaning. */}
           {issuesCount > 0
             ? compact
               ? `⚠ ${issuesCount}`
@@ -508,6 +567,11 @@ export function CanvasTopBar({
         <button
           type="button"
           onClick={onToggleReview}
+          // Same argument as the issues pill: at compact this button's entire content is `±`, so
+          // without a name of its own its accessible name is the mathematical-plus-minus sign.
+          // `title` cannot stand in — a button that HAS content never falls back to it.
+          aria-label="Review changes"
+          aria-expanded={showReview}
           title="See what changed since the last save"
           className="pill"
           style={{
