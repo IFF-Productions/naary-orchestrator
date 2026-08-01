@@ -8,8 +8,17 @@
  * feedback · "…" overflow menu (Import / Export / Run input / workflow
  * switcher) · Save · Save & run.
  *
- * On a PHONE the row is narrower than that list, so Save and "Check flow" move
- * INTO the "…" menu and only the name + "Save & run" stay in the bar (#964).
+ * That list is wider than the row on anything but a desktop, and the two narrower tiers pay for
+ * it differently — which is the thing to keep straight when editing this file:
+ *
+ *  - `compact` (≤1024px, tablet and down) gives up LABELS AND REFERENCE TEXT, never controls: the
+ *    mono `key · vN` meta and the RUN CAP chip go, "✨ Build with AI" becomes its icon, "Check
+ *    flow" becomes "Check", and the issues / `± changes` pills use their short glyph forms (#989).
+ *  - `phone` (≤640px) has ~440px less to work with, so it also moves ACTIONS: Save and "Check
+ *    flow" go INTO the "…" menu and only the name + "Save & run" stay in the bar (#964).
+ *
+ * `compact` is a superset of `phone`, so a compact rule reaches a phone too; the phone-only rules
+ * stay on `phone`.
  */
 import { Fragment, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -17,7 +26,11 @@ import { Button, Icon, StatusPill } from "../../components";
 import type { GraphSummary } from "../../lib/api";
 import { CANVAS_HOME } from "../../lib/canvas-return";
 import { attachFeedback, feedbackAvailable } from "../../lib/feedback";
-import { PHONE_QUERY, useMediaQuery } from "../../lib/useMediaQuery";
+import {
+  BELOW_RAIL_QUERY,
+  PHONE_QUERY,
+  useMediaQuery,
+} from "../../lib/useMediaQuery";
 
 /**
  * "Send feedback" for the canvas — opens the Sentry User Feedback dialog. The nav drawer's
@@ -191,6 +204,13 @@ export function CanvasTopBar({
 }) {
   const navigate = useNavigate();
   const phone = useMediaQuery(PHONE_QUERY);
+  /**
+   * ≤1024px — phone AND tablet, the same range the shell collapses its nav in. Everything the
+   * phone hides is `!phone`; `compact` is the WIDER rule, for the things a tablet can afford to
+   * shorten but not to lose (#989). Deliberately a superset of `phone`, so a rule written here
+   * reads the same on both and there is no third branch to keep in step.
+   */
+  const compact = useMediaQuery(BELOW_RAIL_QUERY);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -220,8 +240,10 @@ export function CanvasTopBar({
         background: "var(--panel)",
         display: "flex",
         alignItems: "center",
-        gap: phone ? 8 : 12,
-        padding: phone ? "0 10px" : "0 16px",
+        // The row has up to seven gaps; 12 → 8 across a tablet is ~28px back, free of any
+        // control. Phone keeps its own tighter padding.
+        gap: compact ? 8 : 12,
+        padding: phone ? "0 10px" : compact ? "0 12px" : "0 16px",
         position: "relative",
         zIndex: 8,
         minWidth: 0,
@@ -326,7 +348,13 @@ export function CanvasTopBar({
           FIRST (so the right cluster's "…" / Save & run stay put) and the mono key·version meta
           is hidden to save the row. It shrinks, but it must not VANISH: `minWidth: 0` against a
           `flex: none` cluster meant the name absorbed every pixel of shortfall and ended up 14px
-          wide — its own padding — at 390px (#964). The cluster is what got smaller instead. */}
+          wide — its own padding — at 390px (#964). The cluster is what got smaller instead.
+
+          As of #989 the meta's hiding runs to the whole `compact` range, because it is the single
+          most expensive thing in the bar (~210px for "pagerduty-incident-triage · v19", nowrap)
+          and the only one that is pure reference: never actionable, its own tooltip says it never
+          changes, and it is still there on desktop. Buying it back is what lets a tablet keep
+          every control. */}
       <div
         style={{
           display: "flex",
@@ -353,11 +381,11 @@ export function CanvasTopBar({
             borderRadius: 7,
             padding: "4px 6px",
             minWidth: phone ? 0 : 60,
-            maxWidth: phone ? "100%" : 260,
+            maxWidth: phone ? "100%" : compact ? 220 : 260,
             width: phone ? "100%" : undefined,
           }}
         />
-        {!phone && (
+        {!compact && (
           <>
             <span style={{ color: "var(--ink-3)", flex: "none" }}>/</span>
             <span
@@ -383,18 +411,37 @@ export function CanvasTopBar({
       </div>
 
       {/* validity + issues — hidden on a phone to keep the bar to one clean row. Both are shown
-          on the wider (tablet/desktop) layouts; a save still surfaces validity errors via toast. */}
+          on the wider (tablet/desktop) layouts.
+
+          The pill is NOT dropped at tablet, unlike its neighbours: it is the only visible answer
+          to "why is Save disabled". The fallback this comment used to claim — "a save still
+          surfaces validity errors via toast" — does not exist: `save()` puts the message into
+          `status`, not a toast, and Save is itself disabled while the graph is invalid, so it
+          cannot be pressed to get there.
+
+          Its LABEL is bounded there instead. `graphError` is the one piece of unbounded text left
+          in the bar, and a pill cannot shrink: measured at 834px, "Start node has no outgoing
+          edge" rendered a 202px pill and put the row 17px past the edge at 768. At compact the
+          pill states the STATE and the message rides in the wrapper's `title`; the issues pill
+          and its panel, right next door, are the surface built for the detail (#832 / #835). */}
       {!phone && (
-        <StatusPill
-          state={generating ? "running" : graphValid ? "done" : "error"}
-          label={
-            generating
-              ? "building…"
-              : graphValid
-                ? "valid"
-                : (graphError ?? "invalid")
-          }
-        />
+        <span
+          title={!graphValid && graphError ? graphError : undefined}
+          style={{ flex: "none", display: "inline-flex" }}
+        >
+          <StatusPill
+            state={generating ? "running" : graphValid ? "done" : "error"}
+            label={
+              generating
+                ? "building…"
+                : graphValid
+                  ? "valid"
+                  : compact
+                    ? "invalid"
+                    : (graphError ?? "invalid")
+            }
+          />
+        </span>
       )}
       {/* `hasVerdict` is why this isn't just `issuesCount > 0`: a CLEAN dry run has no issues but
           does have something to say (what it verified, and what it couldn't — #835). Gating on the
@@ -434,18 +481,22 @@ export function CanvasTopBar({
           }`}
           style={{ border: "none", cursor: "pointer", flex: "none" }}
         >
+          {/* The short glyph form runs to the whole `compact` range, not just a phone (#989): at
+              834px "⚠ 3 issues ▼" is 88px and "⚠ 3" is ~40, and the pill's `title` already says
+              the same thing to a pointer. Shortening a LABEL is the cheap trade; hiding the pill
+              is the expensive one this file spent a paragraph above refusing to make. */}
           {issuesCount > 0
-            ? phone
+            ? compact
               ? `⚠ ${issuesCount}`
               : `⚠ ${issuesCount} issue${issuesCount > 1 ? "s" : ""} `
             : verdictOk
-              ? phone
+              ? compact
                 ? "✓"
                 : "✓ checked "
-              : phone
+              : compact
                 ? "✗"
                 : "✗ check failed "}
-          {!phone && (showIssues ? "▲" : "▼")}
+          {!compact && (showIssues ? "▲" : "▼")}
         </button>
       )}
 
@@ -467,8 +518,8 @@ export function CanvasTopBar({
             color: "var(--ink-2)",
           }}
         >
-          {phone ? "±" : "± changes "}
-          {!phone && (showReview ? "▲" : "▼")}
+          {compact ? "±" : "± changes "}
+          {!compact && (showReview ? "▲" : "▼")}
         </button>
       )}
 
@@ -503,41 +554,93 @@ export function CanvasTopBar({
         </span>
       )}
 
-      {/* right cluster. On a phone it's flex:none so "Save & run" and the "…" menu never shrink
-          or clip (the workflow name shrinks first instead); on wider layouts it keeps the
-          original min-width:0 so it can still shrink if needed.
+      {/* right cluster — three different rules, one per tier.
 
-          flex:none is only safe because the phone cluster is now SHORT — two controls. It cannot
-          shrink, so whatever it contains it takes, and the header's overflow goes off the right
-          edge under a root that is `overflow-x: hidden` (#511's trap): not clipped-but-scrollable,
-          just gone. Anything added here must be `!phone` unless the row is measured again. */}
+          PHONE: flex:none, so "Save & run" and the "…" menu never shrink or clip (the workflow
+          name shrinks first instead). That is only safe because the phone cluster is SHORT — two
+          controls. It cannot shrink, so whatever it contains it takes, and the header's overflow
+          goes off the right edge under a root that is `overflow-x: hidden` (#511's trap): not
+          clipped-but-scrollable, just gone. Anything added here must be `!phone` unless the row
+          is measured again.
+
+          DESKTOP: the original min-width:0, so it can still shrink if needed.
+
+          COMPACT: neither. It GROWS into the free space (`flex: 1 1 auto`, contents right-aligned)
+          and its `minWidth: 0` is dropped so the automatic min-content floor applies (#989).
+
+          That floor is the whole fix at tablet. `minWidth: 0` let the CLUSTER shrink past buttons
+          that cannot themselves shrink, so the difference left the right edge instead of pushing
+          back on the row: measured at 834px the cluster was 276px around 447px of buttons and
+          "Save & run" ended at 974. With the floor, the shortfall goes to the things that CAN
+          give — the status text first, then the workflow name down to its 60px floor — and every
+          action stays on screen. It is the same conclusion as the phone rule (the name yields
+          before a control does), reached without having to move an action out of the bar.
+
+          `marginLeft: auto` has to go with it at compact: an auto margin eats ALL positive free
+          space before flex-grow is even considered, so keeping it would pin the cluster at its
+          floor and leave the status text at zero width at every compact size.
+          `justifyContent: flex-end` is what keeps the buttons against the right edge once the
+          cluster is the elastic one. */}
       <div
         style={{
           marginLeft: "auto",
           display: "flex",
           alignItems: "center",
+          // Deliberately NOT tightened at compact the way the header's gap is: these are 34px
+          // icon buttons, and 10px is the spacing that keeps a 44px touch target growable without
+          // overlapping its neighbour (the responsive audit's `safe` rule). Buying row width by
+          // crowding touch targets turns a near-miss into a WRONG action.
           gap: phone ? 6 : 10,
-          ...(phone ? { flex: "none" } : { minWidth: 0 }),
+          ...(phone
+            ? { flex: "none" }
+            : compact
+              ? { marginLeft: 0, flex: "1 1 auto", justifyContent: "flex-end" }
+              : { minWidth: 0 }),
         }}
       >
+        {/* `status` is the ONLY channel for "Save failed." / "Run failed." / an import error —
+            none of them is toasted, and `save()` routes "Graph is not runnable." through it too —
+            so it is NOT one of the things a narrower layout may drop.
+
+            It is also the only child of this cluster that can shrink (it is `overflow: hidden`,
+            so its min-content is 0), which means it absorbs the row's shortfall first and can
+            still reach zero width on a full tablet bar. That is the honest trade: a sentence is
+            the right thing to lose before a button, and `title` keeps the full text one hover
+            away. The tighter cap is for the other direction — with the cluster's min-content floor
+            now doing the pushing back, an unbounded 260px sentence would take the room out of the
+            workflow name instead. */}
         {!phone && status && (
           <span
             title={status}
             style={{
               fontSize: "var(--text-xs)",
               color: "var(--ink-2)",
-              maxWidth: 260,
+              maxWidth: compact ? 150 : 260,
               overflow: "hidden",
               textOverflow: "ellipsis",
               whiteSpace: "nowrap",
+              // `width: 0` is what makes the cluster's min-content floor land on the BUTTONS and
+              // not on this sentence. `overflow: hidden` alone is not enough, and neither is a
+              // zero flex-basis: both leave the parent's min-content contribution computed from
+              // the text (clamped to `maxWidth`), which held the cluster 150px wider than its
+              // buttons and pushed the shortfall onto the workflow name instead — measured, the
+              // name sat at its 60px floor while this sentence kept a full 150. A definite
+              // `width` overrides that contribution; `flex: 1 1 150px` is what grows it back to
+              // readable as soon as the row has room (0 at 834px, 135 at 1024px).
+              ...(compact
+                ? { width: 0, flex: "1 1 150px", minWidth: 0 }
+                : null),
             }}
           >
             {status}
           </span>
         )}
 
-        {/* RUN CAP — only when the budget policy really sets a per-execution cap */}
-        {!phone && runCapUsd != null && runCapUsd > 0 && (
+        {/* RUN CAP — only when the budget policy really sets a per-execution cap, and only from
+            desktop up (#989). Two mono lines for ~69px, and unlike its neighbours it is neither a
+            control nor a state of THIS workflow: it restates a tenant policy that Settings →
+            Usage & budgets owns and that no action here can change. */}
+        {!compact && runCapUsd != null && runCapUsd > 0 && (
           <span
             title="Per-execution budget cap (Usage & budgets policy)"
             style={{ textAlign: "right", flex: "none" }}
@@ -568,12 +671,46 @@ export function CanvasTopBar({
         )}
 
         {/* Build with AI is hidden on a phone (dense power feature; AI authoring lives in Simple
-            mode + the overflow menu) so Save / Save & run stay on the single row. */}
-        {!phone && (
-          <Button variant="secondary" disabled={busy} onClick={onToggleAi}>
-            {showAi ? "Close AI" : "✨ Build with AI"}
-          </Button>
-        )}
+            mode) so Save / Save & run stay on the single row.
+
+            On a TABLET it loses its LABEL, not its place (#989): the full button is 125px, the
+            icon 34, and AI authoring is the differentiating feature of this screen — the last
+            thing to make unreachable at a width people really do author on. `aria-label` +
+            `title` carry the name a screen reader and a pointer would otherwise lose, and the
+            toggled state ("Close AI") is in both, so the icon is never ambiguous. */}
+        {!phone &&
+          (compact ? (
+            <button
+              type="button"
+              aria-label={showAi ? "Close AI" : "Build with AI"}
+              title={showAi ? "Close AI" : "Build with AI"}
+              aria-pressed={showAi}
+              disabled={busy}
+              onClick={onToggleAi}
+              style={{
+                width: 34,
+                height: 34,
+                flex: "none",
+                borderRadius: 9,
+                border: `1px solid ${showAi ? "var(--brand)" : "var(--line-2)"}`,
+                background: showAi ? "var(--brand-soft)" : "var(--card)",
+                color: showAi ? "var(--brand)" : "var(--ink-2)",
+                cursor: busy ? "default" : "pointer",
+                opacity: busy ? 0.5 : 1,
+                fontSize: 15,
+                lineHeight: 1,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              ✨
+            </button>
+          ) : (
+            <Button variant="secondary" disabled={busy} onClick={onToggleAi}>
+              {showAi ? "Close AI" : "✨ Build with AI"}
+            </Button>
+          ))}
 
         {/* Send feedback. Desktop/tablet only — the phone bar is a protected single row (same
             reason Build with AI is hidden there), and the nav drawer's button covers phones. */}
@@ -840,7 +977,11 @@ export function CanvasTopBar({
             }
             onClick={onCheck}
           >
-            {checking ? "Checking…" : "Check flow"}
+            {/* At compact the label is just "Check" (#989) — 40px back, and "flow" is the one word
+                in it that carries nothing the `title` above does not already spell out. The
+                `compact` branch is only reachable from tablet down to 641px, since below that
+                this button is not in the bar at all (#964). */}
+            {checking ? "Checking…" : compact ? "Check" : "Check flow"}
           </Button>
         )}
         <Button
