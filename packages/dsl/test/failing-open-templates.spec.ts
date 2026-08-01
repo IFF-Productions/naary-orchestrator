@@ -132,11 +132,16 @@ function withNodeConfig(
  * — `wantStructured = effectiveOutputSchema !== undefined`, and #450 removed the hardcoded
  * fallback schema):
  *
- *   - a node WITH an `outputSchema` returns an object carrying the fields it declares;
- *   - a node WITHOUT one returns free text as `{ text }` — whatever the prompt asked for.
+ *   - a node with an `outputSchema` — ANY, `{}` included — returns an object carrying the fields
+ *     that schema declares, and no `text`;
+ *   - a node without one returns free text as `{ text }`, whatever the prompt asked for.
  *
  * So the same model verdict lands in ctx differently depending only on what the node declares,
  * which is precisely what the migration changes and precisely what the routing then depends on.
+ *
+ * Hand-written rather than delegating to `promisedAgentFields`: this is the independent model
+ * the assertions are checked against, and a model that called the code under test would agree
+ * with it by construction.
  */
 function agentOutput(
   graph: GraphDef,
@@ -145,8 +150,8 @@ function agentOutput(
 ): Record<string, unknown> {
   const cfg = graph.nodes.find((n) => n.id === nodeId)?.config as
     { outputSchema?: { properties?: Record<string, unknown> } } | undefined;
-  const props = cfg?.outputSchema?.properties;
-  if (!props) return { text: JSON.stringify(verdict) };
+  if (cfg?.outputSchema === undefined) return { text: JSON.stringify(verdict) };
+  const props = cfg.outputSchema.properties ?? {};
   return Object.fromEntries(
     Object.entries(verdict).filter(([k]) => k in props),
   );
