@@ -387,7 +387,14 @@ export async function runGraph(
         // ApplicationFailure.type is `string | null` — the notification field is optional,
         // so a null type is simply absent rather than rendered as "null".
         errorType: failure?.type ?? undefined,
-        failedNodeId: state.failedNodeId ?? state.currentNodeId,
+        // ONLY for a THROWN failure, where the attribution is real. A RETURNED terminal is
+        // not always attributable to where the walk stopped — `invalid_graph` is decided
+        // AFTER the walk (a stranded fan-in join), so `currentNodeId` there is an unrelated
+        // node and "at step X" would be confidently wrong. Those statuses carry an
+        // informative `detail` already.
+        failedNodeId: failure
+          ? (state.failedNodeId ?? state.currentNodeId)
+          : undefined,
       });
     } catch {
       /* best-effort — a notification problem must not mask the failure */

@@ -19,6 +19,7 @@ import {
   xmlCalls,
   rssCalls,
   subResolveCalls,
+  notifyCalls,
   harnessState,
   pollGraph,
   setGraph,
@@ -416,6 +417,16 @@ describe("runGraph interpreter — per-node behavior: flow control, loops, feeds
         failedWorkflowId: parentId,
         status: "invalid_graph",
       });
+      // The failure NOTIFICATION for a RETURNED terminal carries the status as its reason
+      // and NO failing step (#987): `invalid_graph` is decided AFTER the walk (a stranded
+      // fan-in join), so the node the walk stopped on is unrelated — naming it as "the step
+      // that failed" would be confidently wrong.
+      const notice = notifyCalls.find(
+        (n) => n.kind === "run_failed" && n.workflowId === parentId,
+      );
+      expect(notice?.detail).toBe("invalid_graph");
+      expect(notice?.failedNodeId).toBeUndefined();
+      expect(notice?.errorType).toBeUndefined();
     });
   });
 

@@ -129,6 +129,17 @@ describe("promotion formatter", () => {
     expect(body.workflowUrl).toBe(LINKS.workflowUrl);
   });
 
+  it("neutralizes a backtick in the workflow key in the FALLBACK text too", () => {
+    // The top-level `text` is mrkdwn as well (it is the line mobile push and generic hooks
+    // show). An odd backtick there opens a code span that swallows the rest of the line —
+    // including the link — so the key is codeText'd, not merely escaped. Asserted on a
+    // non-run_failed kind because the shared `wf` interpolation serves EVERY kind.
+    const text = notificationText({ ...INPUT, workflowKey: "poll`er" }, LINKS);
+    expect(text).not.toContain("poll`er");
+    expect(text).toContain('"pollʼer"');
+    expect(text).toContain(LINKS.workflowUrl as string);
+  });
+
   it("escapes env names in Slack mrkdwn (a hostile env name can't inject markup)", () => {
     const { blocks } = notificationBlocks(
       { ...INPUT, fromEnv: "sand<box>", toEnv: "pr&od" },
