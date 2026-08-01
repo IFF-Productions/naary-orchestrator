@@ -96,9 +96,15 @@ const monoLabel: React.CSSProperties = {
  * inconsistent and axe flags it. On the two PILLS, which are real `<button>`s, `aria-label` IS
  * authoritative and is what they use instead.
  *
- * `clip-path` rather than `width/height: 1px; overflow: hidden` so the text is never read as a
- * one-pixel line by a braille display, and `white-space: nowrap` so it can't wrap into a
- * scrollbar-triggering box.
+ * The declarations are the standard sr-only recipe and they work TOGETHER, not as alternatives:
+ * `position: absolute` + a 1px box + negative margin take it out of layout so it can never move
+ * a rect; `overflow: hidden` + `clip-path: inset(50%)` hide the glyphs that box would otherwise
+ * still paint; `white-space: nowrap` stops the text wrapping into something tall enough to add a
+ * scrollbar. `clip-path` specifically — not the deprecated `clip: rect(…)` the older version of
+ * this recipe used.
+ *
+ * Do NOT reach for `display: none` or `visibility: hidden` instead: both remove the node from the
+ * accessibility tree, which is the one thing this must not do.
  */
 const srOnly: React.CSSProperties = {
   position: "absolute",
