@@ -21,7 +21,7 @@
  * Zero dependencies on purpose (it is reachable from the DSL barrel, which rides the
  * deterministic Temporal workflow bundle — Tier-1 rule 2).
  */
-import { HANDOFF_TARGET_FIELD } from "./handoff";
+import { type AgentHandoff, handoffOutputSchema } from "./handoff";
 import type { GraphDef, NodeDef } from "./types";
 import type { TemplateWarning } from "./template";
 
@@ -94,30 +94,64 @@ export function agentOutputReads(graph: GraphDef): AgentOutputRead[] {
 }
 
 /**
- * The fields a node actually PROMISES.
+ * The schema the RUNTIME will actually use for this node — the one place that decides whether an
+ * agent is structured, mirroring `agent.ts` line for line:
  *
- * A node with an `outputSchema` promises its declared properties. A node with none promises
- * exactly one thing — `text` — so that is the whole allowed set. `handoff` is the one
- * exemption, and a real one rather than a hole: the activity DERIVES the schema from
- * `handoff.targets`, so `HANDOFF_TARGET_FIELD` exists by construction.
+ *   const effectiveOutputSchema = cfg.handoff ? handoffOutputSchema(cfg.handoff) : cfg.outputSchema;
+ *   const wantStructured = effectiveOutputSchema !== undefined;
+ *
+ * Two things this must NOT get wrong, both of which it originally did:
+ *
+ *  - **`!== undefined`, not "has properties".** An explicit `outputSchema: {}` turns structured
+ *    mode ON. Treating it as schema-less models a different agent than the one that runs — and
+ *    `{}` is not hypothetical: it is exactly the shape that made Anthropic reject
+ *    structured-output requests, so real graphs carry it.
+ *  - **`handoff` derives a REAL schema**, not one magic field. `handoffOutputSchema` declares
+ *    `target`, `payload`, and `reason` unless `explain: false`. Calling it here rather than
+ *    re-listing those is what stops this drifting from the activity — the same reason its own
+ *    docstring gives for being shared with the save gate.
+ *
+ * Never throws: it runs over half-authored canvas graphs, where `handoff.targets` may not be an
+ * array yet. A malformed handoff falls back to "structured, promising nothing", which pushes the
+ * migration toward SKIPPING ([[matchFailingOpenFork]] clause 3) — the safe direction.
  */
-export function promisedAgentFields(node: NodeDef): Set<string> {
+function effectiveOutputSchema(
+  node: NodeDef,
+): Record<string, unknown> | undefined {
   const cfg = node.config as
     { outputSchema?: unknown; handoff?: unknown } | undefined;
-  const schema = cfg?.outputSchema as
-    { properties?: Record<string, unknown> } | undefined;
-  const derived = cfg?.handoff ? [HANDOFF_TARGET_FIELD] : [];
-  if (!schema?.properties) return new Set(["text", ...derived]);
-  return new Set([...Object.keys(schema.properties), ...derived]);
+  if (cfg?.handoff !== undefined && cfg.handoff !== null) {
+    const handoff = cfg.handoff as AgentHandoff;
+    if (!Array.isArray(handoff?.targets)) return {};
+    try {
+      return handoffOutputSchema(handoff);
+    } catch {
+      // A half-authored handoff (a target with no `to`, say). It is still STRUCTURED at run
+      // time — the fact that matters here — we just cannot name its fields.
+      return {};
+    }
+  }
+  return cfg?.outputSchema as Record<string, unknown> | undefined;
 }
 
-/** Whether an agent node declares a structured output contract at all. */
+/**
+ * The fields a node actually PROMISES.
+ *
+ * Structured ⇒ exactly the properties its effective schema declares, and **no `text`**: the
+ * activity returns either the structured object or `{ text }`, never both. Not structured ⇒
+ * exactly `text`.
+ */
+export function promisedAgentFields(node: NodeDef): Set<string> {
+  const schema = effectiveOutputSchema(node);
+  if (schema === undefined) return new Set(["text"]);
+  const properties = (schema as { properties?: Record<string, unknown> })
+    .properties;
+  return new Set(Object.keys(properties ?? {}));
+}
+
+/** Whether this node runs in the activity's STRUCTURED mode. See [[effectiveOutputSchema]]. */
 export function hasStructuredOutput(node: NodeDef): boolean {
-  const cfg = node.config as
-    { outputSchema?: unknown; handoff?: unknown } | undefined;
-  const schema = cfg?.outputSchema as
-    { properties?: Record<string, unknown> } | undefined;
-  return Boolean(schema?.properties) || Boolean(cfg?.handoff);
+  return effectiveOutputSchema(node) !== undefined;
 }
 
 /**

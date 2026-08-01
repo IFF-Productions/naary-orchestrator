@@ -4,7 +4,11 @@ import {
   matchFailingOpenFork,
   migrateFailingOpenFork,
 } from "../src/failing-open-templates";
-import { lintAgentOutputContract } from "../src/agent-output-contract";
+import {
+  hasStructuredOutput,
+  lintAgentOutputContract,
+  promisedAgentFields,
+} from "../src/agent-output-contract";
 import { nextNodes } from "../src/branch";
 import { canonicalize } from "../src/canonical";
 import {
@@ -570,5 +574,163 @@ describe("lintAgentOutputContract — NOTIFY the broader shape", () => {
     // LEGACY_MODERATION trips BOTH reasons (its prompt asks for JSON *and* the edges read a
     // field it never promised). One node, one row: a duplicate would be noise in the panel.
     expect(nodeIds(LEGACY_MODERATION)).toEqual(["classify"]);
+  });
+});
+/**
+ * THE PREDICATE MUST MODEL THE AGENT THAT WILL ACTUALLY RUN.
+ *
+ * `apps/worker/src/temporal/activities/agent.ts`:
+ *
+ *   const effectiveOutputSchema = cfg.handoff ? handoffOutputSchema(cfg.handoff) : cfg.outputSchema;
+ *   const wantStructured = effectiveOutputSchema !== undefined;
+ *   nodeOutput = wantStructured ? <the structured object> : { text: result.text };
+ *
+ * Structured mode turns on for ANY explicit `outputSchema` — `{}` included — and for `handoff`,
+ * whose schema is DERIVED from its targets. In every structured case there is no `text` field at
+ * all.
+ *
+ * This matters more than a normal correctness nit, because clause 3 of `matchFailingOpenFork`
+ * ("declares no output contract") is what stops the migration touching a node whose author
+ * already took ownership of its output. If the predicate under-reports structured-ness, the
+ * migration REWRITES a graph it should have left alone — the one direction #1016 rules out.
+ * `outputSchema: {}` is not hypothetical: it is the exact shape that made Anthropic reject
+ * structured-output requests, so it is a thing real graphs carry.
+ */
+describe("the structured-output predicate agrees with the runtime", () => {
+  const agentWith = (config: Record<string, unknown>) => ({
+    id: "a",
+    type: "agent" as const,
+    config,
+  });
+
+  it("an EMPTY outputSchema is structured — the runtime tests `!== undefined`, not `.properties`", () => {
+    expect(hasStructuredOutput(agentWith({ outputSchema: {} }))).toBe(true);
+  });
+
+  it("an empty outputSchema promises NO fields — and specifically not `text`", () => {
+    expect([...promisedAgentFields(agentWith({ outputSchema: {} }))]).toEqual(
+      [],
+    );
+  });
+
+  it("a handoff agent does NOT promise `text` — structured mode has no free-text field", () => {
+    const handoff = agentWith({
+      handoff: { targets: [{ to: "billing" }, { to: "tech" }] },
+    });
+    expect(promisedAgentFields(handoff).has("text")).toBe(false);
+  });
+
+  it("a handoff agent promises every field its DERIVED schema declares, not just `target`", () => {
+    const handoff = agentWith({
+      handoff: { targets: [{ to: "billing" }, { to: "tech" }] },
+    });
+    // handoffOutputSchema: target + reason (unless explain:false) + payload.
+    expect([...promisedAgentFields(handoff)].sort()).toEqual([
+      "payload",
+      "reason",
+      "target",
+    ]);
+  });
+
+  it("`explain: false` drops `reason` — the model is derived, not hardcoded", () => {
+    const handoff = agentWith({
+      handoff: { targets: [{ to: "billing" }], explain: false },
+    });
+    expect(promisedAgentFields(handoff).has("reason")).toBe(false);
+    expect(promisedAgentFields(handoff).has("target")).toBe(true);
+  });
+
+  it("a schema-less agent still promises exactly `text`", () => {
+    expect([...promisedAgentFields(agentWith({ systemPrompt: "hi" }))]).toEqual(
+      ["text"],
+    );
+  });
+
+  /**
+   * The consequence that decides the direction of the error. An author who put an EMPTY
+   * `outputSchema` on the classify node has touched that node — and the runtime already treats
+   * it as structured. Rewriting it would replace an output contract its author declared.
+   */
+  it("REFUSES to migrate a fork whose agent carries an empty outputSchema", () => {
+    const withEmpty: GraphDef = {
+      ...LEGACY_MODERATION,
+      nodes: LEGACY_MODERATION.nodes.map((n) =>
+        n.id === "classify"
+          ? { ...n, config: { ...(n.config ?? {}), outputSchema: {} } }
+          : n,
+      ),
+    };
+    expect(matchFailingOpenFork(withEmpty)).toBeNull();
+    expect(migrateFailingOpenFork(withEmpty)).toBeNull();
+    // …and it is not abandoned: the notify half still tells the author.
+    expect(lintAgentOutputContract(withEmpty).map((w) => w.nodeId)).toContain(
+      "classify",
+    );
+  });
+
+  it("FLAGS a read of `output.text` from a handoff agent — that field does not exist at run time", () => {
+    const g: GraphDef = {
+      startNodeId: "trigger",
+      nodes: [
+        { id: "trigger", type: "webhookTrigger" },
+        {
+          id: "supervisor",
+          type: "agent",
+          config: { handoff: { targets: [{ to: "billing" }] } },
+        },
+        {
+          id: "billing",
+          type: "mcpTool",
+          config: {
+            connectionId: "c",
+            tool: "t",
+            argumentBindings: {
+              body: { from: "supervisor", path: "output.text" },
+            },
+          },
+        },
+        { id: "end", type: "end" },
+      ],
+      edges: [
+        { from: "trigger", to: "supervisor" },
+        { from: "supervisor", to: "billing" },
+        { from: "billing", to: "end" },
+      ],
+    };
+    expect(lintAgentOutputContract(g).map((w) => w.ref)).toEqual([
+      "supervisor.output.text",
+    ]);
+  });
+
+  it("does NOT flag a read of `output.payload` from a handoff agent — its schema declares it", () => {
+    const g: GraphDef = {
+      startNodeId: "trigger",
+      nodes: [
+        { id: "trigger", type: "webhookTrigger" },
+        {
+          id: "supervisor",
+          type: "agent",
+          config: { handoff: { targets: [{ to: "billing" }] } },
+        },
+        {
+          id: "billing",
+          type: "mcpTool",
+          config: {
+            connectionId: "c",
+            tool: "t",
+            argumentBindings: {
+              body: { from: "supervisor", path: "output.payload" },
+            },
+          },
+        },
+        { id: "end", type: "end" },
+      ],
+      edges: [
+        { from: "trigger", to: "supervisor" },
+        { from: "supervisor", to: "billing" },
+        { from: "billing", to: "end" },
+      ],
+    };
+    expect(lintAgentOutputContract(g)).toEqual([]);
   });
 });
