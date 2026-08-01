@@ -58,8 +58,9 @@ export function sentryRelease(
  * unset-only form. So an unset repo secret, which CI does render as `""`, still reaches the
  * container as `"0"` (verified with `docker compose config`), and `deploy.yml` additionally
  * `unset`s the empty ones before compose runs. The empty case here is therefore defense in
- * depth for the paths that bypass compose — `docker run -e SENTRY_TRACES_SAMPLE_RATE=`, or an
- * exported-but-empty var when running the worker directly — not a live production failure.
+ * depth for any path with no `:-` in front of it — running the worker or API directly with the
+ * var exported-but-empty (`pnpm worker`) is the one this repo actually has — rather than a live
+ * production failure.
  *
  * The browser has no such substitution layer: Vite inlines the build arg VERBATIM, so an unset
  * secret arrives as a literal `""`. That is why the same parsing gap silently disabled replays

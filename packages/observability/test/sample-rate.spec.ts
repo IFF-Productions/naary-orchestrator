@@ -15,8 +15,8 @@
  * false, so `initSentry` disabled profiling while looking configured; and an out-of-range
  * value was passed to Sentry verbatim.
  *
- * The `""` / whitespace rows below are still worth pinning — a caller CAN produce them
- * (`docker run -e SENTRY_TRACES_SAMPLE_RATE=`, an exported-but-empty var, a direct call) —
+ * The `""` / whitespace rows below are still worth pinning — a caller CAN produce them (any
+ * path with no `:-` in front of it, e.g. `pnpm worker` with the var exported-but-empty) —
  * they just aren't how production gets an unset value.
  *
  * These rows pin both the unchanged defaults (no quota surprise on the backend) and the new
@@ -60,8 +60,8 @@ describe.each([
       raw: "",
       expected: 0,
       // NOT how compose delivers an unset var — `${VAR:-0}` already substitutes 0 for an
-      // EMPTY one. This is `docker run -e VAR=` / an exported-but-empty var, which nothing
-      // sanitises on the way in.
+      // EMPTY one. This is a path with no `:-` in front of it: `pnpm worker` with the var
+      // exported-but-empty, which nothing sanitises on the way in.
       why: "explicitly empty (no :- default in front of it) → off",
     },
     { raw: "   ", expected: 0, why: "whitespace-only → off" },
