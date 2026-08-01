@@ -7,6 +7,7 @@
 // warning would simply never appear. Nothing would look broken. Hence a pure function with tests.
 import { describe, expect, it } from "vitest";
 import {
+  blockedReason,
   ctxWasReadable,
   driftBetween,
   fixStage,
@@ -89,7 +90,7 @@ describe("fixStage", () => {
       fixStage({
         fixRunId: null,
         hasGraph: true,
-        canvasLoaded: true,
+        canvasLoad: "loaded",
         doneFor: null,
       }),
     ).toBe("idle");
@@ -100,7 +101,7 @@ describe("fixStage", () => {
       fixStage({
         fixRunId: RUN,
         hasGraph: false,
-        canvasLoaded: false,
+        canvasLoad: "loading",
         doneFor: null,
       }),
     ).toBe("loading-canvas");
@@ -116,7 +117,7 @@ describe("fixStage", () => {
       fixStage({
         fixRunId: RUN,
         hasGraph: true,
-        canvasLoaded: false,
+        canvasLoad: "loading",
         doneFor: null,
       }),
     ).toBe("loading-canvas");
@@ -127,10 +128,41 @@ describe("fixStage", () => {
       fixStage({
         fixRunId: RUN,
         hasGraph: true,
-        canvasLoaded: true,
+        canvasLoad: "loaded",
         doneFor: null,
       }),
     ).toBe("reading-run");
+  });
+
+  it("STOPS waiting when the workflow FAILED to open — with a graph still compiling", () => {
+    // #1006, and the reason a settled/not-settled boolean was not enough. A failed `/graphs` read
+    // never replaces the nodes, so SEED_NODES are still mounted and still COMPILE — `hasGraph` is
+    // true. Reported as "settled", that seed is what the failure gets described against, and the
+    // prompt says a step is "no longer in the workflow" under a banner naming the workflow the
+    // user came from. `hasGraph` is deliberately true in this case so the test fails if the
+    // failure is ever folded back into the `hasGraph ? … : …` line below.
+    expect(
+      fixStage({
+        fixRunId: RUN,
+        hasGraph: true,
+        canvasLoad: "failed",
+        doneFor: null,
+      }),
+    ).toBe("blocked");
+  });
+
+  it("does NOT reopen the wait for a workflow that failed to open", () => {
+    // The other half: `failed` is terminal, not a retry-forever spinner. Inverting `canvasLoaded`
+    // to mean "succeeded" would have produced exactly that — `loading-canvas` for good, on the one
+    // path that most needs to say what went wrong.
+    expect(
+      fixStage({
+        fixRunId: RUN,
+        hasGraph: false,
+        canvasLoad: "failed",
+        doneFor: null,
+      }),
+    ).toBe("blocked");
   });
 
   it("STOPS waiting when the canvas has loaded and still has no graph", () => {
@@ -141,7 +173,7 @@ describe("fixStage", () => {
       fixStage({
         fixRunId: RUN,
         hasGraph: false,
-        canvasLoaded: true,
+        canvasLoad: "loaded",
         doneFor: null,
       }),
     ).toBe("blocked");
@@ -152,7 +184,7 @@ describe("fixStage", () => {
       fixStage({
         fixRunId: RUN,
         hasGraph: true,
-        canvasLoaded: true,
+        canvasLoad: "loaded",
         doneFor: RUN,
       }),
     ).toBe("done");
@@ -165,7 +197,7 @@ describe("fixStage", () => {
       fixStage({
         fixRunId: RUN,
         hasGraph: false,
-        canvasLoaded: true,
+        canvasLoad: "loaded",
         doneFor: RUN,
       }),
     ).toBe("done");
@@ -178,9 +210,42 @@ describe("fixStage", () => {
       fixStage({
         fixRunId: "exec-t-demo-2",
         hasGraph: true,
-        canvasLoaded: true,
+        canvasLoad: "loaded",
         doneFor: RUN,
       }),
     ).toBe("reading-run");
+  });
+});
+
+// WHICH SENTENCE `blocked` SHOWS. Three situations reach it and each of the other two sentences is
+// FALSE about the third — which matters more than it sounds, because this branch has already
+// shipped a sentence that was plainly false about a visible canvas, twice. Precedence is the whole
+// content of the test: a failed open compiles (the SEED graph is still mounted), so if it is not
+// asked first it falls through to "there's no workflow on the canvas" — with three nodes rendered.
+describe("blockedReason", () => {
+  it("names the failed OPEN first — the canvas is neither empty nor broken, just not the workflow", () => {
+    const copy = blockedReason({ canvasLoadFailed: true, canvasError: null });
+    expect(copy).toMatch(/couldn't be opened/);
+    expect(copy).not.toMatch(/no workflow on the canvas/);
+    expect(copy).not.toMatch(/doesn't compile/);
+  });
+
+  it("prefers the failed open even when the canvas ALSO has a compile error", () => {
+    // A canvas that failed to open and was then edited into a non-compiling state. The open is the
+    // older and more fundamental fact: nothing here is the user's workflow, so naming the compile
+    // error would send them to fix the wrong thing.
+    expect(
+      blockedReason({ canvasLoadFailed: true, canvasError: "Multiple entry" }),
+    ).toMatch(/couldn't be opened/);
+  });
+
+  it("names the compile error when the workflow IS here and doesn't compile", () => {
+    const copy = blockedReason({ canvasError: "Multiple entry nodes" });
+    expect(copy).toMatch(/doesn't compile — Multiple entry nodes/);
+    expect(copy).not.toMatch(/no workflow on the canvas/);
+  });
+
+  it("says there's no workflow only when that is actually true", () => {
+    expect(blockedReason({})).toMatch(/no workflow on the canvas/);
   });
 });
