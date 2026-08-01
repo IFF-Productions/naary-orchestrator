@@ -439,12 +439,19 @@ describe("scheduled runs carry NO input (#991)", () => {
       resolve(__dirname, "../src/schedules/schedules.service.ts"),
       "utf8",
     );
-    // Import LINES only — the file's own prose explains the history and mentions the name, and a
-    // whole-file regex would dump 700 lines into the failure diff instead of naming the import.
-    const offending = src
-      .split("\n")
-      .filter((l) => l.startsWith("import ") && l.includes("startSampleInput"));
-    expect(offending).toEqual([]);
+    // Whole import STATEMENTS, not lines: the file's own prose explains this history and mentions
+    // the name (so a whole-file search would always match), and a `startsWith("import ")` line
+    // filter misses the form prettier produces once the clause grows —
+    //     import {
+    //       startSampleInput,
+    //     } from "../executions/executions.helpers";
+    // — which would make this guard silently vacuous the day a second symbol is imported.
+    const statements = src.match(/^import[\s\S]*?from\s+"[^"]+";/gm) ?? [];
+    // Guard the guard: an extraction that matched NOTHING would also report no offenders.
+    expect(statements.length).toBeGreaterThan(5);
+    expect(statements.filter((s) => s.includes("startSampleInput"))).toEqual(
+      [],
+    );
   });
 });
 
