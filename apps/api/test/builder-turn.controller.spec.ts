@@ -208,6 +208,83 @@ describe("POST /builder/sessions/:id/turns — edit-mode streaming", () => {
   });
 });
 
+/**
+ * The canvas panel owns its draft (#1003).
+ *
+ * The session's `currentGraph` is seeded from the SAVED workflow and rewritten by each turn's
+ * result — the whole truth for the Build with AI screen, where the draft only ever exists on the
+ * server. It is not the truth for the canvas: that panel is a strip under the top bar, the canvas
+ * stays editable beneath it, and a node dragged or reconfigured between turns makes the stored copy
+ * stale immediately. A turn built from the stale copy comes back with those hand-edits quietly
+ * removed, which is #874 wearing a different hat — a valid workflow, just not one derived from what
+ * the user was looking at.
+ */
+describe("POST /builder/sessions/:id/turns — whose graph gets edited", () => {
+  it("edits the CALLER's graph when one is sent, not the session's stored draft", async () => {
+    const { controller, sessions, generator } = makeController();
+    // What the server last saw — two steps.
+    const stored = {
+      startNodeId: "n0",
+      nodes: [{ id: "n0", type: "start" }],
+      edges: [],
+    };
+    // What is actually on the canvas: the user added a step by hand since that turn.
+    const onCanvas = {
+      startNodeId: "n0",
+      nodes: [
+        { id: "n0", type: "start" },
+        { id: "hand-added", type: "httpRequest" },
+      ],
+      edges: [{ from: "n0", to: "hand-added" }],
+    };
+    sessions.getForTurn.mockResolvedValue({
+      id: "s-1",
+      status: "open",
+      environmentId: "env-1",
+      title: "x",
+      currentGraph: stored,
+    });
+
+    await controller.turn(
+      "t-1",
+      "s-1",
+      { message: "Add a Slack notification", graph: onCanvas },
+      makeRes() as never,
+    );
+
+    const edit = generator.editStream.mock.calls[0][2];
+    // The hand-added step is in what the model is asked to change. Without this, the returned
+    // "change" silently deletes it.
+    expect(edit.previous).toEqual(onCanvas);
+    expect(edit.previous).not.toEqual(stored);
+  });
+
+  it("still edits the session's draft when the caller sends none (the Build with AI screen)", async () => {
+    const { controller, sessions, generator } = makeController();
+    const stored = {
+      startNodeId: "n0",
+      nodes: [{ id: "n0", type: "start" }],
+      edges: [],
+    };
+    sessions.getForTurn.mockResolvedValue({
+      id: "s-1",
+      status: "open",
+      environmentId: "env-1",
+      title: "x",
+      currentGraph: stored,
+    });
+
+    await controller.turn(
+      "t-1",
+      "s-1",
+      { message: "Add a Slack notification" },
+      makeRes() as never,
+    );
+
+    expect(generator.editStream.mock.calls[0][2].previous).toBe(stored);
+  });
+});
+
 describe("POST /builder/sessions/:id/turns — preconditions fire BEFORE any frame", () => {
   it("400 (no writeHead) for an empty message", async () => {
     const { controller, generator } = makeController();

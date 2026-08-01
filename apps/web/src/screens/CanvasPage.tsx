@@ -220,22 +220,30 @@ export function CanvasPage() {
   // and the least visibility into it; openable any time there is something to review.
   const [showReview, setShowReview] = useState(false);
 
-  // AI workflow builder: describe a flow → stream a draft onto the canvas, or describe a
-  // change → stream it applied to what's already there.
+  // AI workflow builder: a CONVERSATION (#1003) — each message streams its result onto the canvas,
+  // either changing what's there or replacing it with a new draft.
   const {
     showAi,
     setShowAi,
     aiPrompt,
     setAiPrompt,
-    genProvider,
-    setGenProvider,
     aiMode,
     setAiMode,
     canEdit,
     generating,
     genMessage,
     genNodeCount,
-    generateFromPrompt,
+    messages: aiMessages,
+    phase: aiPhase,
+    typing: aiTyping,
+    plan: aiPlan,
+    chatError: aiError,
+    send: sendAiMessage,
+    resetChat: resetAiChat,
+    provider: aiProvider,
+    chooseProvider: chooseAiProvider,
+    providerOptions: aiProviderOptions,
+    providerHint: aiProviderHint,
   } = useAiBuilder({
     nodes,
     graph,
@@ -243,6 +251,9 @@ export function CanvasPage() {
     rfRef,
     keyParam,
     templateParam,
+    // The SAVED key only — "" for an unsaved draft. Binds the session to this workflow so a build
+    // resumed later from the Build with AI screen publishes its next version instead of forking it.
+    savedKey: workflowKey,
     setNodes,
     setEdges,
     setName,
@@ -258,8 +269,10 @@ export function CanvasPage() {
     onEditApplied: () => setShowReview(true),
   });
 
-  // Turn `?fix=<runId>` into a prefilled change request in the AI panel. Prefills only — the user
-  // reads what the model will be told about their run and presses Generate themselves.
+  // Turn `?fix=<runId>` into a prefilled first MESSAGE in the AI panel's composer. Prefills only —
+  // the user reads what the model will be told about their run and presses Send themselves. That
+  // is why it is a draft rather than an auto-sent turn: in a conversation the obvious alternative
+  // (make it the first user message) would ship a tenant's run data to a model on a navigation.
   const fixFromRun = useFixFromRun({
     fixRunId,
     // The graph the fix will CHANGE — the live canvas, not the snapshot the run executed.
@@ -1268,13 +1281,24 @@ export function CanvasPage() {
         <AiPromptPanel
           aiPrompt={aiPrompt}
           onPromptChange={setAiPrompt}
-          genProvider={genProvider}
-          onProviderChange={setGenProvider}
           aiMode={aiMode}
           onModeChange={setAiMode}
           canEdit={canEdit}
-          generating={generating}
-          onGenerate={() => void generateFromPrompt()}
+          workflowName={name}
+          messages={aiMessages}
+          phase={aiPhase}
+          typing={aiTyping}
+          plan={aiPlan}
+          error={aiError}
+          onSend={(text) => void sendAiMessage(text)}
+          onReset={resetAiChat}
+          // The accept quick reply ("Looks good — save it") runs the canvas's OWN save, so the chip
+          // does exactly what the top bar's Save does — one save path, not a second one.
+          onAccept={() => void saveOnly()}
+          provider={aiProvider}
+          onProvider={chooseAiProvider}
+          providerOptions={aiProviderOptions}
+          providerHint={aiProviderHint}
           // Present only when the user arrived from a failed run (?fix=). Says which run this
           // describes, whose outputs are about to be sent, and — when the run executed an older
           // version — that the fix is being applied to a graph that has since moved on.

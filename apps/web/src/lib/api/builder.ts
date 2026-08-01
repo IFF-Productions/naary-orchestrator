@@ -106,6 +106,11 @@ export const builderApi = {
    * Pre-stream failures surface as real HTTP errors (400 empty message, 404 not
    * this workspace's session, 409 closed, 402 over monthly budget); mid-stream
    * failures arrive as an `error` frame. Both throw here with the server message.
+   *
+   * `graph` is for callers that OWN the draft — the canvas panel, whose canvas
+   * stays editable between turns, so the session's stored copy is stale the
+   * moment a node is dragged. Sent, it supersedes `currentGraph` for this turn;
+   * omitted (the Build with AI screen), the session's own draft is edited.
    */
   async sendBuilderTurn(
     sessionId: string,
@@ -116,6 +121,7 @@ export const builderApi = {
       onNode?: (node: unknown) => void;
       onEdge?: (edge: unknown) => void;
     },
+    graph?: GraphDef,
   ): Promise<{ name: string; graph: GraphDef }> {
     const token = await getBearerToken();
     const activeWorkspaceId = getActiveWorkspace();
@@ -132,7 +138,11 @@ export const builderApi = {
             ? { "x-environment-id": activeEnvironmentId }
             : {}),
         },
-        body: JSON.stringify(provider ? { message, provider } : { message }),
+        body: JSON.stringify({
+          message,
+          ...(provider ? { provider } : {}),
+          ...(graph ? { graph } : {}),
+        }),
       },
     );
     if (res.status === 401) throw new UnauthorizedError();

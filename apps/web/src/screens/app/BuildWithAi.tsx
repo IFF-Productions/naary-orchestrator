@@ -51,30 +51,11 @@ import {
   type AiBuilderProvider,
   providerOptions,
   providerSetupHint,
+  readStoredProvider,
   resolveStoredProvider,
+  writeStoredProvider,
 } from "./build-ai/providers";
 import { useWorkspace } from "../../workspace/WorkspaceProvider";
-
-/** Remembered provider choice. localStorage can THROW (sandboxed iframe, private mode), and a
- *  preference is never worth failing a screen over — both helpers swallow. */
-const PROVIDER_KEY = "naary-build-ai-provider";
-
-function readStoredProvider(): string | null {
-  try {
-    return localStorage.getItem(PROVIDER_KEY);
-  } catch {
-    return null;
-  }
-}
-
-function writeStoredProvider(value: AiBuilderProvider | null): void {
-  try {
-    if (value) localStorage.setItem(PROVIDER_KEY, value);
-    else localStorage.removeItem(PROVIDER_KEY);
-  } catch {
-    /* preference only */
-  }
-}
 
 function turnsToMessages(s: BuilderSession): ChatMsg[] {
   return s.turns.map((t) => ({

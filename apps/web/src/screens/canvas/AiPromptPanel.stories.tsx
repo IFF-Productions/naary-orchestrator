@@ -1,48 +1,98 @@
 /**
- * The canvas AI panel, which used to have exactly one behaviour: generate a workflow from
- * scratch and drop it over whatever was on the canvas. Asking it to *change* the workflow
- * you were looking at got you a different workflow — the panel had no way to say otherwise
- * and no way to tell you so.
+ * The canvas AI panel, which used to have exactly one behaviour: type a description, press
+ * Generate, get a workflow dropped over whatever was on the canvas. Refining meant retyping the
+ * whole request, and nothing on screen remembered what had already been asked for.
  *
- * `Edit` is the state to look at. What matters is that the mode is VISIBLE and switchable:
- * if the user can't see which of the two things is about to happen, the destructive one is
- * a surprise. `NewCanvas` is the empty-canvas case — nothing to change, so no chooser.
+ * It is now the SAME conversation as the Build with AI screen (#1003) — the identical
+ * `ConversationPanel`, in its `panel` variant, with the canvas-specific parts passed in: the
+ * `?fix=` disclosure banner, the edit-vs-create chooser, and a status header. So the states worth
+ * looking at come in two groups.
+ *
+ * THE CONVERSATION: `Empty` → `Building` → `Conversation`. What matters is that a follow-up is a
+ * MESSAGE, not a re-description, and that the assistant's summary, its cost and its quick replies
+ * all come from the server rather than being invented in the browser.
+ *
+ * THE `?fix=` ARRIVAL: `FromFailedRun` and the four states around it. The description is a PREFILLED
+ * DRAFT in the composer — never an auto-sent message — because sending a tenant's run data to a
+ * model is not something to do on a navigation. `FixReadingRun` is the one to check for regressions:
+ * the box is read-only, not disabled, while the description is being written into it.
  */
-import { buildFixInstruction, type GraphDef } from "@naary/dsl";
+import { buildFixInstruction, type GraphDef, type NodeDef } from "@naary/dsl";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { useState } from "react";
+import { SAVE_OPTION } from "../../lib/api/builder";
+import type { BuildPhase, ChatMsg } from "../app/build-ai/ConversationPanel";
+import { planFromStream } from "../app/build-ai/model";
+import type { ProviderOption } from "../app/build-ai/providers";
 import { AiPromptPanel, type FixNotice } from "./AiPromptPanel";
 import type { AiMode } from "./useAiBuilder";
 
-/** Stateful wrapper — the mode + prompt are controlled, so a story needs an owner for them. */
+/** What a workspace with two configured provider keys offers (see ./build-ai/providers). */
+const PROVIDER_OPTIONS: ProviderOption[] = [
+  {
+    id: "anthropic",
+    label: "Claude",
+    hint: "Anthropic API · claude-opus-4-8",
+    selectable: true,
+  },
+  {
+    id: "claude-code",
+    label: "Claude Code",
+    hint: "Runs the local claude CLI as an agent",
+    selectable: true,
+  },
+];
+
+/** Stateful wrapper — the mode, the composer draft and the provider are all controlled, so a
+ *  story needs an owner for them. */
 function Harness({
   initialMode,
   canEdit,
-  generating = false,
+  phase = "idle",
+  typing = false,
+  messages = [],
+  plan = null,
+  error = null,
   fixNotice = null,
-  initialPrompt = "Handle the case where there are no open incidents — just end with no issues.",
+  initialPrompt = "",
 }: {
   initialMode: AiMode;
   canEdit: boolean;
-  generating?: boolean;
+  phase?: BuildPhase;
+  typing?: boolean;
+  messages?: ChatMsg[];
+  plan?: ReturnType<typeof planFromStream> | null;
+  error?: string | null;
   fixNotice?: FixNotice | null;
   initialPrompt?: string;
 }) {
   const [mode, setMode] = useState<AiMode>(initialMode);
   const [prompt, setPrompt] = useState(initialPrompt);
-  const [provider, setProvider] = useState("");
+  const [provider, setProvider] = useState<ProviderOption["id"] | null>(null);
   return (
-    <div style={{ width: 720 }}>
+    // 940px: the panel is full-bleed under the canvas top bar, so it is never seen at its own
+    // intrinsic width. A phone-width story would be a different component's problem (the panel
+    // is hidden below the rail breakpoint on the canvas' own top bar).
+    <div style={{ width: 940 }}>
       <AiPromptPanel
         aiPrompt={prompt}
         onPromptChange={setPrompt}
-        genProvider={provider}
-        onProviderChange={setProvider}
         aiMode={mode}
         onModeChange={setMode}
         canEdit={canEdit}
-        generating={generating}
-        onGenerate={() => {}}
+        workflowName="On-call escalation"
+        messages={messages}
+        phase={phase}
+        typing={typing}
+        plan={plan}
+        error={error}
+        onSend={() => {}}
+        onReset={() => {}}
+        onAccept={() => {}}
+        provider={provider}
+        onProvider={setProvider}
+        providerOptions={PROVIDER_OPTIONS}
+        providerHint={null}
         fixNotice={fixNotice}
       />
     </div>
@@ -119,6 +169,52 @@ const FIX = buildFixInstruction({
 });
 const FIX_INSTRUCTION = FIX.instruction;
 
+/**
+ * The "Building" card, built by the REAL `planFromStream` from the same node shapes the turn SSE
+ * emits — so what a story shows is what a stream produces, not a hand-drawn approximation of it.
+ */
+const STREAMED: NodeDef[] = FIX_GRAPH.nodes.slice(0, 3);
+const PLAN = planFromStream("On-call escalation", STREAMED, 2, false);
+const PLAN_DONE = planFromStream(
+  "On-call escalation",
+  FIX_GRAPH.nodes,
+  3,
+  true,
+);
+
+/** A thread as the server returns it: the user's own words, the assistant's change-summary, its
+ *  metered BYOK cost and its quick replies. Nothing here is composed client-side. */
+const THREAD: ChatMsg[] = [
+  {
+    id: "t1",
+    role: "user",
+    text: "Page the on-call engineer when a disk alert comes in",
+  },
+  {
+    id: "t2",
+    role: "assistant",
+    text: "Built “On-call escalation” — 4 steps, starting from a schedule trigger.",
+    costUsd: 0.0231,
+    options: [],
+  },
+  {
+    id: "t3",
+    role: "user",
+    text: "Ask me to approve it before it pages anyone",
+  },
+  {
+    id: "t4",
+    role: "assistant",
+    text: "Added an approval before the PagerDuty step — 5 steps now.",
+    costUsd: 0.0164,
+    options: [
+      "Notify the requester when it's approved",
+      "Retry PagerDuty twice before giving up",
+      SAVE_OPTION,
+    ],
+  },
+];
+
 const meta: Meta<typeof Harness> = {
   title: "Canvas/AiPromptPanel",
   component: Harness,
@@ -126,10 +222,17 @@ const meta: Meta<typeof Harness> = {
 export default meta;
 type Story = StoryObj<typeof Harness>;
 
-/** A canvas holding a workflow: default to changing it, and say so on the button. */
-export const Edit: Story = { args: { initialMode: "edit", canEdit: true } };
+/* ---------------- the conversation ---------------- */
 
-/** The same canvas with "Start a new one" chosen — the destructive path, explicitly picked. */
+/**
+ * A canvas holding a workflow, before the first message. The intro says which workflow every
+ * message will change — the mistake this panel used to make was letting "change it" and "replace
+ * it" look identical — and offers openers that are CHANGES rather than whole workflows.
+ */
+export const Empty: Story = { args: { initialMode: "edit", canEdit: true } };
+
+/** The same canvas with "Start a new one" chosen: the destructive path, explicitly picked. The
+ *  chooser is what stands between a follow-up message and a silently replaced workflow. */
 export const Replace: Story = {
   args: { initialMode: "create", canEdit: true },
 };
@@ -139,17 +242,71 @@ export const NewCanvas: Story = {
   args: { initialMode: "create", canEdit: false },
 };
 
-/** Mid-run wording — "Applying…", not "Generating…", because it isn't generating. */
-export const Applying: Story = {
-  args: { initialMode: "edit", canEdit: true, generating: true },
+/**
+ * Mid-turn. The typing dots covered the gap before the first frame; now the plan card mirrors the
+ * real `node`/`edge` frames as the workflow draws itself on the canvas below.
+ */
+export const Building: Story = {
+  args: {
+    initialMode: "edit",
+    canEdit: true,
+    phase: "streaming",
+    messages: THREAD.slice(0, 3),
+    plan: PLAN,
+  },
+};
+
+/** The turn is accepted and nothing has arrived yet — dots, not a frozen panel. */
+export const Typing: Story = {
+  args: {
+    initialMode: "edit",
+    canEdit: true,
+    phase: "streaming",
+    typing: true,
+    messages: THREAD.slice(0, 3),
+  },
 };
 
 /**
- * Arrived from a FAILED run (`?fix=<runId>`): the failure is already written up, and the header
- * NAMES the steps whose output goes with it. A count ("output from 3 steps") is not something a
- * user can check; a list is, and the prompt itself is right there to read in full.
+ * The state the whole change exists for: a real multi-turn thread. The second ask is a SENTENCE,
+ * not a re-description of the workflow, and the newest assistant turn carries the quick replies —
+ * including "Looks good — save it", which runs the canvas's own Save.
+ */
+export const Conversation: Story = {
+  args: {
+    initialMode: "edit",
+    canEdit: true,
+    phase: "ready",
+    messages: THREAD,
+    plan: PLAN_DONE,
+  },
+};
+
+/**
+ * A turn that failed. The thread survives it — the error sits in the conversation and the previous
+ * draft is still on the canvas, because a transient 429 must not cost the user their work.
+ */
+export const TurnFailed: Story = {
+  args: {
+    initialMode: "edit",
+    canEdit: true,
+    phase: "ready",
+    messages: THREAD,
+    error: "Your anthropic API key was rejected. Update it in Integrations.",
+  },
+};
+
+/* ---------------- arriving from a failed run (`?fix=`) ---------------- */
+
+/**
+ * Arrived from a FAILED run (`?fix=<runId>`): the failure is already written up in the composer,
+ * and the banner NAMES the steps whose output goes with it. A count ("output from 3 steps") is not
+ * something a user can check; a list is, and the message itself is right there to read in full.
  *
- * The prompt is worth reading here rather than skimming — it is the whole disclosure. Note the
+ * It is a DRAFT, not a sent message. The user reads it, edits anything, and presses Send — the one
+ * decision this screen must not make on their behalf.
+ *
+ * The text is worth reading rather than skimming, since it is the whole disclosure. Note the
  * AS-IT-RAN block: the authored title is `{{ lookup.body.titel }}` (a typo) and what actually went
  * out is marked `<unresolved>`. That is the bug this feature exists to make visible, and it is
  * invisible in the template alone. Note also that the secret and `$vars` stay tokens in both.
@@ -191,7 +348,8 @@ export const VersionDrift: Story = {
  *
  * This is the state that was MISSING: the canvas appeared, the panel didn't, and nothing said the
  * description was on its way, so the honest reading was that the button had done nothing. The box
- * is already full height here, so the description lands without the panel jumping.
+ * is already full height here, so the description lands without the panel jumping — now via
+ * `composerMinHeight` rather than a `rows` count, since the composer is the shared one (#1003).
  *
  * It was also, for a while, a story for a state the app could not reach: `fixStage` asked
  * `hasGraph` first, and the canvas's SEED nodes compile, so it went straight to `reading-run`
@@ -214,7 +372,13 @@ export const FixOpeningWorkflow: Story = {
   },
 };
 
-/** The canvas is up; the run's error, failing step and inputs are being read (three fetches). */
+/**
+ * The canvas is up; the run's error, failing step and inputs are being read (three fetches).
+ *
+ * The composer is READ-ONLY here, not disabled — anything typed would be replaced the instant the
+ * description landed, but `disabled` would take the box out of the tab order and out of reach of a
+ * screen reader. `apps/web/e2e/fix-with-ai.spec.ts` asserts both halves of that.
+ */
 export const FixReadingRun: Story = {
   args: {
     initialMode: "edit",
