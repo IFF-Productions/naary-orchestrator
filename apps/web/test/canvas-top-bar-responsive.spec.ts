@@ -247,6 +247,56 @@ describe("canvas top bar — compact/tablet tier (#989)", () => {
     );
   });
 
+  it("every label shortened at compact still says what it means non-visually", () => {
+    // The tier's whole trade is "shorten the label, keep the control". That trade is only honest
+    // if the MEANING survives the truncation for someone who isn't reading the pixels — otherwise
+    // it is the same disappearance #964 was about, just for a different set of users. `title` is
+    // not the answer anywhere here: it needs a hover, and compact IS the touch tier.
+    //
+    // Element by element, all four things this tier shortens:
+    //
+    //  1. validity pill — `graphError` -> "invalid". A plain <span> (role `generic`), which ARIA
+    //     PROHIBITS naming, so an `aria-label` on it is unreliable and axe-flagged. Off-screen
+    //     text instead: in the accessibility tree at zero layout cost.
+    expect(code).toMatch(
+      /\{compact && !generating && !graphValid && graphError/,
+    );
+    expect(code).toMatch(/<span style=\{srOnly\}>\{graphError\}<\/span>/);
+    expect(code).toMatch(/const srOnly: React\.CSSProperties/);
+    //  2. issues pill — "⚠ 3 issues ▼" -> "⚠ 3", and a VERDICT shrinks to a bare "✓" / "✗" that
+    //  3. review pill — "± changes ▼" -> "±", which names nothing at all.
+    //     Both are real <button>s, where `aria-label` IS authoritative — and a button that HAS
+    //     content never falls back to `title` for its name, so the name must be stated. Given at
+    //     every width, so there is one name to keep true rather than two.
+    //     The "<n> issue(s)" SHAPE is load-bearing beyond this file: giving a button an
+    //     `aria-label` replaces its accessible name outright, and `e2e/session-fixes.spec.ts`
+    //     finds this pill with `getByRole("button", { name: /\d+ issue/i })`. That ran against
+    //     the old content name ("⚠ 3 issues ▼") and matches the new one too — but only because
+    //     the digits and the word "issue" survived, so they are asserted rather than assumed.
+    expect(code).toMatch(
+      /aria-label=\{\s*issuesCount > 0\s*\?\s*`\$\{issuesCount\} issue\$\{issuesCount > 1 \? "s" : ""\} found`/,
+    );
+    expect(
+      /\d+ issue/i.test("3 issues found"),
+      "e2e selector still matches",
+    ).toBe(true);
+    expect(code).toContain('aria-label="Review changes"');
+    //     …and both are disclosure controls, so they say so.
+    expect(code).toContain("aria-expanded={showIssues}");
+    expect(code).toContain("aria-expanded={showReview}");
+    //  4. "Check flow" -> "Check" needs NOTHING, and that is a verdict, not an oversight: the
+    //     accessible name of a <button> is its text, and "Check" is a real word that still names
+    //     the action — a shorter synonym, not a symbol. Contrast the pills, where what was left
+    //     behind was punctuation. Asserted so that shortening it FURTHER (to an icon, say) has to
+    //     come back through here.
+    const check = code.slice(code.indexOf('{checking ? "Checking…" : compact'));
+    expect(check.slice(0, 80)).toContain('compact ? "Check" : "Check flow"');
+    // The one control this tier turns into a pure icon carries its name explicitly.
+    expect(clusterCode).toMatch(
+      /aria-label=\{showAi \? "Close AI" : "Build with AI"\}/,
+    );
+  });
+
   it("touch spacing is not what pays for the row", () => {
     // The header's 12px gap tightens to 8; the CLUSTER's does not. Those are 34px icon buttons,
     // and 10px is the clearance that keeps a 44px touch target growable without overlapping its

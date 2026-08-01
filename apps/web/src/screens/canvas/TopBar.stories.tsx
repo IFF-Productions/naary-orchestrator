@@ -171,8 +171,10 @@ const tablet = { viewport: { defaultViewport: "tablet" } };
  * 60px is the name input's `minWidth` floor on the non-phone branch — the workflow you are
  * editing was ~7 characters wide — and the primary CTA sat 89 to 381px past the right edge of a
  * root that is `overflow-x: hidden`, so it could not be scrolled to either (#511's trap). Over
- * the whole `Canvas/TopBar` set the responsive audit goes 28 clipped elements / 19 unreachable
- * controls -> 0 / 0 at this width. Storybook builds with no `VITE_SENTRY_DSN`, so the 34px
+ * the whole `Canvas/TopBar` set — all 11 stories, count it, because this pair of numbers is a
+ * SUM and silently goes stale the moment a story is added — the responsive audit goes 32 clipped
+ * elements / 23 unreachable controls -> 0 / 0 at this width. Storybook builds without a
+ * `VITE_SENTRY_DSN`, so the 34px
  * "Send feedback" button is absent from these numbers; re-measured with it present, the same
  * stories fit at 768 and 834 (the workflow name takes the difference: 142 -> 98).
  *
@@ -223,8 +225,13 @@ export const TabletAiOpen: Story = {
  * does not exist: `save()` puts "Graph is not runnable." into `status`, which is the FIRST thing
  * this row squeezes to zero — and Save is disabled while the graph is invalid, so it cannot even
  * be pressed to get there. So the pill has to stay, and its worst case has to be measured rather
- * than assumed: 202px of pill put "Save & run" at 1215 in an 834px viewport. At compact the pill
- * now states the state and the message rides in its `title`.
+ * than assumed: 202px of pill put "Save & run" at 1215 in an 834px viewport.
+ *
+ * At compact the pill states the STATE and the message rides in off-screen (`srOnly`) text, so it
+ * is in the accessibility tree at zero layout cost. Deliberately NOT "the message rides in its
+ * `title`", which is what this story used to say: a title needs a hover, and the compact tier is
+ * the TOUCH tier, so a tooltip-only fallback would have withheld the reason the graph is invalid
+ * from precisely the users the tier exists for. `title` stays for the pointer case only.
  *
  * HONEST DATA: this story is still 48px over at 1440. That is the SAME unbounded label on the
  * DESKTOP bar, which #989's compact tier does not touch — measured identical before and after —
