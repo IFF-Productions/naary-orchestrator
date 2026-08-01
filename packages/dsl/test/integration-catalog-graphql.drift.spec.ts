@@ -266,9 +266,18 @@ interface Check {
   parseError?: string;
 }
 
-/** The one key an acknowledgment is matched on, everywhere. */
+/**
+ * The one key an acknowledgment is matched on, everywhere.
+ *
+ * The separator is a NUL because no action key or subject can contain one, so two different
+ * `(action, subject)` pairs can never collide into one key. It is written as the ESCAPE `\0` and
+ * must stay that way: a raw NUL in source makes the whole file read as BINARY to grep, which drops
+ * it out of every text search — #810 found six files that had disappeared from searches exactly that
+ * way, which is why `pnpm check:control-bytes` is a blocking gate. `\0` is byte-identical at
+ * runtime and greppable in source.
+ */
 const adjudicationKey = (action: string, subject: string) =>
-  `${action} ${subject}`;
+  `${action}\0${subject}`;
 const ACKNOWLEDGED_KEYS = new Set(
   ACKNOWLEDGED.map((a) => adjudicationKey(a.action, a.subject)),
 );
