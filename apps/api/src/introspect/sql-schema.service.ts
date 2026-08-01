@@ -20,15 +20,27 @@
  * connection errors put the host, port and sometimes the user in `e.message`. Driver messages are
  * therefore mapped to a fixed set of our own strings, exactly as the worker activity does.
  *
- * SCOPING. A connection is looked up by its own id, TENANT-scoped, and its secret is read from the
- * connection row's own `environmentId` — the caller's active environment is not a filter. That is
- * the same rule the sibling `POST /tenants/:id/connections/:connectionId/test` route states
- * explicitly, and it is the right one: the schema you get back is the schema of the database that
- * connection actually points at, never a mix of one env's id and another's credential. The
- * consequence, stated rather than implied: a member of the tenant can read the table names of a
- * connection in an environment other than their active one. Table names are not credentials, and
- * both existing routes already behave this way — but if connections ever become env-scoped for
- * reads, this route must move with them.
+ * SCOPING. Tenant AND the caller's ACTIVE ENVIRONMENT. The connection must live in the environment
+ * the caller is currently in; anything else is Not Found.
+ *
+ * This route originally scoped by tenant only, matching the sibling
+ * `POST /tenants/:id/connections/:connectionId/test`, and said so explicitly: "a member of the
+ * tenant can read the table names of a connection in an environment other than their active one …
+ * but if connections ever become env-scoped for reads, this route must move with them." That was
+ * an honest disclosure of a real consequence, and on review the consequence was not wanted: a
+ * sandbox editor should not be able to enumerate the shape of the production database. Table names
+ * are not credentials, but they are the map of one — and `/connections` LIST is already env-scoped,
+ * so tenant-only scoping here made this route a way around that list.
+ *
+ * Two invariants hold the tightening up, and both are load-bearing:
+ *   1. The gate runs BEFORE the cache read, and the environment is part of the cache KEY. Scoping
+ *      the lookup alone would leave the cache serving one environment's schema to another.
+ *   2. A connection in another environment throws the SAME NotFoundException as an id that does not
+ *      exist, so the route never becomes an oracle for which ids exist elsewhere.
+ *
+ * What did NOT change: the SECRET is still read from the connection row's own `environmentId`
+ * (§Slice 5), so the schema returned is always the schema of the database that connection actually
+ * points at — never a mix of one env's id and another's credential.
  */
 import {
   BadRequestException,
@@ -43,6 +55,7 @@ import {
   resolveDbConnection,
   resolvePinnedHost,
 } from "@naary/connections";
+import { getPrisma } from "@naary/db";
 import {
   type SqlSchemaSummary,
   buildSchemaQuery,
@@ -93,6 +106,22 @@ export const __sqlIntrospectDeps = {
   resolvePinnedHost,
   getAdapter,
   now: () => Date.now(),
+  /**
+   * Does this connection live in this environment? Deliberately its OWN query rather than a
+   * parameter threaded into `resolveDbConnection`: that function is shared with the WORKER, where
+   * "the caller's active environment" has no meaning — an activity runs in the RUN's environment.
+   * Widening its signature to serve an authoring route would have put an API-only concept into the
+   * execution path, and the natural next step (defaulting it) is how a gate silently stops gating.
+   */
+  connectionInEnv: async (
+    tenantId: string,
+    environmentId: string,
+    connectionId: string,
+  ): Promise<boolean> =>
+    (await getPrisma().connection.findFirst({
+      where: { id: connectionId, tenantId, environmentId },
+      select: { id: true },
+    })) !== null,
 };
 
 @Injectable()
@@ -106,13 +135,24 @@ export class SqlSchemaService {
    */
   async introspect(
     tenantId: string,
+    environmentId: string,
     connectionId: string,
     opts: { refresh?: boolean } = {},
   ): Promise<SqlSchemaSummary> {
     if (typeof connectionId !== "string" || connectionId.trim() === "") {
       throw new BadRequestException("A connectionId is required.");
     }
-    const key = `${tenantId}:${connectionId}`;
+    // ENV GATE, ahead of the cache read and ahead of any credential resolution. A connection
+    // outside the caller's active environment is simply Not Found here — the same answer every
+    // other env-scoped read gives, and the same answer an id that does not exist gives, so this
+    // does not become an oracle for "which ids exist in your other environments".
+    await this.assertConnectionInEnv(tenantId, environmentId, connectionId);
+    // The environment is part of the cache KEY, not just the gate. Scoping the lookup while
+    // leaving the key `tenantId:connectionId` would have left the whole tightening decorative:
+    // env A warms the entry, env B asks for the same connection id and gets served A's cached
+    // schema without ever reaching the gate above. A cache keyed more loosely than the
+    // authorization in front of it IS the authorization.
+    const key = `${tenantId}:${environmentId}:${connectionId}`;
     if (!opts.refresh) {
       const hit = this.cache.get(key);
       if (hit && __sqlIntrospectDeps.now() - hit.at < CACHE_TTL_MS) {
@@ -178,6 +218,29 @@ export class SqlSchemaService {
    * failure carries the host and port (and `ECONNREFUSED …` style detail) that would then land in
    * a browser console, a Sentry breadcrumb or a support screenshot. Tier-1 §4.
    */
+  /**
+   * The environment gate. Throws the SAME NotFoundException an unknown id throws, deliberately:
+   * distinguishing "exists but is in another environment" from "does not exist" would let a member
+   * enumerate connection ids across the environments they cannot otherwise read, which is a strictly
+   * worse leak than the table names this route exists to return.
+   */
+  private async assertConnectionInEnv(
+    tenantId: string,
+    environmentId: string,
+    connectionId: string,
+  ): Promise<void> {
+    const ok = await __sqlIntrospectDeps.connectionInEnv(
+      tenantId,
+      environmentId,
+      connectionId,
+    );
+    if (!ok) {
+      throw new NotFoundException(
+        "No such connection in this environment. Switch environment, or pick a connection saved here.",
+      );
+    }
+  }
+
   private toSafeError(e: unknown): Error {
     if (e instanceof BlockedEgressError) {
       return new BadRequestException(
