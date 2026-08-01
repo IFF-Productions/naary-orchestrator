@@ -228,8 +228,8 @@ export const TabletAiOpen: Story = {
  *
  * HONEST DATA: this story is still 48px over at 1440. That is the SAME unbounded label on the
  * DESKTOP bar, which #989's compact tier does not touch — measured identical before and after —
- * and it is left visible on purpose rather than tuned out of the story. See the follow-up issue
- * linked from PR "fix(canvas): a compact top-bar tier for tablet widths (#989)".
+ * and it is left visible on purpose rather than tuned out of the story. Tracked as #997, with
+ * the 1025–~1200 desktop band it shares a cause with.
  */
 export const TabletInvalid: Story = {
   ...Tablet,
