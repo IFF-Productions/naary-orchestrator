@@ -275,9 +275,10 @@ slots in behind the same interface."* So on the writing instance revocation is i
 channel. That is acceptable for a sync (which is minutes-granular anyway) and is worth stating
 rather than implying "immediate".
 
-**Three real gaps a directory sync would inherit, found while writing this.** These are
-pre-existing bugs in the manual removal path, not new ones — but a sync turns them from
-occasional to routine, so they are prerequisites:
+**Three real gaps a directory sync would inherit, found while writing this — filed as #1041.**
+These are pre-existing bugs in the manual removal path, not new ones, and they stand on their
+own whether or not any of this ships; but a sync turns them from occasional to routine, so they
+are prerequisites for it:
 
 1. **`MembersService.removeMember` does not delete `GroupMember` rows.**
    `members.service.ts:234-235` is `membership.deleteMany` + `memberships.invalidate` and
@@ -373,9 +374,14 @@ The SAML doc's "no live IdP round trip was performed" is a real limitation
 (`SAML-SSO.md:282-286`). A directory does not have to inherit it, because unlike an IdP a
 directory is a **container**.
 
-- **Integration (the primary gate).** `bitnami/openldap` (or `osixia/openldap`) via
-  testcontainers, seeded from a checked-in LDIF: two orgs, overlapping emails across them, a
-  user in two groups, a user removed between runs. This slots into the existing harness with no
+- **Integration (the primary gate).** A containerised directory via testcontainers, seeded from
+  a checked-in LDIF: two orgs, overlapping emails across them, a user in two groups, a user
+  removed between runs. **Pick the image deliberately** — `docker manifest inspect` at the time
+  of writing: `bitnami/openldap` **no longer exists** (Bitnami moved its free catalog to
+  `bitnamilegacy/` in 2025; `bitnamilegacy/openldap:latest` resolves, but pinning CI to a
+  legacy-archive tag is a slow-motion break), `osixia/openldap:1.5.0` resolves but is
+  years-unmaintained, and `389ds/dirsrv:latest` resolves and is the actively maintained option.
+  Re-check before committing to one. This slots into the existing harness with no
   new machinery — `vitest.integration.config.ts` (`apps/**/test/**/*.integration.spec.ts`,
   180 s timeouts, `fileParallelism: false` because containers bind host ports), run by
   `pnpm test:integration` and excluded from `pnpm test`. `@testcontainers/postgresql` is already
@@ -414,8 +420,10 @@ something ships**, not before — writing it now would repeat the mistake this d
    asked for the first.
 3. **Confirm sync-only** — the directory is an authorization/lifecycle source, never an
    authentication one, and Naary continues to never handle a user password (§4).
-4. **De-provisioning at next sync is acceptable?** i.e. no immediate-revocation path in v1, with
-   the 30 s/60 s cache TTLs (§7) as the extra tail on multi-instance deployments.
+4. **Revocation bounded by the 30 s / 60 s in-memory cache TTLs (§7) rather than instant is
+   acceptable?** This holds under *either* branch — push de-provisioning is near-real-time but
+   still lands behind those caches on a multi-instance deployment, and a pull sync adds the sync
+   interval on top. Answering it does not commit to either design.
 5. **A sync that de-provisions a user holding a pending approval should warn and leave the run
    parked** — rather than auto-rejecting it or reassigning it. Confirm, because the alternative
    (auto-reject) silently fails compliance gates on an HR change.
@@ -435,8 +443,8 @@ market position in `sso-testing.md:177-179`, not a preference.
   moot until decision 1 lands.
 - **Immediate revocation** (a login-time directory check), and cross-instance cache
   invalidation (the Redis `PermissionsCache` that `permissions-cache.ts:16` anticipates).
-- **Fixing the three §7 gaps.** They are pre-existing defects in the manual removal path and
-  deserve their own issue whether or not any of this ships.
+- **Fixing the three §7 gaps (#1041).** Pre-existing defects in the manual removal path, filed
+  separately because they matter whether or not any of this ships.
 - **Company-scoping `CompanyService.addMember`'s instance-wide email lookup** (§5) — already a
   known residual from SAML; a prerequisite if a sync ships, but it belongs to the Companies
   work.
