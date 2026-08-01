@@ -227,7 +227,13 @@ export function formatReport(report: MigrationReport): string[] {
   }
 
   const failed = report.outcomes.filter((o) => o.error).length;
-  const changed = report.outcomes.filter((o) => !o.error).length;
+  // An UNCHANGED outcome (apply mode, content hash already matched — a re-run) is not a
+  // migration, and counting it as one would let the summary contradict the detail lines right
+  // above it. In a report whose whole job is "the blast radius is a fact afterwards", the
+  // summary saying 1 while the line says UNCHANGED is the wrong way to be wrong.
+  const changed = report.outcomes.filter(
+    (o) => !o.error && (report.dryRun || o.written),
+  ).length;
   lines.push(
     `\n${report.plan.scanned} workflow(s) scanned · ` +
       `${changed} ${report.dryRun ? "would be migrated" : "migrated"} · ` +

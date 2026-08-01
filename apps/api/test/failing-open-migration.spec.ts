@@ -197,7 +197,10 @@ describe("applyMigration — dry run is the default", () => {
     const plan = planMigration([row({ graph: LEGACY_MODERATION })]);
     const report = await applyMigration(service, plan, { dryRun: false });
     expect(report.outcomes[0].written).toBe(false);
-    expect(formatReport(report).join("\n")).toContain("UNCHANGED");
+    const text = formatReport(report).join("\n");
+    expect(text).toContain("UNCHANGED");
+    // And the SUMMARY must agree with the line above it — an unchanged graph is not a migration.
+    expect(text).toContain("0 migrated");
   });
 
   it("one failing workflow does not abort the sweep", async () => {

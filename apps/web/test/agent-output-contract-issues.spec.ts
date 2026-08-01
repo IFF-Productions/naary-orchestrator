@@ -1,8 +1,13 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { lintAgentOutputContract } from "@naary/dsl";
+import {
+  lintAgentOutputContract,
+  matchFailingOpenFork,
+  type GraphDef,
+} from "@naary/dsl";
 import { compileGraph } from "../src/lib/compile-graph";
+import { decompileGraph } from "../src/lib/decompile-graph";
 import type { CanvasEdge, CanvasNode } from "../src/lib/graph-model";
 import type { CanvasIssue } from "../src/screens/canvas/CanvasIssuesPanel";
 
@@ -107,6 +112,92 @@ describe("the issues panel surfaces a missing agent output contract", () => {
       { id: "e2", source: "draft", target: "end" },
     ];
     expect(asIssues(plain, plainEdges)).toEqual([]);
+  });
+});
+
+/**
+ * THE POPULATION THE MIGRATION HAS TO REACH.
+ *
+ * A fork installed from the Templates screen is saved byte-for-byte. A fork the author has
+ * OPENED AND RE-SAVED went through `decompileGraph` → canvas → `compileGraph`, and that round
+ * trip rebuilds every edge condition from an editor draft: `{ value: true }` becomes the string
+ * `"true"` on the way out and is re-coerced on the way back.
+ *
+ * `matchFailingOpenFork` compares conditions structurally, so if that round trip changed a
+ * `true` into a `"true"` the predicate would quietly stop matching — and the migration would
+ * miss most of the graphs it exists for while every test above still passed. Nothing would look
+ * broken, which is the signature of this whole class of bug.
+ */
+describe("a fork survives the canvas round trip and is still recognised", () => {
+  /** `moderationGraph` as it shipped BEFORE #1015 — the shape a fork carries. */
+  const LEGACY: GraphDef = {
+    startNodeId: "trigger",
+    nodes: [
+      { id: "trigger", type: "webhookTrigger" },
+      {
+        id: "classify",
+        type: "agent",
+        config: {
+          provider: "anthropic",
+          model: "claude-opus-4-8",
+          systemPrompt:
+            'Classify the submitted content for policy violations. Respond with a JSON object: { "flagged": boolean, "reason": string }. Flag anything unsafe, spammy, or abusive.',
+        },
+      },
+      {
+        id: "review",
+        type: "humanApproval",
+        config: {
+          title: "Review flagged content",
+          instructions:
+            "The classifier flagged this submission. Approve to publish it anyway, or reject to keep it blocked.",
+          timeoutHours: 48,
+        },
+      },
+      {
+        id: "accepted",
+        type: "respondToWebhook",
+        config: { statusCode: 200, body: { status: "accepted" } },
+      },
+      { id: "end", type: "end" },
+    ],
+    edges: [
+      { from: "trigger", to: "classify" },
+      {
+        from: "classify",
+        to: "review",
+        condition: { path: "classify.output.flagged", op: "eq", value: true },
+      },
+      {
+        from: "classify",
+        to: "accepted",
+        condition: { path: "classify.output.flagged", op: "neq", value: true },
+      },
+      { from: "review", to: "accepted" },
+      { from: "accepted", to: "end" },
+    ],
+  };
+
+  const roundTripped = (): GraphDef => {
+    const draft = decompileGraph(LEGACY);
+    const { graph, error } = compileGraph(draft.nodes, draft.edges);
+    if (!graph) throw new Error(error ?? "canvas did not compile");
+    return graph;
+  };
+
+  it('the boolean edge values survive as booleans, not as the string "true"', () => {
+    const cond = roundTripped().edges.find(
+      (e) => e.to === "review",
+    )!.condition!;
+    expect(cond.value).toBe(true);
+    expect(cond.op).toBe("eq");
+    expect(cond.path).toBe("classify.output.flagged");
+  });
+
+  it("is still an exact fork after being opened and re-saved on the canvas", () => {
+    expect(matchFailingOpenFork(roundTripped())?.templateKey).toBe(
+      "moderation",
+    );
   });
 });
 

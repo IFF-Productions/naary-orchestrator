@@ -53,6 +53,14 @@ async function main(): Promise<void> {
   // Templates screen derives it from the display name), so the key tells us nothing about
   // provenance. `distinct` + a workflowKey-led order pushes a Postgres DISTINCT ON, so only the
   // newest body per key crosses the wire — the `connectionUsageCounts` pattern.
+  //
+  // No alias resolution needed on the way back into `upsert` (which REFUSES a retired key):
+  // `WorkflowKeyRenameService` rewrites `GraphDefinition.workflowKey` itself
+  // (`tx.graphDefinition.updateMany({ where: byKey, data: move })`), so a row's key is always
+  // the live one. Reading it back out is reading the current name by construction.
+  //
+  // One pass, everything in memory. This is a one-off ops sweep over graph definitions (not
+  // runs), so the working set is small; if a deployment ever outgrows that, batch by tenant.
   const rows = await getPrisma().graphDefinition.findMany({
     orderBy: [
       { tenantId: "asc" },
