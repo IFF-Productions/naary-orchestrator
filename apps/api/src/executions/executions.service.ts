@@ -242,12 +242,17 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     }
     // Default input precedence: explicit body input → the Start node's configured sampleInput →
     // EMPTY. The last step used to be a hardcoded `{ message: "I was charged twice this month" }`
-    // demo payload, which made a manual run structurally different from the real trigger: cron and
-    // poll schedules start a run with `{}`, so "Run now" on a scheduled workflow injected a support
+    // demo payload, which made a manual run structurally different from the real trigger: EVERY
+    // schedule starts a run with `{}` (#991 — all four schedule-creation paths, not just the
+    // cron/poll ones auto-synced on save), so "Run now" on a scheduled workflow injected a support
     // ticket its steps were never written to accept, and the run failed for a reason the schedule
-    // would never hit (#979). Worse, `sampleInput` only exists on the `start` node type, so a
-    // scheduleTrigger graph had no way to opt out. That payload now lives on the demo graph that
-    // wants it (sampleGraph). A run with nothing to pass passes nothing.
+    // would never hit (#979). Worse, `sampleInput` then existed on the `start` node type ALONE, so
+    // a scheduleTrigger graph had no way to opt out; #983 gave the field to every entry node with
+    // a real payload to stand in for. That demo payload now lives on the demo graph that wants it
+    // (sampleGraph). A run with nothing to pass passes nothing.
+    //
+    // This is the ONLY reader of `startSampleInput`: the field means "what a MANUAL run sends"
+    // and nothing else — schedules deliberately never consult it (see startWorkflowAction).
     return this.startGraph(
       `exec-${tenantId}`,
       snapshot,

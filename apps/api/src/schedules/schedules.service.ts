@@ -23,11 +23,6 @@ import { connectTemporal } from "../temporal/client";
 // same cap applies whether a schedule starts the run or the API does, so two copies could disagree
 // about a safety net (#805).
 import { DEFAULT_MAX_STEPS_PER_RUN } from "../executions/executions.types";
-// Same reasoning as the cap above, and the same bug one level down: this file used to carry its own
-// byte-identical copy of the Start-node sample-input reader, and the two copies had already drifted
-// to DIFFERENT fallbacks ({ message: "scheduled run" } here, a support-ticket payload there) while
-// the cron and poll paths in this same file passed `{}`. Three answers to one question (#979).
-import { startSampleInput } from "../executions/executions.helpers";
 
 export interface ScheduleView {
   id: string;
@@ -108,9 +103,6 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
           "schedrun",
           { tenantId, environmentId, workflowKey },
           snapshot,
-          // `{}` when the graph declares no sample: a scheduled run gets what the schedule has,
-          // which is nothing. Matches syncCronSchedule/syncPollSchedule below.
-          startSampleInput(snapshot.graph) ?? {},
         ),
       });
     } catch (_e) {
@@ -195,7 +187,6 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
         "pollrun",
         { tenantId, environmentId, workflowKey },
         snapshot,
-        {},
       ),
     });
     // Invariant: a deactivated workflow's schedule must not fire. The delete-then-create above
@@ -258,7 +249,6 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
         "cronrun",
         { tenantId, environmentId, workflowKey },
         snapshot,
-        {},
       ),
     });
     // Invariant (see syncPollSchedule): re-pause the freshly-created cron schedule if the workflow
@@ -490,7 +480,6 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
             "schedrun",
             { tenantId, environmentId, workflowKey },
             snapshot,
-            startSampleInput(snapshot.graph) ?? {},
           ),
         });
       } catch (e) {
@@ -527,15 +516,34 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
     await this.clearLegacySchedule(row.id);
   }
 
-  /** The shared startWorkflow action all four schedule kinds fire: same runGraph workflow as a
-   *  manual run, graph SNAPSHOT pinned, env threaded into the run ctx so scheduled runs land in
-   *  their environment (env-scoped creds/secrets/notifications/poll cursors). One builder so a
-   *  new run-ctx field can't be added to one schedule kind and missed in another. */
+  /**
+   * The shared startWorkflow action all four schedule kinds fire: same runGraph workflow as a
+   * manual run, graph SNAPSHOT pinned, env threaded into the run ctx so scheduled runs land in
+   * their environment (env-scoped creds/secrets/notifications/poll cursors). One builder so a
+   * new run-ctx field can't be added to one schedule kind and missed in another.
+   *
+   * THERE IS DELIBERATELY NO `input` PARAMETER (#991). A schedule carries no trigger data —
+   * nothing arrives when a cron fires — so EVERY scheduled run starts with `{}`, whatever the
+   * graph declares. `sampleInput` is the MANUAL-run default and only that (`startExecution`
+   * resolves `body.input → sampleInput → {}`), which is what the canvas has always promised the
+   * author: *"Only used when you run this manually."*
+   *
+   * This used to be a parameter, and the four call sites disagreed about it: `create` and the
+   * legacy reconcile passed `startSampleInput(graph) ?? {}` while the cron/poll syncs passed a
+   * literal `{}` — so one graph's two schedules could start the same run with two different
+   * inputs (#991; #982 claimed all four already agreed, they didn't). Deleting the parameter is
+   * what keeps them equal — a property of the signature, not of four call sites remembering.
+   *
+   * Do not add it back. Feeding `sampleInput` to a schedule would INVERT #979: a production 9am
+   * firing would carry whatever an author typed into a field labelled "sample input", which is
+   * precisely the "manual run gets data the real trigger never sends" bug #979 fixed, only aimed
+   * at production instead of the test run. Parameterizing a scheduled run is a legitimate want,
+   * but it is a real `Schedule.input` column with its own UI — not the graph's test data.
+   */
   private async startWorkflowAction(
     runIdPrefix: "schedrun" | "pollrun" | "cronrun",
     scope: { tenantId: string; environmentId: string; workflowKey: string },
     snapshot: GraphSnapshot,
-    input: Record<string, unknown>,
   ): Promise<ScheduleOptionsAction> {
     const { tenantId, environmentId, workflowKey } = scope;
     const budget = await getBudget(tenantId);
@@ -547,7 +555,9 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
       workflowId: `${runIdPrefix}-${tenantId}-${environmentId}-${workflowKey}`,
       args: [
         snapshot.graph,
-        input,
+        // A fresh literal per action, never a shared const: this object is handed to the Temporal
+        // client and a shared one could be mutated for every schedule at once.
+        {},
         {
           tenantId,
           environmentId,
