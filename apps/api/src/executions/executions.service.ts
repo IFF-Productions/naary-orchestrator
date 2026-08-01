@@ -24,7 +24,7 @@ import {
   type WebhookResponse,
 } from "@naary/contracts";
 import type { GraphDef, NodeDef } from "@naary/dsl";
-import { getPrisma } from "@naary/db";
+import { getPrisma, resolveWorkflowKey } from "@naary/db";
 import {
   evaluateResume,
   resumeWarningText,
@@ -223,6 +223,11 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     /** Opt into per-run verbose (DEBUG) activity logging for THIS run only. */
     debug = false,
   ): Promise<{ workflowId: string }> {
+    // #904 — a manual start can name a RETIRED key (an MCP `run_workflow` argument held in an
+    // external agent's config, a `naary run --workflow` script, a v1 caller). Resolve before the
+    // §4 assert: `WorkflowGrantKey` carries the live key after a rename, so checking the old one
+    // would 403 a user who has access.
+    workflowKey = await resolveWorkflowKey(tenantId, workflowKey);
     await this.assertRun(actor, workflowKey, environmentId);
     const snapshot =
       graphVersion === undefined
@@ -606,6 +611,12 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
       resumedFromId: string;
     },
   ): Promise<{ workflowId: string }> {
+    // The funnel for EVERY start path. Resolving here is what guarantees the `Execution` row and
+    // the run's Temporal ctx record the LIVE key (#904) — so a run triggered through a retired
+    // webhook/form/chat/MCP reference still lands in the renamed workflow's history, and the
+    // interpreter's own `workflowKey` (used for self-heal, notifications and the error handler)
+    // is never a name that no longer exists.
+    workflowKey = await resolveWorkflowKey(tenantId, workflowKey);
     const workflowId = `${prefix}-${randomUUID()}`;
     const budget = await getBudget(tenantId);
     // Fast-fail if the workspace is already over its monthly cap (covers start/webhook/form,

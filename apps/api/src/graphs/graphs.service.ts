@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
   Optional,
 } from "@nestjs/common";
-import { getPrisma } from "@naary/db";
+import { getPrisma, resolveWorkflowKey } from "@naary/db";
 import {
   canonicalize,
   diffGraphs,
@@ -157,6 +158,19 @@ export class GraphsService {
     await this.perms().assertCan(actor, action, workflowKey, environmentId);
   }
 
+  /**
+   * A possibly-RETIRED key → the key that is live today (#904).
+   *
+   * MUST run BEFORE the §4 permission assert, not just before the DB read: a rename rewrites
+   * `WorkflowGrantKey` and the tag-derived key list to the new key, so checking a grant against a
+   * retired key would 403 a user who genuinely has access.
+   *
+   * `upsert` is the ONE method that does NOT resolve — see the note there.
+   */
+  async liveKey(tenantId: string, workflowKey: string): Promise<string> {
+    return resolveWorkflowKey(tenantId, workflowKey);
+  }
+
   private perms(): PermissionsService {
     if (!this.permissions) {
       // A user-facing call site passed an actor but the service was constructed without
@@ -179,6 +193,27 @@ export class GraphsService {
     /** Optional commit note for this version (#488, API/CLI-settable). */
     saveMessage?: string,
   ): Promise<GraphSnapshot> {
+    // #904 — the ONE key-bearing path that REFUSES to resolve an alias.
+    //
+    // Every other lookup resolves a retired key silently, because that is the whole point of an
+    // alias. `upsert` cannot: it is the only operation that can MINT a workflow, so "no graph under
+    // this key" is ambiguous between "save my renamed workflow via its old key" and "create a brand
+    // new workflow that happens to derive this key". Resolving would let a NEW workflow silently
+    // land as another workflow's next version; creating would fork the renamed one. So it refuses,
+    // loudly, naming where the key went — the caller (canvas, CLI, v1) re-addresses and retries.
+    // A canvas opened at a retired key never hits this: `getLatestNamed` hands back the LIVE key.
+    const live = await this.liveKey(tenantId, workflowKey);
+    if (live !== workflowKey) {
+      throw new ConflictException({
+        message:
+          `The workflow key '${workflowKey}' was renamed to '${live}'. ` +
+          `Save to '${live}' instead — '${workflowKey}' still resolves for reads and runs, but it ` +
+          "can't be re-used for a new workflow.",
+        code: "WORKFLOW_KEY_RENAMED",
+        workflowKey,
+        renamedTo: live,
+      });
+    }
     // Reject a malformed graph BEFORE it can be persisted/started (QA#8): the
     // interpreter also guards at runtime (terminal invalid_graph), but catching it
     // here keeps bad graphs out of the DB entirely.
@@ -464,7 +499,11 @@ export class GraphsService {
   }
 
   /** Latest graph for a key, WITH its name + version — for opening into the canvas.
-   *  Asserts `view` for a user-facing actor (403 BEFORE the read — no existence oracle). */
+   *  Asserts `view` for a user-facing actor (403 BEFORE the read — no existence oracle).
+   *
+   *  Returns the LIVE key, not the one asked for (#904): opening a bookmarked canvas URL under a
+   *  retired key must hand the client the current key, or its next save would be refused by
+   *  `upsert`'s alias guard. This is the redirect half of "old keys keep resolving". */
   async getLatestNamed(
     tenantId: string,
     environmentId: string,
@@ -476,11 +515,12 @@ export class GraphsService {
     version: number;
     graph: GraphDef;
   } | null> {
-    await this.assertActor(actor, "view", workflowKey, environmentId);
-    const row = await this.latestRow(tenantId, environmentId, workflowKey);
+    const key = await this.liveKey(tenantId, workflowKey);
+    await this.assertActor(actor, "view", key, environmentId);
+    const row = await this.latestRow(tenantId, environmentId, key);
     return row
       ? {
-          workflowKey,
+          workflowKey: key,
           name: row.name,
           version: row.version,
           graph: row.graph as unknown as GraphDef,
@@ -496,12 +536,16 @@ export class GraphsService {
     workflowKey: string,
     version: number,
   ): Promise<GraphSnapshot | null> {
+    // Composite findUnique — it can't route through `latestRow`, and a miss here is `null`, not an
+    // error, so the alias MUST be resolved before the read or a rerun-at-version of a pre-rename
+    // run would silently look like "that version doesn't exist".
+    const key = await this.liveKey(tenantId, workflowKey);
     const row = await getPrisma().graphDefinition.findUnique({
       where: {
         tenantId_environmentId_workflowKey_version: {
           tenantId,
           environmentId,
-          workflowKey,
+          workflowKey: key,
           version,
         },
       },
@@ -528,10 +572,11 @@ export class GraphsService {
     toVersion: number,
     actor?: Principal,
   ): Promise<GraphDiff & { fromVersion: number; toVersion: number }> {
-    await this.assertActor(actor, "view", workflowKey, environmentId);
+    const key = await this.liveKey(tenantId, workflowKey);
+    await this.assertActor(actor, "view", key, environmentId);
     const [from, to] = await Promise.all([
-      this.getVersion(tenantId, environmentId, workflowKey, fromVersion),
-      this.getVersion(tenantId, environmentId, workflowKey, toVersion),
+      this.getVersion(tenantId, environmentId, key, fromVersion),
+      this.getVersion(tenantId, environmentId, key, toVersion),
     ]);
     if (!from) {
       throw new NotFoundException(
@@ -562,9 +607,10 @@ export class GraphsService {
       saveMessage: string | null;
     }[]
   > {
-    await this.assertActor(actor, "view", workflowKey, environmentId);
+    const key = await this.liveKey(tenantId, workflowKey);
+    await this.assertActor(actor, "view", key, environmentId);
     const rows = await getPrisma().graphDefinition.findMany({
-      where: { tenantId, environmentId, workflowKey },
+      where: { tenantId, environmentId, workflowKey: key },
       orderBy: { version: "desc" },
       select: {
         version: true,
@@ -583,13 +629,18 @@ export class GraphsService {
     }));
   }
 
-  private latestRow(
+  /** The central by-key graph read. Alias-resolving (#904) — so a run started from another graph's
+   *  `executeSubWorkflow` node, an armed schedule's args, an MCP tool, a CLI call or a bookmarked
+   *  canvas URL still finds the workflow after its key was renamed. `upsert` passes a key it has
+   *  already checked itself (it refuses aliases), so the extra lookup there is a no-op. */
+  private async latestRow(
     tenantId: string,
     environmentId: string,
     workflowKey: string,
   ) {
+    const key = await this.liveKey(tenantId, workflowKey);
     return getPrisma().graphDefinition.findFirst({
-      where: { tenantId, environmentId, workflowKey },
+      where: { tenantId, environmentId, workflowKey: key },
       orderBy: { version: "desc" },
     });
   }
@@ -612,7 +663,11 @@ export class GraphsService {
      *  SOURCE environment — you promote what you can see/share FROM. */
     principal?: Principal,
   ): Promise<{ fromVersion: number; toVersion: number; contentHash: string }> {
-    await this.assertActor(principal, "share", workflowKey, fromEnvId);
+    // Alias-resolved up front (#904): a promote driven by a retired key (a CLI script, a v1 caller)
+    // must move the workflow it names, and the key it writes into the TARGET env has to be the live
+    // one — `upsert` below refuses an alias by design.
+    const key = await this.liveKey(tenantId, workflowKey);
+    await this.assertActor(principal, "share", key, fromEnvId);
     if (fromEnvId === toEnvId) {
       throw new BadRequestException(
         "Source and target environments must differ.",
@@ -620,13 +675,13 @@ export class GraphsService {
     }
     const source =
       fromVersion === undefined
-        ? await this.latestRow(tenantId, fromEnvId, workflowKey)
+        ? await this.latestRow(tenantId, fromEnvId, key)
         : await getPrisma().graphDefinition.findUnique({
             where: {
               tenantId_environmentId_workflowKey_version: {
                 tenantId,
                 environmentId: fromEnvId,
-                workflowKey,
+                workflowKey: key,
                 version: fromVersion,
               },
             },
@@ -634,22 +689,22 @@ export class GraphsService {
     if (!source) {
       throw new NotFoundException(
         fromVersion === undefined
-          ? `No '${workflowKey}' graph in the source environment.`
-          : `No version ${fromVersion} of '${workflowKey}' in the source environment.`,
+          ? `No '${key}' graph in the source environment.`
+          : `No version ${fromVersion} of '${key}' in the source environment.`,
       );
     }
     // Write into the target env (re-validated + content-hashed; identical graph → reuses version).
     const snap = await this.upsert(
       tenantId,
       toEnvId,
-      workflowKey,
+      key,
       source.name,
       source.graph as unknown as GraphDef,
     );
     await getPrisma().promotion.create({
       data: {
         tenantId,
-        workflowKey,
+        workflowKey: key,
         fromEnvId,
         toEnvId,
         fromVersion: source.version,
@@ -669,7 +724,7 @@ export class GraphsService {
         const envName = (id: string) =>
           envs.find((e) => e.id === id)?.name ?? id;
         await this.notifications.sendPromotion(tenantId, toEnvId, {
-          workflowKey,
+          workflowKey: key,
           fromEnv: envName(fromEnvId),
           toEnv: envName(toEnvId),
           version: snap.version,
@@ -704,9 +759,10 @@ export class GraphsService {
       createdAt: string;
     }[]
   > {
-    await this.assertActor(actor, "view", workflowKey, environmentId);
+    const key = await this.liveKey(tenantId, workflowKey);
+    await this.assertActor(actor, "view", key, environmentId);
     const rows = await getPrisma().promotion.findMany({
-      where: { tenantId, workflowKey },
+      where: { tenantId, workflowKey: key },
       orderBy: { createdAt: "desc" },
       take: 50,
     });
@@ -728,13 +784,14 @@ export class GraphsService {
     workflowKey: string,
     actor?: Principal,
   ): Promise<string | null> {
-    await this.assertActor(actor, "view", workflowKey, environmentId);
+    const key = await this.liveKey(tenantId, workflowKey);
+    await this.assertActor(actor, "view", key, environmentId);
     const row = await getPrisma().errorHandler.findUnique({
       where: {
         tenantId_environmentId_workflowKey: {
           tenantId,
           environmentId,
-          workflowKey,
+          workflowKey: key,
         },
       },
     });
@@ -749,23 +806,32 @@ export class GraphsService {
     errorWorkflowKey: string | null,
     actor?: Principal,
   ): Promise<void> {
-    await this.assertActor(actor, "edit", workflowKey, environmentId);
+    // BOTH keys resolve: the workflow being bound, and the handler it nominates (a user picking a
+    // handler from a stale list, or a CLI passing a retired key, must still bind the right graph).
+    const key = await this.liveKey(tenantId, workflowKey);
+    await this.assertActor(actor, "edit", key, environmentId);
     if (!errorWorkflowKey) {
       await getPrisma().errorHandler.deleteMany({
-        where: { tenantId, environmentId, workflowKey },
+        where: { tenantId, environmentId, workflowKey: key },
       });
       return;
     }
+    const handler = await this.liveKey(tenantId, errorWorkflowKey);
     await getPrisma().errorHandler.upsert({
       where: {
         tenantId_environmentId_workflowKey: {
           tenantId,
           environmentId,
-          workflowKey,
+          workflowKey: key,
         },
       },
-      create: { tenantId, environmentId, workflowKey, errorWorkflowKey },
-      update: { errorWorkflowKey },
+      create: {
+        tenantId,
+        environmentId,
+        workflowKey: key,
+        errorWorkflowKey: handler,
+      },
+      update: { errorWorkflowKey: handler },
     });
   }
 
@@ -776,12 +842,13 @@ export class GraphsService {
     environmentId: string,
     workflowKey: string,
   ): Promise<boolean> {
+    const key = await this.liveKey(tenantId, workflowKey);
     const row = await getPrisma().workflowActivation.findUnique({
       where: {
         tenantId_environmentId_workflowKey: {
           tenantId,
           environmentId,
-          workflowKey,
+          workflowKey: key,
         },
       },
     });
@@ -809,15 +876,16 @@ export class GraphsService {
     workflowKey: string,
     active: boolean,
   ): Promise<void> {
+    const key = await this.liveKey(tenantId, workflowKey);
     await getPrisma().workflowActivation.upsert({
       where: {
         tenantId_environmentId_workflowKey: {
           tenantId,
           environmentId,
-          workflowKey,
+          workflowKey: key,
         },
       },
-      create: { tenantId, environmentId, workflowKey, active },
+      create: { tenantId, environmentId, workflowKey: key, active },
       update: { active },
     });
   }
@@ -836,50 +904,72 @@ export class GraphsService {
     environmentId: string,
     workflowKey: string,
   ): Promise<boolean> {
+    const key = await this.liveKey(tenantId, workflowKey);
     const existed = await getPrisma().graphDefinition.findFirst({
-      where: { tenantId, environmentId, workflowKey },
+      where: { tenantId, environmentId, workflowKey: key },
       select: { workflowKey: true },
     });
     if (!existed) return false;
 
     const p = getPrisma();
+    // Does the workflow survive in ANOTHER environment? Aliases are TENANT-wide, so they may only
+    // be released once the LAST env's copy is gone — otherwise a sandbox delete would strand prod's
+    // sub-workflow references and armed schedules on an unresolvable key.
+    const elsewhere = await p.graphDefinition.findFirst({
+      where: {
+        tenantId,
+        workflowKey: key,
+        environmentId: { not: environmentId },
+      },
+      select: { workflowKey: true },
+    });
     // Always delete THIS env's rows: graph, activation, pins, error-handler bindings, and the
     // trigger endpoints (all env-scoped now) — a sandbox delete can no longer wipe prod's
     // webhooks for the same key, and no longer orphans its own.
     const ops = [
       p.graphDefinition.deleteMany({
-        where: { tenantId, environmentId, workflowKey },
+        where: { tenantId, environmentId, workflowKey: key },
       }),
       p.workflowActivation.deleteMany({
-        where: { tenantId, environmentId, workflowKey },
+        where: { tenantId, environmentId, workflowKey: key },
       }),
       p.pinnedData.deleteMany({
-        where: { tenantId, environmentId, workflowKey },
+        where: { tenantId, environmentId, workflowKey: key },
       }),
       // Bindings where this key is EITHER the failing workflow or the handler.
       p.errorHandler.deleteMany({
         where: {
           tenantId,
           environmentId,
-          OR: [{ workflowKey }, { errorWorkflowKey: workflowKey }],
+          OR: [{ workflowKey: key }, { errorWorkflowKey: key }],
         },
       }),
       // Triggers reference the graph key as `workflowId`.
       p.webhookEndpoint.deleteMany({
-        where: { tenantId, environmentId, workflowId: workflowKey },
+        where: { tenantId, environmentId, workflowId: key },
       }),
       p.formEndpoint.deleteMany({
-        where: { tenantId, environmentId, workflowId: workflowKey },
+        where: { tenantId, environmentId, workflowId: key },
       }),
       p.chatEndpoint.deleteMany({
-        where: { tenantId, environmentId, workflowId: workflowKey },
+        where: { tenantId, environmentId, workflowId: key },
       }),
       // Poll cursors are env-scoped now (env-scoped-schedules slice) — always deleted for
       // THIS env, like every other row. The former deleteShared gate is gone with it.
       p.pollState.deleteMany({
-        where: { tenantId, environmentId, workflowKey },
+        where: { tenantId, environmentId, workflowKey: key },
       }),
     ];
+    // Free the retired keys with the last copy (#904). Without this, deleting a renamed workflow
+    // would leave its old keys permanently reserved — `upsert` refuses to save under a retired
+    // alias, so nobody could ever re-use the name. Deleting the workflow IS the release path.
+    if (!elsewhere) {
+      ops.push(
+        p.workflowKeyAlias.deleteMany({
+          where: { tenantId, workflowKey: key },
+        }),
+      );
+    }
     await p.$transaction(ops);
     return true;
   }

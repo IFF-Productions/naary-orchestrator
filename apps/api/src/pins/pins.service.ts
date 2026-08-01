@@ -1,5 +1,5 @@
 import { Injectable, Optional } from "@nestjs/common";
-import { getPrisma, Prisma } from "@naary/db";
+import { getPrisma, Prisma, resolveWorkflowKey } from "@naary/db";
 import type { Principal } from "../auth/tenant.decorator";
 import {
   PermissionsService,
@@ -42,9 +42,12 @@ export class PinsService {
     workflowKey: string,
     actor?: Principal,
   ): Promise<Record<string, unknown>> {
-    await this.assertActor(actor, "view", workflowKey, environmentId);
+    // Alias-resolve BEFORE the assert AND the read (#904): PinnedData is a composite-PK table, so a
+    // retired key reads as "no pins", not as an error — indistinguishable from "nothing pinned".
+    const key = await resolveWorkflowKey(tenantId, workflowKey);
+    await this.assertActor(actor, "view", key, environmentId);
     const rows = await getPrisma().pinnedData.findMany({
-      where: { tenantId, environmentId, workflowKey },
+      where: { tenantId, environmentId, workflowKey: key },
       select: { nodeId: true, output: true },
     });
     return Object.fromEntries(rows.map((r) => [r.nodeId, r.output]));
@@ -59,18 +62,25 @@ export class PinsService {
     output: unknown,
     actor?: Principal,
   ): Promise<void> {
-    await this.assertActor(actor, "edit", workflowKey, environmentId);
+    const key = await resolveWorkflowKey(tenantId, workflowKey);
+    await this.assertActor(actor, "edit", key, environmentId);
     const value = output as Prisma.InputJsonValue;
     await getPrisma().pinnedData.upsert({
       where: {
         tenantId_environmentId_workflowKey_nodeId: {
           tenantId,
           environmentId,
-          workflowKey,
+          workflowKey: key,
           nodeId,
         },
       },
-      create: { tenantId, environmentId, workflowKey, nodeId, output: value },
+      create: {
+        tenantId,
+        environmentId,
+        workflowKey: key,
+        nodeId,
+        output: value,
+      },
       update: { output: value },
     });
   }
@@ -83,9 +93,10 @@ export class PinsService {
     nodeId: string,
     actor?: Principal,
   ): Promise<boolean> {
-    await this.assertActor(actor, "edit", workflowKey, environmentId);
+    const key = await resolveWorkflowKey(tenantId, workflowKey);
+    await this.assertActor(actor, "edit", key, environmentId);
     const res = await getPrisma().pinnedData.deleteMany({
-      where: { tenantId, environmentId, workflowKey, nodeId },
+      where: { tenantId, environmentId, workflowKey: key, nodeId },
     });
     return res.count > 0;
   }

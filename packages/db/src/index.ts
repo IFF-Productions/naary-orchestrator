@@ -65,6 +65,10 @@ export async function getDefaultEnvironmentId(
   return row.id;
 }
 
+// Workflow key aliases (#904) — the shared old-key → live-key resolver, importable by BOTH the API
+// and the worker (the sub-workflow resolver runs in a different process).
+export { aliasesOf, resolveWorkflowKey } from "./workflow-key-alias";
+
 /** Close the pg pool on shutdown (Arch§4.9). Safe to call when never connected. */
 export async function disconnectPrisma(): Promise<void> {
   if (client) {

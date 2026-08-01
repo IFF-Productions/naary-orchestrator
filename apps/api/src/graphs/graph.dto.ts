@@ -106,6 +106,21 @@ export class SaveGraphDto {
   message?: string;
 }
 
+/** Change a workflow's KEY (#904). The old key is retired but keeps RESOLVING — see
+ *  WorkflowKeyRenameService. Tenant-wide: every environment's copy moves together. */
+export class RenameWorkflowKeyDto {
+  @ApiProperty({
+    example: "support-triage",
+    description:
+      "The new key. Lowercase letters, digits and single hyphens (the canvas' own slug rule), " +
+      "max 64 characters. Must not already be in use, and must not be another workflow's " +
+      "retired key.",
+  })
+  @IsString()
+  @MaxLength(64)
+  newKey!: string;
+}
+
 /** Promote a workflow's definition from the ACTIVE env (X-Environment-Id) to a target env. */
 export class PromoteGraphDto {
   @ApiProperty({

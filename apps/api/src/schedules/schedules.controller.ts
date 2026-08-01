@@ -9,6 +9,7 @@ import {
   Put,
 } from "@nestjs/common";
 import { ApiBearerAuth } from "@nestjs/swagger";
+import { resolveWorkflowKey } from "@naary/db";
 import { EnvironmentSel } from "../auth/tenant.decorator";
 import { EnvironmentsService } from "../environments/environments.service";
 import { ApiEndpoint } from "../swagger/api-decorators";
@@ -54,7 +55,11 @@ export class SchedulesController {
     @EnvironmentSel() envSel?: string,
   ): Promise<ScheduleView> {
     const envId = await this.environments.resolveEnvId(tenantId, envSel);
-    return this.schedules.create(tenantId, envId, body.workflowKey, body.cron);
+    // #904 — resolve a retired key HERE rather than in SchedulesService: the row must be written
+    // under the live key or every later `findMany({workflowKey})` (teardown, activation toggle)
+    // would miss it.
+    const workflowKey = await resolveWorkflowKey(tenantId, body.workflowKey);
+    return this.schedules.create(tenantId, envId, workflowKey, body.cron);
   }
 
   @ApiEndpoint({

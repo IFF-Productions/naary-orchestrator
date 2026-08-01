@@ -22,7 +22,7 @@ import {
 } from "@nestjs/common";
 import type { Client, Connection } from "@temporalio/client";
 import { healDecisionSignal, type HealDecisionInput } from "@naary/contracts";
-import { getPrisma } from "@naary/db";
+import { getPrisma, resolveWorkflowKey } from "@naary/db";
 import type { GraphDef } from "@naary/dsl";
 import { connectTemporal } from "../temporal/client";
 import type { Principal } from "../auth/tenant.decorator";
@@ -106,12 +106,14 @@ export class HealService implements OnModuleInit, OnModuleDestroy {
     environmentId: string,
     workflowKey: string,
   ): Promise<boolean> {
+    // Composite-PK read: a retired key returns null, which reads as "self-healing is off" rather
+    // than as an error — resolve before the lookup (#904).
     const row = await getPrisma().selfHealSetting.findUnique({
       where: {
         tenantId_environmentId_workflowKey: {
           tenantId,
           environmentId,
-          workflowKey,
+          workflowKey: await resolveWorkflowKey(tenantId, workflowKey),
         },
       },
       select: { enabled: true },
@@ -132,18 +134,19 @@ export class HealService implements OnModuleInit, OnModuleDestroy {
     // and authorizes spending the tenant's model budget on it. Checked through PermissionsService
     // directly — GraphsService's own `assertActor` wrapper is private, and there is no reason for
     // this to go through the graph service at all.
+    const key = await resolveWorkflowKey(tenantId, workflowKey);
     if (actor) {
-      await this.perms.assertCan(actor, "edit", workflowKey, environmentId);
+      await this.perms.assertCan(actor, "edit", key, environmentId);
     }
     await getPrisma().selfHealSetting.upsert({
       where: {
         tenantId_environmentId_workflowKey: {
           tenantId,
           environmentId,
-          workflowKey,
+          workflowKey: key,
         },
       },
-      create: { tenantId, environmentId, workflowKey, enabled },
+      create: { tenantId, environmentId, workflowKey: key, enabled },
       update: { enabled },
     });
     return { enabled };

@@ -4,7 +4,12 @@ import { createHash } from "node:crypto";
 import { ApplicationFailure } from "@temporalio/activity";
 import { canonicalize } from "@naary/dsl";
 import type { GraphDef, TemplateBlock } from "@naary/dsl";
-import { Prisma, getDefaultEnvironmentId, getPrisma } from "@naary/db";
+import {
+  Prisma,
+  getDefaultEnvironmentId,
+  getPrisma,
+  resolveWorkflowKey,
+} from "@naary/db";
 import { createLogger } from "@naary/logging";
 import { getObjectStore, maybeOffload } from "@naary/storage";
 import { getBudget } from "@naary/usage";
@@ -27,13 +32,19 @@ export async function recordExecution(meta: {
   workflowKey?: string;
   graphVersion?: number;
 }): Promise<void> {
+  // #904: a run started by an ALREADY-ARMED Temporal schedule (or any long-lived handle created
+  // before a key rename) still carries the OLD key in its args. Resolve it here or the run would be
+  // filed under a key the workflows list no longer shows — history has to follow the workflow.
+  const workflowKey = meta.workflowKey
+    ? await resolveWorkflowKey(meta.tenantId, meta.workflowKey)
+    : null;
   await getPrisma().execution.upsert({
     where: { workflowId: meta.workflowId },
     create: {
       workflowId: meta.workflowId,
       tenantId: meta.tenantId,
       environmentId: meta.environmentId ?? null, // per-env Runs tag (Slice 6)
-      workflowKey: meta.workflowKey ?? null,
+      workflowKey,
       // Only scheduled runs create here (API runs are pre-created with the version);
       // record the snapshotted version so scheduled runs show it too.
       graphVersion: meta.graphVersion ?? null,
@@ -278,11 +289,17 @@ export async function resolveSubWorkflowGraph(meta: {
 }): Promise<SubWorkflowGraph> {
   const environmentId =
     meta.environmentId ?? (await getDefaultEnvironmentId(meta.tenantId));
+  // Alias-resolve (#904). THE most important consumer of the alias table: a `workflowKey` inside
+  // another graph's `executeSubWorkflow` / `forEach` node config (or a run's `errorWorkflowKey`) is
+  // a reference we deliberately do NOT rewrite when the child is renamed — a JSON-body rewrite
+  // across every version of every other graph in every env would be brittle, and a stale one fails
+  // at RUN time, not save time. Resolving here is what makes the rename safe for those callers.
+  const workflowKey = await resolveWorkflowKey(meta.tenantId, meta.workflowKey);
   const row = await getPrisma().graphDefinition.findFirst({
     where: {
       tenantId: meta.tenantId,
       environmentId,
-      workflowKey: meta.workflowKey,
+      workflowKey,
     },
     orderBy: { version: "desc" },
   });

@@ -1,6 +1,7 @@
 import { Body, Controller, Param, Put } from "@nestjs/common";
 import { ApiProperty, ApiBearerAuth } from "@nestjs/swagger";
 import { IsBoolean } from "class-validator";
+import { resolveWorkflowKey } from "@naary/db";
 import {
   CurrentPrincipal,
   EnvironmentSel,
@@ -57,12 +58,16 @@ export class WorkflowActivationController {
   ): Promise<WorkflowActiveResponse> {
     // The active toggle is env-scoped — resolve the ACTIVE env (the flag write lands there).
     const envId = await this.environments.resolveEnvId(tenantId, envSel);
+    // #904 — a retired key resolves to the live one. Done here (not deeper) because the §4 assert,
+    // the flag write and the Temporal pause/resume must all address the SAME key, and the response
+    // has to hand the caller back the key that exists.
+    const key = await resolveWorkflowKey(tenantId, workflowKey);
     // Activation toggle = the EDIT verb (RBAC-GROUPS.md §4 matrix), asserted before the
     // flag write / schedule pause side effects.
     if (principal) {
-      await this.permissions.assertCan(principal, "edit", workflowKey, envId);
+      await this.permissions.assertCan(principal, "edit", key, envId);
     }
-    await this.schedules.setActive(tenantId, envId, workflowKey, body.active);
-    return { workflowKey, active: body.active };
+    await this.schedules.setActive(tenantId, envId, key, body.active);
+    return { workflowKey: key, active: body.active };
   }
 }

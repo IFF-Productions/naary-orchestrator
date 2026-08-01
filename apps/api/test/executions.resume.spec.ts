@@ -17,6 +17,9 @@ const findUnique = vi.fn();
 const create = vi.fn();
 const update = vi.fn();
 vi.mock("@naary/db", () => ({
+  // #904: this spec has no renamed workflows, so the alias resolver is the identity. A spec
+  // that DOES exercise aliases stubs it to return the live key (see workflow-key-alias.spec.ts).
+  resolveWorkflowKey: async (_t: string, k: string) => k,
   getPrisma: () => ({ execution: { findUnique, create, update } }),
   getDefaultEnvironmentId: async () => "env-test",
 }));

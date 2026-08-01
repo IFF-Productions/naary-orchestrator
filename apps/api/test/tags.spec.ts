@@ -14,6 +14,9 @@ const graphFindMany = vi.fn();
 const activationFindMany = vi.fn();
 const $transaction = vi.fn();
 vi.mock("@naary/db", () => ({
+  // #904: this spec has no renamed workflows, so the alias resolver is the identity. A spec
+  // that DOES exercise aliases stubs it to return the live key (see workflow-key-alias.spec.ts).
+  resolveWorkflowKey: async (_t: string, k: string) => k,
   getPrisma: () => ({
     tag: {
       findMany: tagFindMany,

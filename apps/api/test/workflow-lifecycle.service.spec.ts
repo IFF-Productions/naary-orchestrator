@@ -11,7 +11,13 @@ import { WorkflowLifecycleService } from "../src/graphs/workflow-lifecycle.servi
  * - Best-effort side-effects: a scheduling hiccup must not fail the save/delete.
  */
 
-const graphs = { upsert: vi.fn(), deleteWorkflow: vi.fn() };
+// #904: `liveKey` maps a retired workflow key onto the live one. Identity here — this spec has no
+// renamed workflows; workflow-key-alias.spec.ts is where a non-identity resolution is exercised.
+const graphs = {
+  upsert: vi.fn(),
+  deleteWorkflow: vi.fn(),
+  liveKey: vi.fn(async (_t: string, k: string) => k),
+};
 const schedules = {
   syncPollSchedule: vi.fn(),
   syncCronSchedule: vi.fn(),
