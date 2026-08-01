@@ -15,6 +15,7 @@ import { useNavigate } from "react-router-dom";
 import { Button } from "../../components";
 import { api } from "../../lib/api";
 import type { N8nImportResult, N8nNodeReport } from "../../lib/api";
+import { jsonErrorText } from "../../lib/json-error";
 
 /**
  * workflowKey for the imported draft. Same shape as the slug BuildWithAi derives for a generated
@@ -87,8 +88,13 @@ export function ImportN8n() {
       // Parsed in the BROWSER so a syntax error reads as "that isn't valid JSON" rather than an
       // opaque 400 from the API.
       parsed = JSON.parse(text);
-    } catch {
-      setError("That isn't valid JSON. Paste the whole n8n workflow export.");
+    } catch (e) {
+      setError(
+        jsonErrorText(
+          e,
+          "That isn't valid JSON. Paste the whole n8n workflow export",
+        ),
+      );
       setBusy(false);
       return;
     }
@@ -421,10 +427,9 @@ export function ImportN8n() {
               <code>
                 {slugifyName(name.trim() || result.name, unnamedKeyFallback)}
               </code>
-              . If a
-              workflow already uses that key this becomes its next VERSION
-              rather than a new workflow — change the name above if you want a
-              separate one. Never activated automatically.
+              . If a workflow already uses that key this becomes its next
+              VERSION rather than a new workflow — change the name above if you
+              want a separate one. Never activated automatically.
             </span>
           </div>
         </>

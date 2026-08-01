@@ -8,6 +8,7 @@ import { type GraphDef } from "@naary/dsl";
 import { api, type GraphSummary, UnauthorizedError } from "../../lib/api";
 import { withReturn } from "../../lib/canvas-return";
 import { decompileGraph } from "../../lib/decompile-graph";
+import { jsonErrorText } from "../../lib/json-error";
 import { type CanvasBaseline, savedWorkflowName } from "./canvas-dirty";
 import {
   type FlowEdge,
@@ -112,8 +113,8 @@ export function useWorkflowActions({
       let parsed: unknown;
       try {
         parsed = JSON.parse(String(reader.result));
-      } catch {
-        setStatus("Import failed — the file isn't valid JSON.");
+      } catch (e) {
+        setStatus(jsonErrorText(e, "Import failed: the file isn't valid JSON"));
         return;
       }
       const wrapper =
@@ -210,8 +211,8 @@ export function useWorkflowActions({
           return;
         }
         input = parsed as Record<string, unknown>;
-      } catch {
-        setStatus("Run input is not valid JSON.");
+      } catch (e) {
+        setStatus(jsonErrorText(e, "Run input is not valid JSON"));
         return;
       }
     }
