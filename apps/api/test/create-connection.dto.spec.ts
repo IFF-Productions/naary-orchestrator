@@ -63,9 +63,11 @@ describe("CreateConnectionDto", () => {
     expect(errors.filter((e) => e.property === "type")).toEqual([]);
   });
 
-  // The second half of #1032: `NON_URL_TYPES` is what exempts a database connection from the
-  // https-URL rule, so an engine missing from it still 400s — on `serverUrl` instead of `type`.
-  // A DB connection's serverUrl is a non-secret display host; the DSN rides in `token`.
+  // The second half of #1032: `NON_URL_TYPES` is what exempts a connection whose serverUrl is a
+  // display label rather than an address we dial, so an engine missing from that list still 400s —
+  // on `serverUrl` instead of `type`. A SQL connection's serverUrl is a non-secret display host;
+  // the DSN rides in `token`. (The list is wider than the SQL engines — smtp and signing are in it
+  // too — but the engines are what #1032 was about, and what SQL_ENGINES derives.)
   it.each(SQL_ENGINES)(
     "accepts a %s connection whose serverUrl is a bare host",
     async (engine) => {
@@ -79,4 +81,28 @@ describe("CreateConnectionDto", () => {
       expect(errors.map((e) => e.property)).toEqual([]);
     },
   );
+
+  // The exemption is NOT "the databases" — the validator's message used to say so, and it was
+  // wrong: a signing key has no host at all, and smtp is not a database. Both are label-only
+  // types, so both must be accepted without an https URL.
+  it.each([
+    ["signing", "Prod signing key"],
+    ["smtp", "smtp.example.com"],
+  ] as const)(
+    "accepts a %s connection whose serverUrl is a label",
+    async (type, label) => {
+      const errors = await validate(dto({ type, serverUrl: label }));
+      expect(errors.map((e) => e.property)).toEqual([]);
+    },
+  );
+
+  it("still requires an https URL for connections it calls over HTTP", async () => {
+    const errors = await validate(
+      dto({
+        type: "custom",
+        serverUrl: "http://169.254.169.254/latest/meta-data",
+      }),
+    );
+    expect(errors.map((e) => e.property)).toContain("serverUrl");
+  });
 });

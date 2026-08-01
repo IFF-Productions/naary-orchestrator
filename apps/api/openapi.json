@@ -18590,7 +18590,7 @@
           "serverUrl": {
             "type": "string",
             "example": "https://api.github.com",
-            "description": "https URL for MCP/HTTP connections, or a non-secret display host for DB connections (the DSN rides in `token`)."
+            "description": "An https URL when this server calls the connection over HTTP (MCP/app servers). When it is only a non-secret display label, because the real endpoint and its credential ride together in `token` (e.g. a SQL DSN, an SMTP URI, a signing key), any non-empty value."
           },
           "authMode": {
             "type": "string",
@@ -18662,7 +18662,7 @@
           "serverUrl": {
             "type": "string",
             "example": "https://api.github.com",
-            "description": "https URL for MCP/HTTP connections, or a non-secret display host for DB connections."
+            "description": "An https URL when this server calls the connection over HTTP (MCP/app servers), otherwise a non-secret display label — the real endpoint and its credential ride in `token`."
           },
           "authMode": {
             "type": "string",

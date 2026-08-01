@@ -11,8 +11,10 @@ import {
 } from "class-validator";
 import type { CreateConnectionInput } from "@naary/connections";
 
-// Types whose serverUrl is a NON-SECRET display label (host / name), not an https
-// URL — the real secret (DSN / signing key) rides in `token`.
+// Types whose serverUrl is a NON-SECRET display label (a host, or just a name), never an
+// address this server dials — the real endpoint AND its credential ride together in `token`
+// (a DSN, an SMTP URI, a key). Deliberately a principle rather than a category: it is NOT
+// "the databases" — `signing` keys have no host at all, and `smtp` is not a database.
 const NON_URL_TYPES = [
   "postgres",
   "mssql",
@@ -23,11 +25,13 @@ const NON_URL_TYPES = [
 ];
 
 /**
- * serverUrl is validated by connection kind:
- *  - MCP/HTTP connections: an https URL (https-only closes the trivial http://
- *    internal-target SSRF vector; the full egress block is the separate Sec#2 item).
- *  - DB connections (postgres/mssql/mysql/firestore): a NON-SECRET display host — the real DSN (with
- *    password) rides in `token` — so only a non-empty string is required.
+ * serverUrl is validated by what this server DOES with it, which is the only rule that
+ * stays true as types are added:
+ *  - When it is the address we dial (MCP/HTTP connections): an https URL (https-only
+ *    closes the trivial http:// internal-target SSRF vector; the full egress block is
+ *    the separate Sec#2 item).
+ *  - When it is only a display label — see NON_URL_TYPES, where the real endpoint and
+ *    credential ride together in `token` — any non-empty string, since nothing dials it.
  */
 @ValidatorConstraint({ name: "connectionServerUrl", async: false })
 class ConnectionServerUrlConstraint implements ValidatorConstraintInterface {
@@ -42,7 +46,11 @@ class ConnectionServerUrlConstraint implements ValidatorConstraintInterface {
     }
   }
   defaultMessage(): string {
-    return "serverUrl must be an https URL (or a non-empty host for database connections)";
+    return (
+      "serverUrl must be an https URL for connection types this server calls over HTTP. " +
+      "For types whose serverUrl is only a display label — the real endpoint and its " +
+      "credential ride in `token` — any non-empty value is accepted."
+    );
   }
 }
 
@@ -86,7 +94,9 @@ export class CreateConnectionDto implements CreateConnectionInput {
   @ApiProperty({
     example: "https://api.github.com",
     description:
-      "https URL for MCP/HTTP connections, or a non-secret display host for DB connections (the DSN rides in `token`).",
+      "An https URL when this server calls the connection over HTTP (MCP/app servers). When it is " +
+      "only a non-secret display label, because the real endpoint and its credential ride together " +
+      "in `token` (e.g. a SQL DSN, an SMTP URI, a signing key), any non-empty value.",
   })
   @Validate(ConnectionServerUrlConstraint)
   serverUrl!: string;
