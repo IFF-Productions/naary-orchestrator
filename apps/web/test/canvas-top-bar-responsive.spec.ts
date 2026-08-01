@@ -34,12 +34,19 @@
  * 14px and 60px are the name input's floors on the two branches (its own padding; its `minWidth`)
  * — the workflow being edited was not readably on screen in EITHER tier. The root is
  * `overflow-x: hidden` (styles/global.css), so the overflow was not clipped-but-scrollable: the
- * primary CTA did not exist for the user (#511's trap). Over the whole `Canvas/TopBar` set the
- * responsive audit goes 28 clipped elements / 19 unreachable controls -> 0 / 0 at 834.
+ * primary CTA did not exist for the user (#511's trap).
  *
- * DESKTOP (1440) is byte-identical across both changes, every story — including the one that was
- * already 48px over there (`TabletInvalid`: the desktop bar's own unbounded `graphError`, a
- * pre-existing defect neither tier reaches — #997).
+ * `apps/web/scripts/responsive-audit.mjs --filter canvas-topbar`, all 11 stories, #989 measured
+ * against a tree that already had #964's fix:
+ *
+ *              clipped elements   unreachable controls
+ *    390            0  ->  0            0  ->  0        (identical: #964 owns this width)
+ *    834           32  ->  0           23  ->  0        (14 were WHOLLY offscreen)
+ *   1440            1  ->  1            0  ->  0        (identical)
+ *
+ * 390 and 1440 are byte-identical per story, not merely equal in the totals. The one 1440 clip is
+ * `TabletInvalid` before AND after: the desktop bar's own unbounded `graphError`, a pre-existing
+ * defect neither tier reaches — #997.
  */
 import { readFileSync } from "node:fs";
 import path from "node:path";
