@@ -49,7 +49,6 @@ export function ConversationIntro({
   boxStyle,
   seeding,
   editing,
-  hideExamples,
   resumables,
   onResume,
   onSend,
@@ -59,7 +58,6 @@ export function ConversationIntro({
   boxStyle: CSSProperties;
   seeding: boolean;
   editing: EditTarget | null;
-  hideExamples?: boolean;
   resumables: BuilderSessionSummary[] | null;
   onResume?: (id: string) => void;
   onSend: (text: string) => void;
@@ -132,68 +130,64 @@ export function ConversationIntro({
         )}
       </div>
 
-      {!hideExamples && (
-        <>
-          <div
-            className="mono"
+      <div
+        className="mono"
+        style={{
+          fontSize: "var(--text-2xs)",
+          letterSpacing: ".1em",
+          textTransform: "uppercase",
+          color: "var(--ink-faint)",
+          margin: "20px 0 9px",
+        }}
+      >
+        {editing ? "Common changes" : "Start from an idea"}
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+        {(editing ? EDIT_EXAMPLES : EXAMPLES).map((ex) => (
+          <button
+            key={ex.label}
+            type="button"
+            onClick={() => onSend(ex.label)}
+            className="bwa-chip"
             style={{
-              fontSize: "var(--text-2xs)",
-              letterSpacing: ".1em",
-              textTransform: "uppercase",
-              color: "var(--ink-faint)",
-              margin: "20px 0 9px",
+              border: "1px solid var(--line-mid)",
+              background: "var(--card)",
+              borderRadius: 10,
+              padding: "10px 12px",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              textAlign: "left",
             }}
           >
-            {editing ? "Common changes" : "Start from an idea"}
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-            {(editing ? EDIT_EXAMPLES : EXAMPLES).map((ex) => (
-              <button
-                key={ex.label}
-                type="button"
-                onClick={() => onSend(ex.label)}
-                className="bwa-chip"
-                style={{
-                  border: "1px solid var(--line-mid)",
-                  background: "var(--card)",
-                  borderRadius: 10,
-                  padding: "10px 12px",
-                  cursor: "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 10,
-                  textAlign: "left",
-                }}
-              >
-                <span
-                  style={{
-                    width: 26,
-                    height: 26,
-                    flex: "none",
-                    borderRadius: 7,
-                    border: "1px solid var(--brand)",
-                    color: "var(--brand)",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                  }}
-                >
-                  <Icon name={ex.icon} size={14} strokeWidth={1.7} />
-                </span>
-                <span
-                  style={{
-                    fontSize: "var(--text-sm)",
-                    color: "var(--ink-soft)",
-                    lineHeight: 1.4,
-                  }}
-                >
-                  {ex.label}
-                </span>
-              </button>
-            ))}
-          </div>
-        </>
-      )}
+            <span
+              style={{
+                width: 26,
+                height: 26,
+                flex: "none",
+                borderRadius: 7,
+                border: "1px solid var(--brand)",
+                color: "var(--brand)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <Icon name={ex.icon} size={14} strokeWidth={1.7} />
+            </span>
+            <span
+              style={{
+                fontSize: "var(--text-sm)",
+                color: "var(--ink-soft)",
+                lineHeight: 1.4,
+              }}
+            >
+              {ex.label}
+            </span>
+          </button>
+        ))}
+      </div>
 
       {resumables && resumables.length > 0 && onResume && (
         <>

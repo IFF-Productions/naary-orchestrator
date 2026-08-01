@@ -51,9 +51,13 @@ export type ConversationVariant = "page" | "panel";
 /**
  * Composer bounds. One line to start; grows with the content up to a cap, because a `?fix=`
  * description arrives ~15 lines long and the banner above it asks the user to read it first.
+ *
+ * The cap is tighter on a phone, where this panel and the canvas it is describing share one narrow
+ * screen — a box that can eat 220px there is a box that hides the workflow it just changed.
  */
 const COMPOSER_MIN_H = 38;
 const COMPOSER_MAX_H = 220;
+const COMPOSER_MAX_H_COMPACT = 150;
 
 /** The brand ember-flame avatar next to assistant turns. */
 function EmberAvatar() {
@@ -105,7 +109,8 @@ export function ConversationPanel({
   draftReadOnly,
   banner,
   showAccept = true,
-  hideExamples,
+  hideIntro,
+  composerMinHeight,
 }: {
   phase: BuildPhase;
   messages: ChatMsg[];
@@ -168,10 +173,23 @@ export function ConversationPanel({
   /** False where the surface has its own save (the canvas top bar) — see `onAccept`. */
   showAccept?: boolean;
   /**
-   * Drop the example-idea chips. A chip SENDS immediately, and on the `?fix=` path the composer is
-   * already holding a description of the user's failed run — tapping one would discard it silently.
+   * Drop the empty state, leaving the banner and composer alone above the canvas.
+   *
+   * For the `?fix=` arrival, where the banner already IS the intro — it names the run, what is
+   * about to be sent and what to do next — so a second empty state above it would be redundant,
+   * and its example chips are actively dangerous: a chip SENDS immediately, which would discard
+   * the description of the user's failed run without a word. The intro's COPY still applies (the
+   * placeholder and hint below stay in their idle wording); only the block is dropped.
    */
-  hideExamples?: boolean;
+  hideIntro?: boolean;
+  /**
+   * Pre-size the composer, for a container that is about to write something long into it.
+   *
+   * The `?fix=` box is ~15 lines when it lands. Growing into that from one line makes the whole
+   * panel jump under the reader at the exact moment the thing they are meant to read appears — so
+   * the canvas asks for the height up front and the description simply arrives in it.
+   */
+  composerMinHeight?: number;
 }) {
   const [ownDraft, setOwnDraft] = useState("");
   const controlled = draftProp !== undefined;
@@ -205,12 +223,17 @@ export function ConversationPanel({
    * simply typed. `useLayoutEffect` so the resize is committed with the paint that shows the text,
    * never a frame after it.
    */
+  const composerMin = composerMinHeight ?? COMPOSER_MIN_H;
+  const composerMax = Math.max(
+    composerMin,
+    compact ? COMPOSER_MAX_H_COMPACT : COMPOSER_MAX_H,
+  );
   useLayoutEffect(() => {
     const el = composerRef.current;
     if (!el) return;
     el.style.height = "auto";
-    el.style.height = `${Math.min(Math.max(el.scrollHeight, COMPOSER_MIN_H), COMPOSER_MAX_H)}px`;
-  }, [draft]);
+    el.style.height = `${Math.min(Math.max(el.scrollHeight, composerMin), composerMax)}px`;
+  }, [draft, composerMin, composerMax]);
 
   // `seeding` blocks a turn until we know WHICH workflow it edits — see BuildWithAiState.seeding.
   const canSend =
@@ -292,17 +315,20 @@ export function ConversationPanel({
         height: embedded ? undefined : compact ? "60vh" : "auto",
       }}
     >
+      {/* `hideIntro` drops the BLOCK, not the state: the placeholder and hint above still read as
+          the idle ones, because that is still what this is. */}
       {showIntro ? (
-        <ConversationIntro
-          scrollRef={scrollRef}
-          boxStyle={{ ...threadBox, overflowY: "auto", padding: 22 }}
-          seeding={seeding}
-          editing={editing}
-          hideExamples={hideExamples}
-          resumables={resumables}
-          onResume={onResume}
-          onSend={onSend}
-        />
+        hideIntro ? null : (
+          <ConversationIntro
+            scrollRef={scrollRef}
+            boxStyle={{ ...threadBox, overflowY: "auto", padding: 22 }}
+            seeding={seeding}
+            editing={editing}
+            resumables={resumables}
+            onResume={onResume}
+            onSend={onSend}
+          />
+        )
       ) : (
         <div
           ref={scrollRef}
@@ -753,8 +779,8 @@ export function ConversationPanel({
               flex: 1,
               // Height is owned by the auto-grow layout effect above; these are its bounds, kept
               // here so a first paint before the effect runs is already the right size.
-              height: COMPOSER_MIN_H,
-              maxHeight: COMPOSER_MAX_H,
+              height: composerMin,
+              maxHeight: composerMax,
               resize: "none",
               background: "transparent",
               border: "none",

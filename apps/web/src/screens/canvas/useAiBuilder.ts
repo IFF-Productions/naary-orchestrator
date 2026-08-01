@@ -95,6 +95,48 @@ export function needsFreshSession(mode: AiMode, hasSession: boolean): boolean {
   return mode === "create" && hasSession;
 }
 
+/** What a session was opened against — fixed for its whole life, server-side. */
+export interface SessionBinding {
+  /** The workflow it will save as the next version of, or "" for an unbound build. */
+  workflowKey: string;
+  /** The environment it generates in (provider keys, connections). */
+  env: string | null;
+}
+
+/**
+ * Has the canvas moved out from under the session?
+ *
+ * `needsFreshSession` covers the case the user asks for ("start a new one"); this covers the ones
+ * they don't. `/app/canvas` is a SIBLING of `/app`, not a child, so `AppShell`'s
+ * `${pathname}|${activeEnv}` key never remounts it — `openWorkflow` just rewrites `?key=`, and
+ * `newWorkflow` reseeds the canvas in place. Both leave a session ref alive across a change of the
+ * very thing it is bound to.
+ *
+ * WHY IT MATTERS. A turn always edits the graph the canvas sends, so the model does the right work
+ * either way — but `applyTurn` writes the result onto a session still stamped with workflow A. That
+ * session then reads "editing A" in the resume list, and resuming it from the Build with AI screen
+ * publishes B's graph as A's next version. Same destination as #874, reached by standing still.
+ *
+ * TWO RULES, DELIBERATELY DIFFERENT.
+ *
+ *   - **Environment**: any change is stale. The session carries its own `environmentId` and the
+ *     turn endpoint prefers it over the request's, so a session opened in sandbox keeps generating
+ *     against sandbox's provider keys and connections however the env chip reads.
+ *   - **Workflow**: only a BOUND session goes stale, and only against a different key. An unbound
+ *     one is safe by construction — resuming it creates a new workflow rather than overwriting one
+ *     — which is what lets a from-scratch chat survive its own bookkeeping: the create path blanks
+ *     `workflowKey`, and saving the draft later fills it in, and neither is a reason to throw away
+ *     the conversation that produced it.
+ */
+export function sessionBindingStale(
+  bound: SessionBinding | null,
+  canvas: SessionBinding,
+): boolean {
+  if (!bound) return false;
+  if (bound.env !== canvas.env) return true;
+  return bound.workflowKey !== "" && bound.workflowKey !== canvas.workflowKey;
+}
+
 /** Persisted turns → thread messages. Nothing is fabricated client-side: the assistant's summary,
  *  its cost and its quick replies are all written by the server after a successful turn. */
 function turnsToMessages(s: BuilderSession): ChatMsg[] {
@@ -115,6 +157,7 @@ export function useAiBuilder({
   keyParam,
   templateParam,
   savedKey,
+  activeEnv,
   setNodes,
   setEdges,
   setName,
@@ -143,6 +186,8 @@ export function useAiBuilder({
    * someone else's future key.
    */
   savedKey: string;
+  /** The active environment. A session generates in ONE — see sessionBindingStale. */
+  activeEnv: string | null;
   setNodes: Dispatch<SetStateAction<Node<NaaryData>[]>>;
   setEdges: Dispatch<SetStateAction<FlowEdge[]>>;
   setName: Dispatch<SetStateAction<string>>;
@@ -195,6 +240,8 @@ export function useAiBuilder({
   const [gotFrame, setGotFrame] = useState(false);
   const [draftName, setDraftName] = useState<string | null>(null);
   const sessionRef = useRef<string | null>(null);
+  /** What the live session was opened against — see sessionBindingStale. Null with no session. */
+  const boundRef = useRef<SessionBinding | null>(null);
   /** Has this conversation ever produced a validated draft? A ref, not `messages.length`, because
    *  the failure path below reads it from inside a closure over an older render. */
   const hasDraftRef = useRef(false);
@@ -293,9 +340,20 @@ export function useAiBuilder({
     }
     const editing = mode === "edit" && graph !== undefined;
 
-    // "Start a new one" is a new workflow, so it is a new conversation — see needsFreshSession.
-    if (needsFreshSession(mode, Boolean(sessionRef.current))) {
+    // Two reasons to start over, checked together because they have the same consequence: the
+    // session in hand can no longer stand for what the user is looking at. One is asked for
+    // ("start a new one"); the other is what happens when the canvas is pointed at a different
+    // workflow, or a different environment, without this screen ever remounting.
+    if (
+      needsFreshSession(mode, Boolean(sessionRef.current)) ||
+      sessionBindingStale(boundRef.current, {
+        workflowKey: savedKey,
+        env: activeEnv,
+      })
+    ) {
       sessionRef.current = null;
+      boundRef.current = null;
+      hasDraftRef.current = false;
       setMessages([]);
     }
 
@@ -362,11 +420,15 @@ export function useAiBuilder({
         // Bound to the SAVED workflow when there is one, so a session resumed later from the
         // Build with AI screen saves as its next version rather than forking a copy (#874). A
         // create is never bound: it is about to invent a different workflow.
+        const boundKey = editing && savedKey ? savedKey : "";
         const opened = await builderApi.openBuilderSession(
-          editing && savedKey ? { workflowKey: savedKey } : {},
+          boundKey ? { workflowKey: boundKey } : {},
         );
         sid = opened.id;
         sessionRef.current = sid;
+        // Record what it was opened against, so a later turn can tell whether the canvas has since
+        // moved out from under it.
+        boundRef.current = { workflowKey: boundKey, env: activeEnv };
       }
 
       const result = await builderApi.sendBuilderTurn(
@@ -488,6 +550,7 @@ export function useAiBuilder({
    *  is the user's, not the conversation's. */
   function resetChat() {
     sessionRef.current = null;
+    boundRef.current = null;
     hasDraftRef.current = false;
     setMessages([]);
     setPhase("idle");

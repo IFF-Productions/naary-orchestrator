@@ -424,10 +424,22 @@ export function AiPromptPanel({
         draft={aiPrompt}
         onDraftChange={onPromptChange}
         draftReadOnly={writing}
-        /* An example chip SENDS immediately, which would throw away a fix description sitting in
-           the box. There is nothing to suggest during that arrival anyway — the user has one thing
-           to read and one button to press. */
-        hideExamples={Boolean(fixNotice)}
+        /* On a `?fix=` arrival the banner above the composer already IS the intro: it names the
+           run, what is about to be sent and what to do next. A second empty state above it would
+           be redundant, and its example chips SEND immediately — tapping one would discard the
+           description of the user's failed run without a word. Dropping it also gives the phone
+           layout back the ~110px it needs to still show some canvas. */
+        hideIntro={Boolean(fixNotice)}
+        /* Pre-size the box for the description that is about to land in it (~15 lines), so the
+           panel doesn't jump under the reader at the moment the thing they're meant to read
+           appears. This is what `rows={fixNotice ? 12 : 2}` did before the composer was shared.
+
+           Keyed on the NOTICE, not on its stage — as is `hideIntro` above, and as `readOnly` is
+           via `fixIsWriting` covering every waiting stage. That was merely tidy while
+           `loading-canvas` was unreachable; #1007 made it a real state a user sits in, so the
+           arrival is now a genuine sequence (loading-canvas → reading-run → done) and anything
+           sized per-stage would resize the panel twice underneath someone mid-read. */
+        composerMinHeight={fixNotice ? (compact ? 130 : 200) : undefined}
         /* Which workflow this changes, in the shape the shared panel expects. `baseVersion` is null
            because the canvas's own Save owns versioning and this panel renders no save button of
            its own — see `showAccept`. */

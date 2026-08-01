@@ -55,6 +55,7 @@ function Harness({
   error = null,
   fixNotice = null,
   initialPrompt = "",
+  width,
 }: {
   initialMode: AiMode;
   canEdit: boolean;
@@ -65,15 +66,16 @@ function Harness({
   error?: string | null;
   fixNotice?: FixNotice | null;
   initialPrompt?: string;
+  width?: number;
 }) {
   const [mode, setMode] = useState<AiMode>(initialMode);
   const [prompt, setPrompt] = useState(initialPrompt);
   const [provider, setProvider] = useState<ProviderOption["id"] | null>(null);
   return (
     // 940px: the panel is full-bleed under the canvas top bar, so it is never seen at its own
-    // intrinsic width. A phone-width story would be a different component's problem (the panel
-    // is hidden below the rail breakpoint on the canvas' own top bar).
-    <div style={{ width: 940 }}>
+    // intrinsic width. `width` narrows it for the phone story — see FromFailedRunPhone for why
+    // that viewport is reachable even though the top bar hides this panel's own button there.
+    <div style={{ width: width ?? 940 }}>
       <AiPromptPanel
         aiPrompt={prompt}
         onPromptChange={setPrompt}
@@ -320,6 +322,35 @@ export const FromFailedRun: Story = {
       runId: "exec-t-demo-ce20c38b",
       drift: null,
       // From the same call that produced the prompt — the banner and the text cannot disagree.
+      includedNodeIds: FIX.includedNodeIds,
+      error: null,
+      stage: "done",
+    },
+  },
+};
+
+/**
+ * The same arrival on a PHONE — a viewport this panel is genuinely reachable at.
+ *
+ * The canvas top bar hides its "Build with AI" button below the rail breakpoint, so it looked like
+ * a state that could not happen. It can: `useFixFromRun` calls `setShowAi(true)` unconditionally,
+ * and `/app/canvas?key=…&fix=…` is one tap from the run detail's "Fix with AI".
+ *
+ * So the panel has to leave some canvas visible on a ~390px screen while still showing the whole
+ * disclosure. Two things give it the room: the intro block is dropped (the banner already names
+ * the run and what happens next), and the composer's cap tightens. The banner itself is never
+ * trimmed — it is the disclosure, and a phone is not a reason to say less about what leaves the
+ * tenant.
+ */
+export const FromFailedRunPhone: Story = {
+  args: {
+    initialMode: "edit",
+    canEdit: true,
+    width: 390,
+    initialPrompt: FIX_INSTRUCTION,
+    fixNotice: {
+      runId: "exec-t-demo-ce20c38b",
+      drift: null,
       includedNodeIds: FIX.includedNodeIds,
       error: null,
       stage: "done",

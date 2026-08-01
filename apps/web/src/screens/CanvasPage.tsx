@@ -254,6 +254,10 @@ export function CanvasPage() {
     // The SAVED key only — "" for an unsaved draft. Binds the session to this workflow so a build
     // resumed later from the Build with AI screen publishes its next version instead of forking it.
     savedKey: workflowKey,
+    // Both are what the session is bound to. This screen is a SIBLING of /app, so AppShell's
+    // pathname|env key never remounts it — opening another workflow or switching env leaves the
+    // conversation running against something it no longer describes. See sessionBindingStale.
+    activeEnv: activeEnvSlug,
     setNodes,
     setEdges,
     setName,

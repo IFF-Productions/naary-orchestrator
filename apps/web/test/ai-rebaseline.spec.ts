@@ -11,6 +11,7 @@
 import { describe, expect, it } from "vitest";
 import {
   needsFreshSession,
+  sessionBindingStale,
   shouldRebaselineAfterGeneration,
 } from "../src/screens/canvas/useAiBuilder";
 
@@ -59,5 +60,82 @@ describe("needsFreshSession", () => {
   it("keeps the conversation for an edit — that IS the multi-turn refinement", () => {
     expect(needsFreshSession("edit", true)).toBe(false);
     expect(needsFreshSession("edit", false)).toBe(false);
+  });
+});
+
+/**
+ * The canvas moving out from under a live session.
+ *
+ * `needsFreshSession` covers the case the user ASKS for. This covers the ones they don't: /app/canvas
+ * is a sibling of /app, not a child, so AppShell's `pathname|env` key never remounts it — opening
+ * another workflow only rewrites `?key=`, and switching environment changes nothing at all. Each
+ * turn still edits the graph the canvas sends, so the model does the right work; but the RESULT is
+ * written onto a session stamped with the previous workflow, which then reads "editing A" in the
+ * resume list while holding B's graph.
+ */
+describe("sessionBindingStale", () => {
+  const env = "prod";
+
+  it("is never stale with no session yet", () => {
+    expect(sessionBindingStale(null, { workflowKey: "a", env })).toBe(false);
+  });
+
+  it("goes stale when the canvas opens a DIFFERENT workflow", () => {
+    // The bug: resuming this session from Build with AI would publish B's graph as A's next
+    // version — #874's destination, reached without anyone navigating away from the canvas.
+    expect(
+      sessionBindingStale(
+        { workflowKey: "wf-a", env },
+        { workflowKey: "wf-b", env },
+      ),
+    ).toBe(true);
+  });
+
+  it("goes stale when a bound session's workflow is replaced by a blank canvas", () => {
+    expect(
+      sessionBindingStale(
+        { workflowKey: "wf-a", env },
+        { workflowKey: "", env },
+      ),
+    ).toBe(true);
+  });
+
+  it("goes stale on an ENVIRONMENT switch, bound or not", () => {
+    // The session carries its own environmentId and the turn endpoint prefers it, so without this
+    // a session opened in sandbox keeps generating against sandbox's keys and connections however
+    // the env chip reads.
+    expect(
+      sessionBindingStale(
+        { workflowKey: "wf-a", env: "sandbox" },
+        { workflowKey: "wf-a", env: "prod" },
+      ),
+    ).toBe(true);
+    expect(
+      sessionBindingStale(
+        { workflowKey: "", env: "sandbox" },
+        { workflowKey: "", env: "prod" },
+      ),
+    ).toBe(true);
+  });
+
+  it("survives the from-scratch bookkeeping an UNBOUND session does to itself", () => {
+    // A create opens an unbound session, then blanks `workflowKey` on the canvas; saving the draft
+    // later fills it in with a brand-new key. Neither is a reason to throw away the conversation
+    // that produced the draft — and an unbound session is safe by construction, because resuming
+    // it creates a workflow rather than overwriting one.
+    const bound = { workflowKey: "", env };
+    expect(sessionBindingStale(bound, { workflowKey: "", env })).toBe(false);
+    expect(sessionBindingStale(bound, { workflowKey: "new-flow", env })).toBe(
+      false,
+    );
+  });
+
+  it("stays put across turns on the same workflow — the ordinary case", () => {
+    expect(
+      sessionBindingStale(
+        { workflowKey: "wf-a", env },
+        { workflowKey: "wf-a", env },
+      ),
+    ).toBe(false);
   });
 });
