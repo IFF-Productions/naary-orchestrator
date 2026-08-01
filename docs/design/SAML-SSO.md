@@ -2,8 +2,12 @@
 
 **AC:** *SP metadata + ACS endpoint; tenant maps IdP; login provisions/links a user.*
 
-> **Testing it:** see [../sso-testing.md](../sso-testing.md) — configuration, a throwaway IdP, the
-> rejection paths worth probing, and why LDAP isn't testable yet.
+> **Testing it:** see [../sso-testing.md](../sso-testing.md) — configuration, a throwaway IdP, and the
+> rejection paths worth probing.
+>
+> **The other half of the roadmap line:** see [LDAP-DIRECTORY.md](./LDAP-DIRECTORY.md) — why LDAP is a
+> connectivity design rather than an auth one, and why the recommendation is SCIM over this SAML path
+> instead of a directory sync.
 
 Supersedes the "SSO/SAML" v1 non-goal in `PROVISIONING-MULTIUSER.md §2` (and is the piece
 `APP-AUTH.md` deferred).
