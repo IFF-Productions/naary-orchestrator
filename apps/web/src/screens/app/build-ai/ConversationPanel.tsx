@@ -1,8 +1,9 @@
 /**
  * The AI builder conversation — intro empty-state with example-idea chips (+ real resumable
- * sessions), the message thread (ember-flame AI avatar / user bubbles), typing dots while the turn
- * stream warms up, the "Building" plan card derived from real SSE frames, and the composer. Purely
- * presentational — the container owns all I/O.
+ * sessions), the message thread (ember-flame AI avatar / user bubbles), typing dots (plus the
+ * canvas's rotating status copy on the page — see `warming`) while the turn stream warms up, the
+ * "Building" plan card derived from real SSE frames, and the composer. Purely presentational — the
+ * container owns all I/O.
  *
  * TWO SURFACES, ONE COMPONENT (#1003). It is the 452px column on the Build with AI screen (design
  * "Naary AI Generate") and the strip under the canvas's top bar, switched by `variant`. Deliberately
@@ -19,6 +20,7 @@ import {
   type BuilderSessionSummary,
   SAVE_OPTION,
 } from "../../../lib/api/builder";
+import { useRotatingProgressMessage } from "../../../lib/use-progress-message";
 import { ConversationIntro } from "./ConversationIntro";
 import type { EditTarget } from "./edit-target";
 import type { PlanLine } from "./model";
@@ -205,6 +207,21 @@ export function ConversationPanel({
   const streaming = phase === "streaming";
   const ready = phase === "ready";
   const building = streaming && !!plan;
+  /**
+   * Rotating status copy in the ONE window where this column has nothing true to say: the turn is
+   * accepted, no frame has landed, and three dots are the whole message. Same lines as the canvas's
+   * progress pill, from the same picker — see lib/use-progress-message.
+   *
+   * It stops the moment `plan` exists. Those lines mirror REAL `node`/`edge` frames, and a user
+   * watching actual progress should not have playful copy competing with it. Written as `!plan`
+   * rather than leant on a container invariant, so where the boundary sits is legible HERE.
+   *
+   * Page only. On the canvas `generating === (phase === "streaming")` and `typing` lives inside
+   * that window, so `.naary-gen-pill` is already rotating over the stage at this exact moment —
+   * a second rotating string on the same screen is worse than the dots.
+   */
+  const warming = typing && !plan && !embedded;
+  const warmingMessage = useRotatingProgressMessage(warming);
   // Quick-reply chips belong to the newest assistant turn only, and never mid-build (#487).
   const lastMsgId = messages[messages.length - 1]?.id;
 
@@ -487,7 +504,7 @@ export function ConversationPanel({
                 style={{
                   display: "flex",
                   alignItems: "center",
-                  gap: 4,
+                  gap: warming ? 9 : 4,
                   background: "var(--card)",
                   border: "1px solid var(--line-mid)",
                   borderRadius: 12,
@@ -495,18 +512,49 @@ export function ConversationPanel({
                   padding: "12px 14px",
                 }}
               >
-                {[0, 1, 2].map((i) => (
-                  <span
-                    key={i}
-                    style={{
-                      width: 6,
-                      height: 6,
-                      borderRadius: "50%",
-                      background: "var(--ink-faint)",
-                      animation: `bwaDotp 1.2s infinite ${i * 0.2}s`,
-                    }}
-                  />
-                ))}
+                {/* The dots stay: they are the one thing here that keeps moving when the copy
+                    doesn't (reduced motion flattens the cross-fade, not the rotation). */}
+                <span
+                  aria-hidden
+                  style={{ display: "flex", alignItems: "center", gap: 4 }}
+                >
+                  {[0, 1, 2].map((i) => (
+                    <span
+                      key={i}
+                      style={{
+                        width: 6,
+                        height: 6,
+                        borderRadius: "50%",
+                        background: "var(--ink-faint)",
+                        animation: `bwaDotp 1.2s infinite ${i * 0.2}s`,
+                      }}
+                    />
+                  ))}
+                </span>
+                {warming && (
+                  <>
+                    {/* Keyed so each line cross-fades in, exactly as the canvas pill does.
+                        `aria-hidden`: swapping text every 2.5s is decorative, and a live region
+                        that re-announced it would be noisier than today's silent dots. */}
+                    <span
+                      key={warmingMessage}
+                      className="naary-gen-msg"
+                      aria-hidden
+                      style={{
+                        fontSize: "var(--text-sm)",
+                        color: "var(--ink-2)",
+                        lineHeight: 1.45,
+                      }}
+                    >
+                      {warmingMessage}
+                    </span>
+                    {/* ONE announcement for the whole wait, from a region whose text never
+                        changes — so assistive tech hears the state once and is then left alone. */}
+                    <span className="sr-only" role="status">
+                      Naary is thinking…
+                    </span>
+                  </>
+                )}
               </div>
             </div>
           )}

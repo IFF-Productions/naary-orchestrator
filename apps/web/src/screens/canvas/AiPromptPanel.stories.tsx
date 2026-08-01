@@ -258,7 +258,15 @@ export const Building: Story = {
   },
 };
 
-/** The turn is accepted and nothing has arrived yet — dots, not a frozen panel. */
+/**
+ * The turn is accepted and nothing has arrived yet — dots, not a frozen panel.
+ *
+ * Deliberately NOT the rotating status copy the Build with AI page shows in this same window (see
+ * Screens/Build with AI → Thinking). This strip sits above a live canvas, and on that canvas the
+ * `.naary-gen-pill` is ALREADY rotating those exact lines top-center for the whole of `phase ===
+ * "streaming"` — which contains this moment. Two rotating strings on one screen read as two
+ * different things happening. The panel stays quiet and lets the pill do it.
+ */
 export const Typing: Story = {
   args: {
     initialMode: "edit",
