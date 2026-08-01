@@ -263,8 +263,12 @@ const SOURCES = {
  * anything we would transform ourselves are excluded on purpose — a fixture we authored proves our
  * request matches our own reading, which is the mistake #813 caught one level down.
  *
- *   linear, monday — GraphQL. PERMANENT: the body is `{query, variables}`, correct by construction,
- *                and the risk is inside the query string. Only introspection can check that.
+ *   linear, monday — GraphQL, so permanently out of scope FOR THIS SCRIPT: the body is
+ *                `{query, variables}`, correct by construction, and the risk is inside the query
+ *                string. That risk is now covered by a sibling instrument rather than left
+ *                unchecked — `extract-graphql-schema-fixtures.mjs` pins each vendor's SCHEMA and
+ *                `integration-catalog-graphql.drift.spec.ts` diffs the query hints against it
+ *                (#943). Neither vendor requires a credential for that.
  *   googlesheets — Google publishes a DISCOVERY document (sheets.googleapis.com/$discovery/rest
  *                ?version=v4), not OpenAPI. Checked the googleapis GitHub org for an official
  *                conversion; the ones that exist are APIs.guru's.

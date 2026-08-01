@@ -12,6 +12,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "graphql": "16.14.2",
     "yaml": "2.9.0"
   }
 }
