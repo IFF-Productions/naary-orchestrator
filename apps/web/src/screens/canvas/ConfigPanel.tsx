@@ -21,6 +21,7 @@ import {
   Labeled,
   RETRYABLE_KINDS,
 } from "./fields";
+import { type ConnectEditing, ConnectionsSection } from "./ConnectionsSection";
 import { CopyButton, PinSection, WebhookInfo } from "./PinSection";
 import { leafPaths } from "./output-fields";
 import { renderAgentSections } from "./config-agents";
@@ -113,6 +114,7 @@ export function ConfigPanel({
   onTest,
   onChange,
   hideHeader,
+  connect,
 }: {
   node: Node<NaaryData>;
   upstreamIds: string[];
@@ -130,6 +132,12 @@ export function ConfigPanel({
   onChange: (patch: Record<string, unknown>) => void;
   /** The inspector dock renders its own node header — skip the built-in one. */
   hideHeader?: boolean;
+  /**
+   * Edge editing from the panel (#1026): the "Connects to" section. Optional because the panel is
+   * also rendered in contexts that only show a node's parameters (Storybook, previews) — absent,
+   * the section simply isn't offered and dragging remains the only way to connect.
+   */
+  connect?: ConnectEditing;
 }) {
   const kind = node.data.kind;
   const config = node.data.config ?? {};
@@ -253,6 +261,13 @@ export function ConfigPanel({
           style={inputStyle}
         />
       </Labeled>
+
+      {/* Connect this node to another WITHOUT dragging (#1026) — the keyboard/touch path, and
+          the only one that works when the target node is off-screen. Placed high because it is
+          structural: what runs next matters before this node's own parameters do. */}
+      {connect && (
+        <ConnectionsSection nodeId={node.id} kind={kind} connect={connect} />
+      )}
 
       {/* Insert-reference helper (design EXPRESSIONS.md §5): use {{ nodeId.path }} in any string
           field to splice an upstream output. Chips copy a starter token to paste at the cursor. */}

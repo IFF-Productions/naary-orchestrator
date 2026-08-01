@@ -7,6 +7,7 @@ import { nodeDisplayLabel } from "../../lib/graph-model";
 import type { EdgeConditionDraft } from "../../lib/graph-model";
 import type { NodeTestRun } from "./canvas-types";
 import { ConfigPanel } from "./ConfigPanel";
+import type { ConnectEditing } from "./ConnectionsSection";
 import { EdgeInspector } from "./EdgeInspector";
 import { type FlowEdge, type NaaryData } from "./flow";
 import {
@@ -43,6 +44,10 @@ export function CanvasInspectorDock({
   updateEdgeCondition,
   clearEdgeCondition,
   deleteEdge,
+  addConnection,
+  moveConnection,
+  selectEdge,
+  watching,
   pushToast,
   closeInspector,
   floating,
@@ -78,11 +83,49 @@ export function CanvasInspectorDock({
   ) => void;
   clearEdgeCondition: (edgeId: string) => void;
   deleteEdge: (id: string) => void;
+  /** Connect a node to another FROM THE PANEL (#1026) — appended, duplicates refused. */
+  addConnection: (source: string, target: string) => void;
+  /** Reorder one outgoing edge among its siblings — edge order is execution order. */
+  moveConnection: (edgeId: string, dir: -1 | 1) => void;
+  /** Select an edge, which opens the existing Connection inspector (where conditions live). */
+  selectEdge: (edgeId: string) => void;
+  /** Live run-watch: the canvas disables drag/connect, so panel edge editing is read-only too. */
+  watching: boolean;
   pushToast: (text: string, meta?: string, tone?: "ok" | "warn") => void;
   closeInspector: () => void;
   floating: boolean;
   stacked: boolean;
 }) {
+  /**
+   * "Connects to" (#1026): the REAL edge array (order intact — it is execution order) plus the
+   * four edits. Conditions are NOT re-implemented here; the row's Condition button selects the
+   * edge, which raises the existing Connection inspector over this dock.
+   */
+  const connect: ConnectEditing | undefined = selected
+    ? {
+        edges,
+        nodes: nodes.map((n) => ({
+          id: n.id,
+          kind: n.data.kind,
+          label: nodeDisplayLabel(n.data.kind, n.data.config),
+        })),
+        onAdd: (targetId) => addConnection(selected.id, targetId),
+        onMove: moveConnection,
+        onRemove: (edgeId) => {
+          const edge = edges.find((e) => e.id === edgeId);
+          deleteEdge(edgeId);
+          if (edge)
+            pushToast(
+              "Edge removed",
+              `${nodeLabelOf(edge.target)} may need a new input`,
+              "warn",
+            );
+        },
+        onEditCondition: selectEdge,
+        readOnly: watching,
+      }
+    : undefined;
+
   // Edge (Connection) inspector — overlays the dock when an edge is selected.
   const edgeOverlay = selectedEdge ? (
     <EdgeInspector
@@ -150,6 +193,7 @@ export function CanvasInspectorDock({
             // state + the dock's output tab.
             onTest={(autofill) => runNodeTest(selected.id, autofill)}
             onChange={(patch) => updateConfig(selected.id, patch)}
+            connect={connect}
           />
         ) : undefined
       }

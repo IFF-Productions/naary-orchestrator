@@ -81,6 +81,11 @@ import { CanvasToasts } from "./canvas/CanvasToasts";
 import { NARROW_QUERY, type NodeTestRun } from "./canvas/canvas-types";
 import { CategoryRail } from "./canvas/CategoryRail";
 import { CatalogModal } from "./canvas/CatalogModal";
+import {
+  appendConnection,
+  hasConnection,
+  moveConnection as moveEdgeOrder,
+} from "./canvas/connect-model";
 import { downstreamOf } from "./canvas/graph-traversal";
 import {
   type FlowEdge,
@@ -873,6 +878,43 @@ export function CanvasPage() {
     setEdges((es) => es.filter((e) => e.id !== id));
   }
 
+  /**
+   * Connect two nodes from the CONFIG PANEL (#1026) — the keyboard/touch path to what dragging a
+   * handle does. Deliberately the same result as a drag: appended LAST, and a duplicate refused
+   * (React Flow's `addEdge` drops one too), so which entry point was used leaves no trace in the
+   * graph. `markStaleFrom` because the target's inputs just changed — the same courtesy
+   * `deleteEdge`/`updateConfig` already pay, or the dock would show a cached test output as fresh.
+   */
+  function addConnection(source: string, target: string): void {
+    if (hasConnection(edges, source, target)) return;
+    const edge: FlowEdge = {
+      id: `e-${crypto.randomUUID().slice(0, 8)}`,
+      source,
+      target,
+    };
+    setEdges((es) => appendConnection(es, edge));
+    markStaleFrom(target, true);
+  }
+
+  /**
+   * Reorder one outgoing edge among the others leaving the same node. EDGE ORDER IS EXECUTION
+   * ORDER (see connect-model): the interpreter takes every passing edge in array order, which sets
+   * fan-out order and decides which branch's terminal status the run reports. A swap, so no
+   * unrelated edge moves and the saved diff is exactly the reorder that was asked for.
+   */
+  function moveConnection(edgeId: string, dir: -1 | 1): void {
+    setEdges((es) => moveEdgeOrder(es, edgeId, dir));
+  }
+
+  /** Select an edge (and only it) — raises the existing Connection inspector, where conditions
+   *  are edited. The panel routes there instead of keeping a second condition editor. */
+  function selectEdge(id: string): void {
+    setNodes((ns) =>
+      ns.map((n) => (n.selected ? { ...n, selected: false } : n)),
+    );
+    setEdges((es) => es.map((e) => ({ ...e, selected: e.id === id })));
+  }
+
   const addNode = useCallback(
     (kind: NodeType, preset?: Record<string, unknown>) => {
       const id = `${kind}-${crypto.randomUUID().slice(0, 8)}`;
@@ -1195,6 +1237,10 @@ export function CanvasPage() {
       updateEdgeCondition={updateEdgeCondition}
       clearEdgeCondition={clearEdgeCondition}
       deleteEdge={deleteEdge}
+      addConnection={addConnection}
+      moveConnection={moveConnection}
+      selectEdge={selectEdge}
+      watching={watching}
       pushToast={pushToast}
       closeInspector={closeInspector}
       floating={dockFloating}
