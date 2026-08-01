@@ -108,13 +108,17 @@ describe("templates — every agent output a template reads is one its schema de
   }
 
   /** Every `(agentNodeId, field)` a graph reads: edge conditions (`<id>.output.<field>`) and
-   *  mcpTool `argumentBindings` (`{ from: <id>, path: "output.<field>" }`). */
+   *  mcpTool `argumentBindings` (`{ from: <id>, path: "output.<field>" }`).
+   *  `[\w-]` not `\w`: node ids may contain hyphens, and a guard against silent skipping that
+   *  silently skips `check-content.output.flagged` would be its own punchline. */
   function reads(graph: GraphDef): { nodeId: string; field: string }[] {
     const out: { nodeId: string; field: string }[] = [];
     for (const e of graph.edges) {
       const path = e.condition?.path;
       const m =
-        typeof path === "string" ? /^(\w+)\.output\.(\w+)/.exec(path) : null;
+        typeof path === "string"
+          ? /^([\w-]+)\.output\.([\w-]+)/.exec(path)
+          : null;
       if (m) out.push({ nodeId: m[1], field: m[2] });
     }
     for (const n of graph.nodes) {
@@ -130,7 +134,7 @@ describe("templates — every agent output a template reads is one its schema de
       )?.argumentBindings;
       for (const b of Object.values(bindings ?? {})) {
         const bm =
-          typeof b?.path === "string" ? /^output\.(\w+)/.exec(b.path) : null;
+          typeof b?.path === "string" ? /^output\.([\w-]+)/.exec(b.path) : null;
         if (bm && b.from) out.push({ nodeId: b.from, field: bm[1] });
       }
     }
