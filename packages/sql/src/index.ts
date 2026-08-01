@@ -11,6 +11,14 @@ export type {
   SqlWriteResult,
 } from "./types";
 export { connectPinned, pinnedPgStream, pinnedTediousConnector } from "./pin";
+export { dsnHost } from "./dsn";
+export {
+  SQL_SCHEMA_MAX_COLUMNS,
+  SQL_SCHEMA_MAX_TABLES,
+  buildSchemaQuery,
+  summarizeSchemaRows,
+} from "./schema";
+export type { SqlColumnInfo, SqlSchemaSummary, SqlTableInfo } from "./schema";
 
 const ADAPTERS: Record<SqlEngine, SqlEngineAdapter> = {
   postgres: postgresAdapter,

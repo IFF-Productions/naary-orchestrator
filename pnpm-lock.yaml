@@ -86,6 +86,9 @@ importers:
       '@naary/secrets':
         specifier: workspace:*
         version: link:../../packages/secrets
+      '@naary/sql':
+        specifier: workspace:*
+        version: link:../../packages/sql
       '@naary/storage':
         specifier: workspace:*
         version: link:../../packages/storage
@@ -563,6 +566,9 @@ importers:
 
   packages/sql:
     dependencies:
+      '@naary/dsl':
+        specifier: workspace:*
+        version: link:../dsl
       mssql:
         specifier: ^12.7.0
         version: 12.7.0(supports-color@9.4.0)

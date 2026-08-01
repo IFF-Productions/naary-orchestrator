@@ -7,8 +7,9 @@ import type {
   GraphQLSchemaSummary,
   McpToolSummary,
   OpenApiSummary,
+  SqlSchemaSummary,
 } from "@naary/dsl";
-import { BASE, http, introspectFetch } from "./http";
+import { BASE, http, introspectFetch, introspectPost } from "./http";
 import type {
   ChatDefinition,
   ChatReply,
@@ -68,6 +69,21 @@ export const integrationsApi = {
       token?.trim() ? { Authorization: `Bearer ${token.trim()}` } : undefined,
     );
   },
+  // Read a saved SQL connection's tables + columns, to autocomplete a sqlQuery/sqlExec node.
+  // The connection (and its DSN) is resolved SERVER-SIDE from the id — unlike the two calls above
+  // there is no URL and no token here, because the credential never reaches the browser.
+  // `refresh` bypasses the server's TTL cache; it is the editor's Refresh button, for a schema
+  // that just changed under a migration.
+  introspectSqlSchema(
+    connectionId: string,
+    refresh?: boolean,
+  ): Promise<SqlSchemaSummary> {
+    return introspectPost<SqlSchemaSummary>("/introspect/sql", {
+      connectionId,
+      ...(refresh ? { refresh: true } : {}),
+    });
+  },
+
   // --- Integrations ---
   // Provider API keys (BYOK). The key is NEVER returned — list yields names + validity.
   listCredentials(tenantId: string): Promise<ProviderCredential[]> {

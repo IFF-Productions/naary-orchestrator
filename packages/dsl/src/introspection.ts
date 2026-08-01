@@ -217,3 +217,41 @@ export interface McpToolSummary {
    */
   inputSchema?: Record<string, unknown>;
 }
+
+// ---- SQL schema (#1004) -------------------------------------------------------------------------
+
+/**
+ * A tenant database's schema, as the API returns it to the canvas so the `sqlQuery`/`sqlExec`
+ * editor can autocomplete table and column names.
+ *
+ * These are WIRE shapes and live here for the same reason `OpenApiSummary` and `McpToolSummary` do:
+ * the API produces them and the web app consumes them, and neither app may import the other. The
+ * per-engine SQL that produces them (and the mapper that fills them) lives in `@naary/sql`, which
+ * carries the database drivers and therefore must never be a browser dependency.
+ */
+export interface SqlColumnInfo {
+  name: string;
+  /** Engine-native type name, e.g. `text`, `varchar(255)`, `nvarchar`. Display only. */
+  type: string;
+  nullable: boolean;
+}
+
+/** One table or view visible to the connection's credential. */
+export interface SqlTableInfo {
+  schema: string;
+  name: string;
+  columns: SqlColumnInfo[];
+}
+
+/**
+ * The introspection result. `truncated` marks that a size cap dropped WHOLE tables — the UI must
+ * say so, because a partial list that looks complete is how autocomplete quietly hides a real table.
+ */
+export interface SqlSchemaSummary {
+  tables: SqlTableInfo[];
+  truncated: boolean;
+  /** Tables dropped by the table cap (exactly known); the row cap can drop an unknown number more. */
+  droppedTables: number;
+  /** Human-readable explanation of what was dropped, or why the list is empty. */
+  note?: string;
+}

@@ -10,9 +10,9 @@ import {
   JsonArrayField,
   JsonField,
   Labeled,
-  textareaStyle,
 } from "./fields";
 import { RowHead } from "./PinSection";
+import { SqlEditorField } from "./SqlEditorField";
 
 export function renderDataSections(c: ConfigSectionCtx) {
   const {
@@ -61,11 +61,10 @@ export function renderDataSections(c: ConfigSectionCtx) {
               label="SQL"
               value={kind === "sqlExec" ? "write" : "read-only"}
             />
-            <textarea
+            <SqlEditorField
               value={str("sql")}
-              onChange={(e) => onChange({ sql: e.target.value })}
-              rows={5}
-              style={textareaStyle}
+              onChange={(sql) => onChange({ sql })}
+              connectionId={str("connectionId")}
               placeholder={
                 kind === "sqlExec"
                   ? "UPDATE users SET seen = true WHERE id = $1"

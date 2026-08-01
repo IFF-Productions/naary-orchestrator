@@ -211,6 +211,18 @@ export async function introspectFetch<T>(
   url: string,
   headers?: Record<string, string>,
 ): Promise<T> {
+  return introspectPost<T>(path, { url, ...(headers ? { headers } : {}) });
+}
+
+/**
+ * The body-shaped form of the above, for `/introspect/sql`, whose request names a saved
+ * `connectionId` rather than a URL (the DSN is a secret and is resolved server-side — it never
+ * reaches the browser, so there is nothing for the caller to pass).
+ */
+export async function introspectPost<T>(
+  path: string,
+  body: Record<string, unknown>,
+): Promise<T> {
   const token = await getBearerToken();
   const res = await fetch(`${BASE}${path}`, {
     method: "POST",
@@ -222,14 +234,14 @@ export async function introspectFetch<T>(
         ? { "x-environment-id": activeEnvironmentId }
         : {}),
     },
-    body: JSON.stringify({ url, ...(headers ? { headers } : {}) }),
+    body: JSON.stringify(body),
   });
   if (res.status === 401) throw new UnauthorizedError();
   if (!res.ok) {
-    const body = (await res.json().catch(() => null)) as {
+    const parsed = (await res.json().catch(() => null)) as {
       message?: string;
     } | null;
-    throw new Error(body?.message ?? `Introspection failed (${res.status}).`);
+    throw new Error(parsed?.message ?? `Introspection failed (${res.status}).`);
   }
   return res.json() as Promise<T>;
 }
