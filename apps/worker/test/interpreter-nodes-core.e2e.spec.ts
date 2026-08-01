@@ -253,8 +253,20 @@ describe("runGraph interpreter — per-node behavior: data, http, sql, sub-workf
       const sub = result.ctx.sub as {
         status: string;
         output: Record<string, unknown>;
+        childRunId?: string;
       };
       expect(sub.status).toBe("completed");
+      // #960: …and the child's workflowId, so the Run Detail can LINK to the child run.
+      // Asserted by RESOLVING it rather than by matching the id format: the whole reason
+      // the worker returns the id (instead of the SPA rebuilding
+      // `<parentId>-sub-<nodeId>-<step>`) is that it must keep addressing a real run even
+      // if that format changes. parentExecution proves it's THIS run's child.
+      expect(typeof sub.childRunId).toBe("string");
+      const childDesc = await env.client.workflow
+        .getHandle(sub.childRunId as string)
+        .describe();
+      expect(childDesc.workflowId).toBe(sub.childRunId);
+      expect(childDesc.parentExecution?.workflowId).toBe("e2e-subworkflow");
       expect(sub.output.worker).toMatchObject({ status: "ok" });
       // internal bookkeeping keys are NOT copied into the parent (bounded payload)
       expect(sub.output.__input).toBeUndefined();

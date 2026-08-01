@@ -95,6 +95,7 @@ describe("runGraph interpreter — per-node behavior: flow control, loops, feeds
       const loop = result.ctx.loop as {
         status: string;
         output: Record<string, unknown>;
+        childRunId?: string;
       }[];
       expect(loop).toHaveLength(3);
       // every item ran to completion, in ARRAY ORDER, with the item as its input
@@ -110,6 +111,18 @@ describe("runGraph interpreter — per-node behavior: flow control, loops, feeds
       ]);
       // each child's mocked agent cost (0.01) summed into the parent (3 × 0.01)
       expect(result.ctx.__costUsd).toBeCloseTo(0.03, 5);
+      // #960: one link per item — DISTINCT ids in item order, each ADDRESSING a real child
+      // run of this parent (resolved, not format-matched: the point of returning the id is
+      // that the SPA never rebuilds `<parentId>-foreach-<nodeId>-<step>-<i>` itself).
+      const ids = loop.map((r) => r.childRunId as string);
+      expect(ids.every((id) => typeof id === "string" && id.length > 0)).toBe(
+        true,
+      );
+      expect(new Set(ids).size).toBe(3);
+      for (const id of ids) {
+        const d = await env.client.workflow.getHandle(id).describe();
+        expect(d.parentExecution?.workflowId).toBe("e2e-foreach");
+      }
     });
   });
 
@@ -178,9 +191,21 @@ describe("runGraph interpreter — per-node behavior: flow control, loops, feeds
       const result = await handle.result();
       // the whole forEach still COMPLETES; each thrown child is a failed entry
       expect(result.status).toBe("completed");
-      const loop = result.ctx.loop as { status: string }[];
+      const loop = result.ctx.loop as {
+        status: string;
+        childRunId?: string;
+      }[];
       expect(loop).toHaveLength(2);
       expect(loop.map((r) => r.status)).toEqual(["failed", "failed"]);
+      // #960: a FAILED entry keeps its child's workflowId — that is the run the user most
+      // wants to open, so the id must survive the rejection the `.catch` swallows.
+      for (const r of loop) {
+        expect(typeof r.childRunId).toBe("string");
+        const d = await env.client.workflow
+          .getHandle(r.childRunId as string)
+          .describe();
+        expect(d.parentExecution?.workflowId).toBe("e2e-foreach-throw");
+      }
     });
   });
 
