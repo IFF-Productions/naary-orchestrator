@@ -17,6 +17,7 @@ const EMPTY: GraphDiff = {
   nodesChanged: [],
   edgesAdded: [],
   edgesRemoved: [],
+  edgesChanged: [],
   edgesReordered: false,
   startNodeChanged: false,
 };
@@ -25,6 +26,16 @@ const node = (id: string) =>
   ({ id, type: "set" }) as GraphDiff["nodesAdded"][number];
 const edge = (from: string, to: string) =>
   ({ from, to }) as GraphDiff["edgesAdded"][number];
+const changedNode = (id: string): GraphDiff["nodesChanged"][number] => ({
+  id,
+  before: node(id),
+  after: node(id),
+  fields: ["config"],
+  details: [
+    { path: "config.url", kind: "changed", before: '"a"', after: '"b"' },
+  ],
+  detailsOmitted: 0,
+});
 
 describe("isEmptyDiff", () => {
   it("is empty only when nothing at all changed", () => {
@@ -35,21 +46,19 @@ describe("isEmptyDiff", () => {
   const cases: [string, Partial<GraphDiff>][] = [
     ["a node added", { nodesAdded: [node("a")] }],
     ["a node removed", { nodesRemoved: [node("a")] }],
+    ["a node changed", { nodesChanged: [changedNode("a")] }],
+    ["an edge added", { edgesAdded: [edge("a", "b")] }],
+    ["an edge removed", { edgesRemoved: [edge("a", "b")] }],
+    // An edited edge CONDITION (#1020). It adds and removes nothing and reorders nothing, so a
+    // predicate that forgets it reports "no changes" for a rerouted branch.
     [
-      "a node changed",
+      "an edge condition changed",
       {
-        nodesChanged: [
-          {
-            id: "a",
-            before: node("a"),
-            after: node("a"),
-            fields: ["config"],
-          },
+        edgesChanged: [
+          { from: "a", to: "b", after: { path: "x", op: "eq", value: 1 } },
         ],
       },
     ],
-    ["an edge added", { edgesAdded: [edge("a", "b")] }],
-    ["an edge removed", { edgesRemoved: [edge("a", "b")] }],
     // Both of these are behaviour changes with no node/edge SET change at all, which is exactly
     // why they need their own flags: edge order decides branch precedence, and the entry node
     // decides where the run starts.
@@ -72,11 +81,27 @@ describe("diffCounts", () => {
         nodesAdded: [node("a"), node("b")],
         edgesAdded: [edge("a", "b")],
         nodesRemoved: [node("c")],
-        nodesChanged: [
-          { id: "d", before: node("d"), after: node("d"), fields: ["config"] },
-        ],
+        nodesChanged: [changedNode("d")],
       }),
     ).toEqual({ add: 3, chg: 1, del: 1, total: 5 });
+  });
+
+  it("counts an edited edge condition as ONE change, not an add plus a delete", () => {
+    // The old diff reported this as edgesAdded:1 + edgesRemoved:1 — "+1 added, −1 removed" for an
+    // edit that moved a threshold and nothing else.
+    expect(
+      diffCounts({
+        ...EMPTY,
+        edgesChanged: [
+          {
+            from: "a",
+            to: "b",
+            before: { path: "x", op: "gt", value: 5 },
+            after: { path: "x", op: "gt", value: 10 },
+          },
+        ],
+      }),
+    ).toEqual({ add: 0, chg: 1, del: 0, total: 1 });
   });
 
   it("counts a reorder and a start-node change as changes", () => {

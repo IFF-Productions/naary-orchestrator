@@ -190,6 +190,8 @@ export {
   graphsEqual,
   type GraphDiff,
   type NodeChange,
+  type FieldChange,
+  type EdgeChange,
 } from "./graph-diff";
 export {
   NODE_CATALOG,
