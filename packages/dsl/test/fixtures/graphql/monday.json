@@ -1,0 +1,398 @@
+{
+  "x-naary": {
+    "provider": "monday",
+    "source": "GET https://api.monday.com/v2/get_schema",
+    "auth": "none",
+    "note": "PRUNED introspection snapshot (vendor-served introspection JSON, no auth (the /v2 API endpoint itself 401s)) — see packages/dsl/scripts/extract-graphql-schema-fixtures.mjs. Do not hand-edit.",
+    "fetchedAt": "2026-08-01",
+    "upstreamTypes": 1272
+  },
+  "__schema": {
+    "queryType": {
+      "name": "Query"
+    },
+    "mutationType": {
+      "name": "Mutation"
+    },
+    "types": [
+      {
+        "kind": "OBJECT",
+        "name": "Query",
+        "fields": [
+          {
+            "name": "boards",
+            "args": [
+              {
+                "name": "board_kind",
+                "type": {
+                  "kind": "ENUM",
+                  "name": "BoardKind"
+                }
+              },
+              {
+                "name": "hierarchy_types",
+                "type": {
+                  "kind": "LIST",
+                  "ofType": {
+                    "kind": "NON_NULL",
+                    "ofType": {
+                      "kind": "ENUM",
+                      "name": "BoardHierarchy"
+                    }
+                  }
+                }
+              },
+              {
+                "name": "ids",
+                "type": {
+                  "kind": "LIST",
+                  "ofType": {
+                    "kind": "NON_NULL",
+                    "ofType": {
+                      "kind": "SCALAR",
+                      "name": "ID"
+                    }
+                  }
+                }
+              },
+              {
+                "name": "latest",
+                "type": {
+                  "kind": "SCALAR",
+                  "name": "Boolean"
+                }
+              },
+              {
+                "name": "limit",
+                "type": {
+                  "kind": "SCALAR",
+                  "name": "Int"
+                },
+                "defaultValue": "25"
+              },
+              {
+                "name": "order_by",
+                "type": {
+                  "kind": "ENUM",
+                  "name": "BoardsOrderBy"
+                }
+              },
+              {
+                "name": "page",
+                "type": {
+                  "kind": "SCALAR",
+                  "name": "Int"
+                },
+                "defaultValue": "1"
+              },
+              {
+                "name": "state",
+                "type": {
+                  "kind": "ENUM",
+                  "name": "State"
+                },
+                "defaultValue": "active"
+              },
+              {
+                "name": "workspace_ids",
+                "type": {
+                  "kind": "LIST",
+                  "ofType": {
+                    "kind": "SCALAR",
+                    "name": "ID"
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "name": "items",
+            "args": [
+              {
+                "name": "exclude_nonactive",
+                "type": {
+                  "kind": "SCALAR",
+                  "name": "Boolean"
+                }
+              },
+              {
+                "name": "ids",
+                "type": {
+                  "kind": "LIST",
+                  "ofType": {
+                    "kind": "NON_NULL",
+                    "ofType": {
+                      "kind": "SCALAR",
+                      "name": "ID"
+                    }
+                  }
+                }
+              },
+              {
+                "name": "limit",
+                "type": {
+                  "kind": "SCALAR",
+                  "name": "Int"
+                },
+                "defaultValue": "25"
+              },
+              {
+                "name": "newest_first",
+                "type": {
+                  "kind": "SCALAR",
+                  "name": "Boolean"
+                }
+              },
+              {
+                "name": "page",
+                "type": {
+                  "kind": "SCALAR",
+                  "name": "Int"
+                },
+                "defaultValue": "1"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "kind": "OBJECT",
+        "name": "Mutation",
+        "fields": [
+          {
+            "name": "change_column_value",
+            "args": [
+              {
+                "name": "board_id",
+                "type": {
+                  "kind": "NON_NULL",
+                  "ofType": {
+                    "kind": "SCALAR",
+                    "name": "ID"
+                  }
+                }
+              },
+              {
+                "name": "column_id",
+                "type": {
+                  "kind": "NON_NULL",
+                  "ofType": {
+                    "kind": "SCALAR",
+                    "name": "String"
+                  }
+                }
+              },
+              {
+                "name": "create_labels_if_missing",
+                "type": {
+                  "kind": "SCALAR",
+                  "name": "Boolean"
+                }
+              },
+              {
+                "name": "item_id",
+                "type": {
+                  "kind": "SCALAR",
+                  "name": "ID"
+                }
+              },
+              {
+                "name": "value",
+                "type": {
+                  "kind": "NON_NULL",
+                  "ofType": {
+                    "kind": "SCALAR",
+                    "name": "JSON"
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "name": "create_item",
+            "args": [
+              {
+                "name": "board_id",
+                "type": {
+                  "kind": "NON_NULL",
+                  "ofType": {
+                    "kind": "SCALAR",
+                    "name": "ID"
+                  }
+                }
+              },
+              {
+                "name": "column_values",
+                "type": {
+                  "kind": "SCALAR",
+                  "name": "JSON"
+                }
+              },
+              {
+                "name": "create_labels_if_missing",
+                "type": {
+                  "kind": "SCALAR",
+                  "name": "Boolean"
+                }
+              },
+              {
+                "name": "group_id",
+                "type": {
+                  "kind": "SCALAR",
+                  "name": "String"
+                }
+              },
+              {
+                "name": "item_name",
+                "type": {
+                  "kind": "NON_NULL",
+                  "ofType": {
+                    "kind": "SCALAR",
+                    "name": "String"
+                  }
+                }
+              },
+              {
+                "name": "position_relative_method",
+                "type": {
+                  "kind": "ENUM",
+                  "name": "PositionRelative"
+                }
+              },
+              {
+                "name": "relative_to",
+                "type": {
+                  "kind": "SCALAR",
+                  "name": "ID"
+                }
+              }
+            ]
+          },
+          {
+            "name": "create_update",
+            "args": [
+              {
+                "name": "body",
+                "type": {
+                  "kind": "NON_NULL",
+                  "ofType": {
+                    "kind": "SCALAR",
+                    "name": "String"
+                  }
+                }
+              },
+              {
+                "name": "original_creation_date",
+                "type": {
+                  "kind": "SCALAR",
+                  "name": "String"
+                }
+              },
+              {
+                "name": "mentions_list",
+                "type": {
+                  "kind": "LIST",
+                  "ofType": {
+                    "kind": "INPUT_OBJECT",
+                    "name": "UpdateMention"
+                  }
+                }
+              },
+              {
+                "name": "item_id",
+                "type": {
+                  "kind": "SCALAR",
+                  "name": "ID"
+                }
+              },
+              {
+                "name": "parent_id",
+                "type": {
+                  "kind": "SCALAR",
+                  "name": "ID"
+                }
+              },
+              {
+                "name": "use_app_info",
+                "type": {
+                  "kind": "SCALAR",
+                  "name": "Boolean"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "kind": "ENUM",
+        "name": "BoardHierarchy"
+      },
+      {
+        "kind": "ENUM",
+        "name": "BoardKind"
+      },
+      {
+        "kind": "ENUM",
+        "name": "BoardsOrderBy"
+      },
+      {
+        "kind": "SCALAR",
+        "name": "Boolean"
+      },
+      {
+        "kind": "SCALAR",
+        "name": "ID"
+      },
+      {
+        "kind": "SCALAR",
+        "name": "Int"
+      },
+      {
+        "kind": "SCALAR",
+        "name": "JSON"
+      },
+      {
+        "kind": "ENUM",
+        "name": "PositionRelative"
+      },
+      {
+        "kind": "ENUM",
+        "name": "State"
+      },
+      {
+        "kind": "SCALAR",
+        "name": "String"
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "UpdateMention",
+        "inputFields": [
+          {
+            "name": "id",
+            "type": {
+              "kind": "NON_NULL",
+              "ofType": {
+                "kind": "SCALAR",
+                "name": "ID"
+              }
+            }
+          },
+          {
+            "name": "type",
+            "type": {
+              "kind": "NON_NULL",
+              "ofType": {
+                "kind": "ENUM",
+                "name": "MentionType"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "kind": "ENUM",
+        "name": "MentionType"
+      }
+    ]
+  }
+}

@@ -341,7 +341,7 @@ the live status code, before "the spec doesn't have it" becomes "it's broken".
 
 | Why | Providers |
 | --- | --- |
-| **GraphQL — permanently out of scope, not pending.** The body IS `{query, variables}`, which is right by construction; the risk lives inside the query STRING, and only introspection can check that. Do not expect these to appear above | `linear` (3) `monday` (3) |
+| **GraphQL — out of scope for an OPENAPI diff, and checked by a different instrument instead (#943).** The body IS `{query, variables}`, which is right by construction; the risk lives inside the query STRING, and only a schema can check that. They will never appear above, and they are no longer unverified: see **§2.6** | `linear` (3) `monday` (3) |
 | Vendor publishes a machine-readable document in a **non-OpenAPI format**. Converting it ourselves would mean auditing our own converter, not their spec | `googlesheets` (2 — Discovery doc), `dropbox` (2 — Stone IDL, `dropbox/dropbox-api-spec`) |
 | Vendor publishes **no** machine-readable REST document. Shopify's REST Admin API is legacy and only the GraphQL schema is published; the OpenAPI documents in circulation are third-party and years stale | `shopify` (3) |
 | Spec exists but is **not a fetchable document** — Airtable's is embedded in its docs page's SSR state under an `"openApi"` key, with no raw URL. Scraping HTML into a fixture would put a third party's page structure in the refresh path, which is the one thing the pinning design exists to prevent | `airtable` (2) |
@@ -364,6 +364,69 @@ Adding one is a `SOURCES` entry in `packages/dsl/scripts/extract-openapi-fixture
 with rather than rediscovered. Where a document was hard to find, the SOURCES comment carries the
 DERIVATION (Calendly's is reachable only through a Gatsby chunk → Stoplight project id → node uri)
 so a future 404 is recoverable.
+
+### 2.6 The two GraphQL providers, checked against their SCHEMAS — 10 of 10 actions (#943)
+
+§2.5 used to say that `linear`'s and `monday`'s six write actions could **never** be verified. That
+was true of an OpenAPI diff and false in general, and it is no longer the case.
+
+Their body is `{query, variables}` — right by construction, which is why a body diff learns nothing
+about them. All of the risk is inside the query STRING: a renamed mutation, a changed input type, an
+argument that became required. The catalog's `query` hints are not prose but real GraphQL documents,
+so `packages/dsl/test/integration-catalog-graphql.drift.spec.ts` parses each one and asserts it
+against a pinned schema:
+
+1. the root field the document selects exists on `Mutation`/`Query`;
+2. every argument it passes exists, and each variable's **declared type is usable in that argument's
+   position** — the GraphQL spec's own variable-usage rule, so `$value: String!` into monday's
+   `value: JSON!` fails;
+3. every argument the schema marks NON_NULL without a default is actually passed;
+4. every declared variable's named type exists;
+5. every NON_NULL input field without a default (Linear's `IssueCreateInput.teamId`) is reachable
+   from the `variables` hint, and every key that hint mentions is a field the input type declares.
+
+**No credential is involved, which is why this is a pinned fixture and not a live-gated spec.** Both
+vendors serve a schema to anonymous callers: Linear answers `__schema` introspection at
+`POST https://api.linear.app/graphql`, and monday publishes the same payload at
+`GET https://api.monday.com/v2/get_schema` (its `/v2` API endpoint itself 401s — getting those two
+backwards is the one way to conclude "monday needs a token"). So the refresh is
+`pnpm refresh:graphql-fixtures`, by anyone, in a PR, as a reviewable diff — the same bargain as the
+OpenAPI documents, and for the same reason: a check that fails on someone else's outage gets muted,
+and a check only the token-holder can run is muted by default.
+
+Tri-stated exactly like §2.5, and pasted from a real run:
+
+| Action | | confirmed | unknowable | wrong |
+| --- | --- | ---: | ---: | ---: |
+| `linear.create_issue` | WRITE | 11 | 0 | 0 |
+| `linear.get_issue` | read | 7 | 0 | 0 |
+| `linear.list_issues` | read | 7 | 1 | 0 |
+| `linear.create_comment` | WRITE | 9 | 0 | 0 |
+| `linear.update_issue` | WRITE | 15 | 0 | 0 |
+| `monday.create_item` | WRITE | 12 | 1 | 0 |
+| `monday.get_item` | read | 4 | 1 | 0 |
+| `monday.list_items` | read | 4 | 1 | 0 |
+| `monday.create_update` | WRITE | 8 | 1 | 0 |
+| `monday.change_column_value` | WRITE | 16 | 1 | 0 |
+| **TOTAL** | | **93** | **6** | **0** |
+
+The **six write actions carry 71 confirmed claims**, and nothing in either catalog entry was wrong
+when this was pinned — unlike the REST audit, this one found no bug, which is what #943 predicted.
+
+**All 6 unknowables are one thing: a `variables` hint that is not machine-readable.** Five are
+monday's (`{ boardId, itemName, columnValues }` is an authoring sketch, not JSON) and one is
+Linear's `list_issues` (`{ "first": 50, "filter": { … } }`). That costs monday nothing — it passes
+its values as plain arguments, which checks 1–4 cover completely — and costs Linear only the
+interior of an optional filter. Linear's three writes put their values inside
+`IssueCreateInput`/`CommentCreateInput`/`IssueUpdateInput`, and those hints ARE JSON, which is where
+check 5's coverage comes from. `variables` is a `type: "json"` field an author fills in, so some of
+this is unknowable by design; saying so is the point of printing three numbers instead of one.
+
+What this does **not** cover, deliberately: the selection sets (`{ success issue { id } }`). The
+fixture prunes output-object types, because vendoring Linear's 600 of them to check field names we
+only read would multiply the fixture by 20 for a strictly smaller risk. And, as everywhere in this
+document, a schema proves the query is *sayable*, not that anyone has ever sent it — neither
+provider has live proof (§2, `Live proof` column).
 
 ## 3. Non-catalog product integrations
 
@@ -483,8 +546,10 @@ Stated as facts, not as a plan.
 2. **37 of 38 catalog providers have no real-environment proof.** Only GitHub is exercised
    live (plus Slack's webhook notification path, which is not the `integration` node). The
    other 36 are typed, unit-tested, and unproven against the real API. Since #813, 13 of them
-   also have their write bodies diffed against the provider's own OpenAPI spec (§2.5) — which
-   narrows the gap without closing it: a spec proves the shape is sayable, not that it works.
+   also have their write bodies diffed against the provider's own OpenAPI spec (§2.5), and since
+   #943 `linear` and `monday` have their GraphQL documents diffed against the vendors' own schemas
+   (§2.6) — which narrows the gap without closing it: a spec proves the shape is sayable, not that
+   it works.
 3. **Only Postgres of the three SQL engines is live-covered.** MySQL and SQL Server have
    unit + integration coverage; no live DSN gate exists.
 4. **`codeAgent` live coverage is Claude Code, read-only.** Cursor and Copilot have no live

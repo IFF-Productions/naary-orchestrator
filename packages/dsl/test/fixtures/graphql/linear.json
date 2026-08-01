@@ -1,0 +1,1918 @@
+{
+  "x-naary": {
+    "provider": "linear",
+    "source": "POST https://api.linear.app/graphql",
+    "auth": "none",
+    "note": "PRUNED introspection snapshot (unauthenticated __schema introspection) — see packages/dsl/scripts/extract-graphql-schema-fixtures.mjs. Do not hand-edit.",
+    "fetchedAt": "2026-08-01",
+    "upstreamTypes": 1130
+  },
+  "__schema": {
+    "queryType": {
+      "name": "Query"
+    },
+    "mutationType": {
+      "name": "Mutation"
+    },
+    "types": [
+      {
+        "kind": "OBJECT",
+        "name": "Query",
+        "fields": [
+          {
+            "name": "comment",
+            "args": [
+              {
+                "name": "id",
+                "type": {
+                  "kind": "SCALAR",
+                  "name": "String"
+                }
+              },
+              {
+                "name": "hash",
+                "type": {
+                  "kind": "SCALAR",
+                  "name": "String"
+                }
+              }
+            ]
+          },
+          {
+            "name": "issues",
+            "args": [
+              {
+                "name": "filter",
+                "type": {
+                  "kind": "INPUT_OBJECT",
+                  "name": "IssueFilter"
+                }
+              },
+              {
+                "name": "before",
+                "type": {
+                  "kind": "SCALAR",
+                  "name": "String"
+                }
+              },
+              {
+                "name": "after",
+                "type": {
+                  "kind": "SCALAR",
+                  "name": "String"
+                }
+              },
+              {
+                "name": "first",
+                "type": {
+                  "kind": "SCALAR",
+                  "name": "Int"
+                }
+              },
+              {
+                "name": "last",
+                "type": {
+                  "kind": "SCALAR",
+                  "name": "Int"
+                }
+              },
+              {
+                "name": "includeArchived",
+                "type": {
+                  "kind": "SCALAR",
+                  "name": "Boolean"
+                }
+              },
+              {
+                "name": "orderBy",
+                "type": {
+                  "kind": "ENUM",
+                  "name": "PaginationOrderBy"
+                }
+              },
+              {
+                "name": "sort",
+                "type": {
+                  "kind": "LIST",
+                  "ofType": {
+                    "kind": "NON_NULL",
+                    "ofType": {
+                      "kind": "INPUT_OBJECT",
+                      "name": "IssueSortInput"
+                    }
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "name": "issue",
+            "args": [
+              {
+                "name": "id",
+                "type": {
+                  "kind": "NON_NULL",
+                  "ofType": {
+                    "kind": "SCALAR",
+                    "name": "String"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "kind": "OBJECT",
+        "name": "Mutation",
+        "fields": [
+          {
+            "name": "commentCreate",
+            "args": [
+              {
+                "name": "input",
+                "type": {
+                  "kind": "NON_NULL",
+                  "ofType": {
+                    "kind": "INPUT_OBJECT",
+                    "name": "CommentCreateInput"
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "name": "issueCreate",
+            "args": [
+              {
+                "name": "input",
+                "type": {
+                  "kind": "NON_NULL",
+                  "ofType": {
+                    "kind": "INPUT_OBJECT",
+                    "name": "IssueCreateInput"
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "name": "issueUpdate",
+            "args": [
+              {
+                "name": "input",
+                "type": {
+                  "kind": "NON_NULL",
+                  "ofType": {
+                    "kind": "INPUT_OBJECT",
+                    "name": "IssueUpdateInput"
+                  }
+                }
+              },
+              {
+                "name": "id",
+                "type": {
+                  "kind": "NON_NULL",
+                  "ofType": {
+                    "kind": "SCALAR",
+                    "name": "String"
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "kind": "SCALAR",
+        "name": "Boolean"
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "CommentCreateInput",
+        "inputFields": [
+          {
+            "name": "id",
+            "type": {
+              "kind": "SCALAR",
+              "name": "String"
+            }
+          },
+          {
+            "name": "body",
+            "type": {
+              "kind": "SCALAR",
+              "name": "String"
+            }
+          },
+          {
+            "name": "bodyData",
+            "type": {
+              "kind": "SCALAR",
+              "name": "JSON"
+            }
+          },
+          {
+            "name": "issueId",
+            "type": {
+              "kind": "SCALAR",
+              "name": "String"
+            }
+          },
+          {
+            "name": "projectUpdateId",
+            "type": {
+              "kind": "SCALAR",
+              "name": "String"
+            }
+          },
+          {
+            "name": "initiativeUpdateId",
+            "type": {
+              "kind": "SCALAR",
+              "name": "String"
+            }
+          },
+          {
+            "name": "postId",
+            "type": {
+              "kind": "SCALAR",
+              "name": "String"
+            }
+          },
+          {
+            "name": "documentContentId",
+            "type": {
+              "kind": "SCALAR",
+              "name": "String"
+            }
+          },
+          {
+            "name": "projectId",
+            "type": {
+              "kind": "SCALAR",
+              "name": "String"
+            }
+          },
+          {
+            "name": "initiativeId",
+            "type": {
+              "kind": "SCALAR",
+              "name": "String"
+            }
+          },
+          {
+            "name": "parentId",
+            "type": {
+              "kind": "SCALAR",
+              "name": "String"
+            }
+          },
+          {
+            "name": "createAsUser",
+            "type": {
+              "kind": "SCALAR",
+              "name": "String"
+            }
+          },
+          {
+            "name": "displayIconUrl",
+            "type": {
+              "kind": "SCALAR",
+              "name": "String"
+            }
+          },
+          {
+            "name": "createdAt",
+            "type": {
+              "kind": "SCALAR",
+              "name": "DateTime"
+            }
+          },
+          {
+            "name": "doNotSubscribeToIssue",
+            "type": {
+              "kind": "SCALAR",
+              "name": "Boolean"
+            }
+          },
+          {
+            "name": "createOnSyncedSlackThread",
+            "type": {
+              "kind": "SCALAR",
+              "name": "Boolean"
+            }
+          },
+          {
+            "name": "quotedText",
+            "type": {
+              "kind": "SCALAR",
+              "name": "String"
+            }
+          },
+          {
+            "name": "subscriberIds",
+            "type": {
+              "kind": "LIST",
+              "ofType": {
+                "kind": "NON_NULL",
+                "ofType": {
+                  "kind": "SCALAR",
+                  "name": "String"
+                }
+              }
+            }
+          }
+        ]
+      },
+      {
+        "kind": "SCALAR",
+        "name": "Int"
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "IssueCreateInput",
+        "inputFields": [
+          {
+            "name": "id",
+            "type": {
+              "kind": "SCALAR",
+              "name": "String"
+            }
+          },
+          {
+            "name": "title",
+            "type": {
+              "kind": "SCALAR",
+              "name": "String"
+            }
+          },
+          {
+            "name": "description",
+            "type": {
+              "kind": "SCALAR",
+              "name": "String"
+            }
+          },
+          {
+            "name": "descriptionData",
+            "type": {
+              "kind": "SCALAR",
+              "name": "JSON"
+            }
+          },
+          {
+            "name": "assigneeId",
+            "type": {
+              "kind": "SCALAR",
+              "name": "String"
+            }
+          },
+          {
+            "name": "delegateId",
+            "type": {
+              "kind": "SCALAR",
+              "name": "String"
+            }
+          },
+          {
+            "name": "parentId",
+            "type": {
+              "kind": "SCALAR",
+              "name": "String"
+            }
+          },
+          {
+            "name": "priority",
+            "type": {
+              "kind": "SCALAR",
+              "name": "Int"
+            }
+          },
+          {
+            "name": "estimate",
+            "type": {
+              "kind": "SCALAR",
+              "name": "Int"
+            }
+          },
+          {
+            "name": "subscriberIds",
+            "type": {
+              "kind": "LIST",
+              "ofType": {
+                "kind": "NON_NULL",
+                "ofType": {
+                  "kind": "SCALAR",
+                  "name": "String"
+                }
+              }
+            }
+          },
+          {
+            "name": "labelIds",
+            "type": {
+              "kind": "LIST",
+              "ofType": {
+                "kind": "NON_NULL",
+                "ofType": {
+                  "kind": "SCALAR",
+                  "name": "String"
+                }
+              }
+            }
+          },
+          {
+            "name": "teamId",
+            "type": {
+              "kind": "NON_NULL",
+              "ofType": {
+                "kind": "SCALAR",
+                "name": "String"
+              }
+            }
+          },
+          {
+            "name": "cycleId",
+            "type": {
+              "kind": "SCALAR",
+              "name": "String"
+            }
+          },
+          {
+            "name": "projectId",
+            "type": {
+              "kind": "SCALAR",
+              "name": "String"
+            }
+          },
+          {
+            "name": "projectMilestoneId",
+            "type": {
+              "kind": "SCALAR",
+              "name": "String"
+            }
+          },
+          {
+            "name": "lastAppliedTemplateId",
+            "type": {
+              "kind": "SCALAR",
+              "name": "String"
+            }
+          },
+          {
+            "name": "stateId",
+            "type": {
+              "kind": "SCALAR",
+              "name": "String"
+            }
+          },
+          {
+            "name": "referenceCommentId",
+            "type": {
+              "kind": "SCALAR",
+              "name": "String"
+            }
+          },
+          {
+            "name": "sourceCommentId",
+            "type": {
+              "kind": "SCALAR",
+              "name": "String"
+            }
+          },
+          {
+            "name": "sourcePullRequestCommentId",
+            "type": {
+              "kind": "SCALAR",
+              "name": "String"
+            }
+          },
+          {
+            "name": "sortOrder",
+            "type": {
+              "kind": "SCALAR",
+              "name": "Float"
+            }
+          },
+          {
+            "name": "prioritySortOrder",
+            "type": {
+              "kind": "SCALAR",
+              "name": "Float"
+            }
+          },
+          {
+            "name": "subIssueSortOrder",
+            "type": {
+              "kind": "SCALAR",
+              "name": "Float"
+            }
+          },
+          {
+            "name": "dueDate",
+            "type": {
+              "kind": "SCALAR",
+              "name": "TimelessDate"
+            }
+          },
+          {
+            "name": "createAsUser",
+            "type": {
+              "kind": "SCALAR",
+              "name": "String"
+            }
+          },
+          {
+            "name": "displayIconUrl",
+            "type": {
+              "kind": "SCALAR",
+              "name": "String"
+            }
+          },
+          {
+            "name": "preserveSortOrderOnCreate",
+            "type": {
+              "kind": "SCALAR",
+              "name": "Boolean"
+            }
+          },
+          {
+            "name": "createdAt",
+            "type": {
+              "kind": "SCALAR",
+              "name": "DateTime"
+            }
+          },
+          {
+            "name": "slaBreachesAt",
+            "type": {
+              "kind": "SCALAR",
+              "name": "DateTime"
+            }
+          },
+          {
+            "name": "slaStartedAt",
+            "type": {
+              "kind": "SCALAR",
+              "name": "DateTime"
+            }
+          },
+          {
+            "name": "templateId",
+            "type": {
+              "kind": "SCALAR",
+              "name": "String"
+            }
+          },
+          {
+            "name": "completedAt",
+            "type": {
+              "kind": "SCALAR",
+              "name": "DateTime"
+            }
+          },
+          {
+            "name": "slaType",
+            "type": {
+              "kind": "ENUM",
+              "name": "SLADayCountType"
+            }
+          },
+          {
+            "name": "useDefaultTemplate",
+            "type": {
+              "kind": "SCALAR",
+              "name": "Boolean"
+            }
+          },
+          {
+            "name": "releaseIds",
+            "type": {
+              "kind": "LIST",
+              "ofType": {
+                "kind": "NON_NULL",
+                "ofType": {
+                  "kind": "SCALAR",
+                  "name": "String"
+                }
+              }
+            }
+          },
+          {
+            "name": "inheritsSharedAccess",
+            "type": {
+              "kind": "SCALAR",
+              "name": "Boolean"
+            }
+          }
+        ]
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "IssueFilter",
+        "inputFields": [
+          {
+            "name": "id",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "IssueIDComparator"
+            }
+          },
+          {
+            "name": "createdAt",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "DateComparator"
+            }
+          },
+          {
+            "name": "updatedAt",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "DateComparator"
+            }
+          },
+          {
+            "name": "number",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "NumberComparator"
+            }
+          },
+          {
+            "name": "title",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "StringComparator"
+            }
+          },
+          {
+            "name": "description",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "NullableStringComparator"
+            }
+          },
+          {
+            "name": "priority",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "NullableNumberComparator"
+            }
+          },
+          {
+            "name": "estimate",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "EstimateComparator"
+            }
+          },
+          {
+            "name": "startedAt",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "NullableDateComparator"
+            }
+          },
+          {
+            "name": "triagedAt",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "NullableDateComparator"
+            }
+          },
+          {
+            "name": "completedAt",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "NullableDateComparator"
+            }
+          },
+          {
+            "name": "canceledAt",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "NullableDateComparator"
+            }
+          },
+          {
+            "name": "slaBreachesAt",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "NullableDateComparator"
+            }
+          },
+          {
+            "name": "archivedAt",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "NullableDateComparator"
+            }
+          },
+          {
+            "name": "autoClosedAt",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "NullableDateComparator"
+            }
+          },
+          {
+            "name": "autoArchivedAt",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "NullableDateComparator"
+            }
+          },
+          {
+            "name": "addedToCycleAt",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "NullableDateComparator"
+            }
+          },
+          {
+            "name": "addedToCyclePeriod",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "CyclePeriodComparator"
+            }
+          },
+          {
+            "name": "dueDate",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "NullableTimelessDateComparator"
+            }
+          },
+          {
+            "name": "accumulatedStateUpdatedAt",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "NullableDateComparator"
+            }
+          },
+          {
+            "name": "snoozedUntilAt",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "NullableDateComparator"
+            }
+          },
+          {
+            "name": "assignee",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "NullableUserFilter"
+            }
+          },
+          {
+            "name": "delegate",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "NullableUserFilter"
+            }
+          },
+          {
+            "name": "lastAppliedTemplate",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "NullableTemplateFilter"
+            }
+          },
+          {
+            "name": "recurringIssueTemplate",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "NullableTemplateFilter"
+            }
+          },
+          {
+            "name": "sourceMetadata",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "SourceMetadataComparator"
+            }
+          },
+          {
+            "name": "creator",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "NullableUserFilter"
+            }
+          },
+          {
+            "name": "parent",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "NullableIssueFilter"
+            }
+          },
+          {
+            "name": "snoozedBy",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "NullableUserFilter"
+            }
+          },
+          {
+            "name": "labels",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "IssueLabelCollectionFilter"
+            }
+          },
+          {
+            "name": "subscribers",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "UserCollectionFilter"
+            }
+          },
+          {
+            "name": "hasSharedUsers",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "RelationExistsComparator"
+            }
+          },
+          {
+            "name": "sharedWith",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "UserCollectionFilter"
+            }
+          },
+          {
+            "name": "team",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "TeamFilter"
+            }
+          },
+          {
+            "name": "projectMilestone",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "NullableProjectMilestoneFilter"
+            }
+          },
+          {
+            "name": "comments",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "CommentCollectionFilter"
+            }
+          },
+          {
+            "name": "activity",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "ActivityCollectionFilter"
+            }
+          },
+          {
+            "name": "suggestions",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "IssueSuggestionCollectionFilter"
+            }
+          },
+          {
+            "name": "cycle",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "NullableCycleFilter"
+            }
+          },
+          {
+            "name": "project",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "NullableProjectFilter"
+            }
+          },
+          {
+            "name": "state",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "WorkflowStateFilter"
+            }
+          },
+          {
+            "name": "children",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "IssueCollectionFilter"
+            }
+          },
+          {
+            "name": "attachments",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "AttachmentCollectionFilter"
+            }
+          },
+          {
+            "name": "searchableContent",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "ContentComparator"
+            }
+          },
+          {
+            "name": "hasRelatedRelations",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "RelationExistsComparator"
+            }
+          },
+          {
+            "name": "hasDuplicateRelations",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "RelationExistsComparator"
+            }
+          },
+          {
+            "name": "hasBlockedByRelations",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "RelationExistsComparator"
+            }
+          },
+          {
+            "name": "hasBlockingRelations",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "RelationExistsComparator"
+            }
+          },
+          {
+            "name": "hasSuggestedRelatedIssues",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "RelationExistsComparator"
+            }
+          },
+          {
+            "name": "hasSuggestedSimilarIssues",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "RelationExistsComparator"
+            }
+          },
+          {
+            "name": "hasSuggestedAssignees",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "RelationExistsComparator"
+            }
+          },
+          {
+            "name": "hasSuggestedProjects",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "RelationExistsComparator"
+            }
+          },
+          {
+            "name": "hasSuggestedLabels",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "RelationExistsComparator"
+            }
+          },
+          {
+            "name": "hasSuggestedTeams",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "RelationExistsComparator"
+            }
+          },
+          {
+            "name": "hasActiveAgentSessions",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "RelationExistsComparator"
+            }
+          },
+          {
+            "name": "hasDismissedAgentSessions",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "RelationExistsComparator"
+            }
+          },
+          {
+            "name": "hasErroredAgentSessions",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "RelationExistsComparator"
+            }
+          },
+          {
+            "name": "hasMergedAgentPullRequests",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "RelationExistsComparator"
+            }
+          },
+          {
+            "name": "slaStatus",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "SlaStatusComparator"
+            }
+          },
+          {
+            "name": "reactions",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "ReactionCollectionFilter"
+            }
+          },
+          {
+            "name": "needs",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "CustomerNeedCollectionFilter"
+            }
+          },
+          {
+            "name": "releases",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "ReleaseCollectionFilter"
+            }
+          },
+          {
+            "name": "customerCount",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "NumberComparator"
+            }
+          },
+          {
+            "name": "customerImportantCount",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "NumberComparator"
+            }
+          },
+          {
+            "name": "leadTime",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "NullableDurationComparator"
+            }
+          },
+          {
+            "name": "cycleTime",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "NullableDurationComparator"
+            }
+          },
+          {
+            "name": "ageTime",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "NullableDurationComparator"
+            }
+          },
+          {
+            "name": "triageTime",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "NullableDurationComparator"
+            }
+          },
+          {
+            "name": "and",
+            "type": {
+              "kind": "LIST",
+              "ofType": {
+                "kind": "NON_NULL",
+                "ofType": {
+                  "kind": "INPUT_OBJECT",
+                  "name": "IssueFilter"
+                }
+              }
+            }
+          },
+          {
+            "name": "or",
+            "type": {
+              "kind": "LIST",
+              "ofType": {
+                "kind": "NON_NULL",
+                "ofType": {
+                  "kind": "INPUT_OBJECT",
+                  "name": "IssueFilter"
+                }
+              }
+            }
+          }
+        ]
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "IssueSortInput",
+        "inputFields": [
+          {
+            "name": "priority",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "PrioritySort"
+            }
+          },
+          {
+            "name": "estimate",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "EstimateSort"
+            }
+          },
+          {
+            "name": "title",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "TitleSort"
+            }
+          },
+          {
+            "name": "label",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "LabelSort"
+            }
+          },
+          {
+            "name": "labelGroup",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "LabelGroupSort"
+            }
+          },
+          {
+            "name": "slaStatus",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "SlaStatusSort"
+            }
+          },
+          {
+            "name": "createdAt",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "CreatedAtSort"
+            }
+          },
+          {
+            "name": "updatedAt",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "UpdatedAtSort"
+            }
+          },
+          {
+            "name": "completedAt",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "CompletedAtSort"
+            }
+          },
+          {
+            "name": "dueDate",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "DueDateSort"
+            }
+          },
+          {
+            "name": "accumulatedStateUpdatedAt",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "TimeInStatusSort"
+            }
+          },
+          {
+            "name": "cycle",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "CycleSort"
+            }
+          },
+          {
+            "name": "milestone",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "MilestoneSort"
+            }
+          },
+          {
+            "name": "assignee",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "AssigneeSort"
+            }
+          },
+          {
+            "name": "delegate",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "DelegateSort"
+            }
+          },
+          {
+            "name": "project",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "ProjectSort"
+            }
+          },
+          {
+            "name": "team",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "TeamSort"
+            }
+          },
+          {
+            "name": "manual",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "ManualSort"
+            }
+          },
+          {
+            "name": "workflowState",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "WorkflowStateSort"
+            }
+          },
+          {
+            "name": "customer",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "CustomerSort"
+            }
+          },
+          {
+            "name": "customerRevenue",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "CustomerRevenueSort"
+            }
+          },
+          {
+            "name": "customerCount",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "CustomerCountSort"
+            }
+          },
+          {
+            "name": "customerImportantCount",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "CustomerImportantCountSort"
+            }
+          },
+          {
+            "name": "rootIssue",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "RootIssueSort"
+            }
+          },
+          {
+            "name": "linkCount",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "LinkCountSort"
+            }
+          },
+          {
+            "name": "release",
+            "type": {
+              "kind": "INPUT_OBJECT",
+              "name": "ReleaseSort"
+            }
+          }
+        ]
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "IssueUpdateInput",
+        "inputFields": [
+          {
+            "name": "title",
+            "type": {
+              "kind": "SCALAR",
+              "name": "String"
+            }
+          },
+          {
+            "name": "description",
+            "type": {
+              "kind": "SCALAR",
+              "name": "String"
+            }
+          },
+          {
+            "name": "descriptionData",
+            "type": {
+              "kind": "SCALAR",
+              "name": "JSON"
+            }
+          },
+          {
+            "name": "assigneeId",
+            "type": {
+              "kind": "SCALAR",
+              "name": "String"
+            }
+          },
+          {
+            "name": "delegateId",
+            "type": {
+              "kind": "SCALAR",
+              "name": "String"
+            }
+          },
+          {
+            "name": "parentId",
+            "type": {
+              "kind": "SCALAR",
+              "name": "String"
+            }
+          },
+          {
+            "name": "priority",
+            "type": {
+              "kind": "SCALAR",
+              "name": "Int"
+            }
+          },
+          {
+            "name": "estimate",
+            "type": {
+              "kind": "SCALAR",
+              "name": "Int"
+            }
+          },
+          {
+            "name": "subscriberIds",
+            "type": {
+              "kind": "LIST",
+              "ofType": {
+                "kind": "NON_NULL",
+                "ofType": {
+                  "kind": "SCALAR",
+                  "name": "String"
+                }
+              }
+            }
+          },
+          {
+            "name": "labelIds",
+            "type": {
+              "kind": "LIST",
+              "ofType": {
+                "kind": "NON_NULL",
+                "ofType": {
+                  "kind": "SCALAR",
+                  "name": "String"
+                }
+              }
+            }
+          },
+          {
+            "name": "addedLabelIds",
+            "type": {
+              "kind": "LIST",
+              "ofType": {
+                "kind": "NON_NULL",
+                "ofType": {
+                  "kind": "SCALAR",
+                  "name": "String"
+                }
+              }
+            }
+          },
+          {
+            "name": "removedLabelIds",
+            "type": {
+              "kind": "LIST",
+              "ofType": {
+                "kind": "NON_NULL",
+                "ofType": {
+                  "kind": "SCALAR",
+                  "name": "String"
+                }
+              }
+            }
+          },
+          {
+            "name": "releaseIds",
+            "type": {
+              "kind": "LIST",
+              "ofType": {
+                "kind": "NON_NULL",
+                "ofType": {
+                  "kind": "SCALAR",
+                  "name": "String"
+                }
+              }
+            }
+          },
+          {
+            "name": "addedReleaseIds",
+            "type": {
+              "kind": "LIST",
+              "ofType": {
+                "kind": "NON_NULL",
+                "ofType": {
+                  "kind": "SCALAR",
+                  "name": "String"
+                }
+              }
+            }
+          },
+          {
+            "name": "removedReleaseIds",
+            "type": {
+              "kind": "LIST",
+              "ofType": {
+                "kind": "NON_NULL",
+                "ofType": {
+                  "kind": "SCALAR",
+                  "name": "String"
+                }
+              }
+            }
+          },
+          {
+            "name": "teamId",
+            "type": {
+              "kind": "SCALAR",
+              "name": "String"
+            }
+          },
+          {
+            "name": "cycleId",
+            "type": {
+              "kind": "SCALAR",
+              "name": "String"
+            }
+          },
+          {
+            "name": "projectId",
+            "type": {
+              "kind": "SCALAR",
+              "name": "String"
+            }
+          },
+          {
+            "name": "projectMilestoneId",
+            "type": {
+              "kind": "SCALAR",
+              "name": "String"
+            }
+          },
+          {
+            "name": "lastAppliedTemplateId",
+            "type": {
+              "kind": "SCALAR",
+              "name": "String"
+            }
+          },
+          {
+            "name": "stateId",
+            "type": {
+              "kind": "SCALAR",
+              "name": "String"
+            }
+          },
+          {
+            "name": "sortOrder",
+            "type": {
+              "kind": "SCALAR",
+              "name": "Float"
+            }
+          },
+          {
+            "name": "prioritySortOrder",
+            "type": {
+              "kind": "SCALAR",
+              "name": "Float"
+            }
+          },
+          {
+            "name": "subIssueSortOrder",
+            "type": {
+              "kind": "SCALAR",
+              "name": "Float"
+            }
+          },
+          {
+            "name": "dueDate",
+            "type": {
+              "kind": "SCALAR",
+              "name": "TimelessDate"
+            }
+          },
+          {
+            "name": "inheritsSharedAccess",
+            "type": {
+              "kind": "SCALAR",
+              "name": "Boolean"
+            }
+          },
+          {
+            "name": "trusted",
+            "type": {
+              "kind": "SCALAR",
+              "name": "Boolean"
+            }
+          },
+          {
+            "name": "trashed",
+            "type": {
+              "kind": "SCALAR",
+              "name": "Boolean"
+            }
+          },
+          {
+            "name": "slaBreachesAt",
+            "type": {
+              "kind": "SCALAR",
+              "name": "DateTime"
+            }
+          },
+          {
+            "name": "slaStartedAt",
+            "type": {
+              "kind": "SCALAR",
+              "name": "DateTime"
+            }
+          },
+          {
+            "name": "snoozedUntilAt",
+            "type": {
+              "kind": "SCALAR",
+              "name": "DateTime"
+            }
+          },
+          {
+            "name": "snoozedById",
+            "type": {
+              "kind": "SCALAR",
+              "name": "String"
+            }
+          },
+          {
+            "name": "slaType",
+            "type": {
+              "kind": "ENUM",
+              "name": "SLADayCountType"
+            }
+          },
+          {
+            "name": "autoClosedByParentClosing",
+            "type": {
+              "kind": "SCALAR",
+              "name": "Boolean"
+            }
+          }
+        ]
+      },
+      {
+        "kind": "ENUM",
+        "name": "PaginationOrderBy"
+      },
+      {
+        "kind": "SCALAR",
+        "name": "String"
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "ActivityCollectionFilter",
+        "x-pruned-fields": true
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "AssigneeSort",
+        "x-pruned-fields": true
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "AttachmentCollectionFilter",
+        "x-pruned-fields": true
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "CommentCollectionFilter",
+        "x-pruned-fields": true
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "CompletedAtSort",
+        "x-pruned-fields": true
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "ContentComparator",
+        "x-pruned-fields": true
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "CreatedAtSort",
+        "x-pruned-fields": true
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "CustomerCountSort",
+        "x-pruned-fields": true
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "CustomerImportantCountSort",
+        "x-pruned-fields": true
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "CustomerNeedCollectionFilter",
+        "x-pruned-fields": true
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "CustomerRevenueSort",
+        "x-pruned-fields": true
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "CustomerSort",
+        "x-pruned-fields": true
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "CyclePeriodComparator",
+        "x-pruned-fields": true
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "CycleSort",
+        "x-pruned-fields": true
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "DateComparator",
+        "x-pruned-fields": true
+      },
+      {
+        "kind": "SCALAR",
+        "name": "DateTime"
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "DelegateSort",
+        "x-pruned-fields": true
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "DueDateSort",
+        "x-pruned-fields": true
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "EstimateComparator",
+        "x-pruned-fields": true
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "EstimateSort",
+        "x-pruned-fields": true
+      },
+      {
+        "kind": "SCALAR",
+        "name": "Float"
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "IssueCollectionFilter",
+        "x-pruned-fields": true
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "IssueIDComparator",
+        "x-pruned-fields": true
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "IssueLabelCollectionFilter",
+        "x-pruned-fields": true
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "IssueSuggestionCollectionFilter",
+        "x-pruned-fields": true
+      },
+      {
+        "kind": "SCALAR",
+        "name": "JSON"
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "LabelGroupSort",
+        "x-pruned-fields": true
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "LabelSort",
+        "x-pruned-fields": true
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "LinkCountSort",
+        "x-pruned-fields": true
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "ManualSort",
+        "x-pruned-fields": true
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "MilestoneSort",
+        "x-pruned-fields": true
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "NullableCycleFilter",
+        "x-pruned-fields": true
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "NullableDateComparator",
+        "x-pruned-fields": true
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "NullableDurationComparator",
+        "x-pruned-fields": true
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "NullableIssueFilter",
+        "x-pruned-fields": true
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "NullableNumberComparator",
+        "x-pruned-fields": true
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "NullableProjectFilter",
+        "x-pruned-fields": true
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "NullableProjectMilestoneFilter",
+        "x-pruned-fields": true
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "NullableStringComparator",
+        "x-pruned-fields": true
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "NullableTemplateFilter",
+        "x-pruned-fields": true
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "NullableTimelessDateComparator",
+        "x-pruned-fields": true
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "NullableUserFilter",
+        "x-pruned-fields": true
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "NumberComparator",
+        "x-pruned-fields": true
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "PrioritySort",
+        "x-pruned-fields": true
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "ProjectSort",
+        "x-pruned-fields": true
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "ReactionCollectionFilter",
+        "x-pruned-fields": true
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "RelationExistsComparator",
+        "x-pruned-fields": true
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "ReleaseCollectionFilter",
+        "x-pruned-fields": true
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "ReleaseSort",
+        "x-pruned-fields": true
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "RootIssueSort",
+        "x-pruned-fields": true
+      },
+      {
+        "kind": "ENUM",
+        "name": "SLADayCountType"
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "SlaStatusComparator",
+        "x-pruned-fields": true
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "SlaStatusSort",
+        "x-pruned-fields": true
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "SourceMetadataComparator",
+        "x-pruned-fields": true
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "StringComparator",
+        "x-pruned-fields": true
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "TeamFilter",
+        "x-pruned-fields": true
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "TeamSort",
+        "x-pruned-fields": true
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "TimeInStatusSort",
+        "x-pruned-fields": true
+      },
+      {
+        "kind": "SCALAR",
+        "name": "TimelessDate"
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "TitleSort",
+        "x-pruned-fields": true
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "UpdatedAtSort",
+        "x-pruned-fields": true
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "UserCollectionFilter",
+        "x-pruned-fields": true
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "WorkflowStateFilter",
+        "x-pruned-fields": true
+      },
+      {
+        "kind": "INPUT_OBJECT",
+        "name": "WorkflowStateSort",
+        "x-pruned-fields": true
+      }
+    ]
+  }
+}
