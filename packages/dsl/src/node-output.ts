@@ -129,7 +129,15 @@ export interface NodeOutputMap {
   sqlExec: { rowsAffected: number };
   sendEmail: { messageId: string };
   rssRead: { items: unknown; count: number };
-  executeSubWorkflow: { status: string; output: Record<string, unknown> };
+  /** `childRunId` is the child's Temporal workflowId — the Runs-list key, so a consumer can
+   *  link straight to the child run (#960). NOT the Temporal `runId` (per-attempt uuid).
+   *  OPTIONAL because it is genuinely absent on runs recorded before #960 shipped: every
+   *  reader must degrade (no link), never render a dead one. */
+  executeSubWorkflow: {
+    status: string;
+    output: Record<string, unknown>;
+    childRunId?: string;
+  };
   respondToWebhook: { statusCode: number };
 
   // --- crypto / util (single-field results) ---

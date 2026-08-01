@@ -401,8 +401,15 @@ async function execNodeInner(
       // The child records its own Execution row (recordExecution), so it appears
       // as its own run in the Runs list. Budget: the child gets the parent's
       // REMAINING per-execution cap; its cost is metered back below.
+      //
+      // The id is built HERE — on the line before the call, never hoisted above the
+      // `await` above — because it reads mutable engine state (`state.stepCount`), and
+      // a workflowId IS a command attribute: producing a different string on replay
+      // would break in-flight runs. Same string as before, just named so the node
+      // output can carry it (#960) instead of the UI re-deriving this format.
+      const childRunId = `${wf.workflowInfo().workflowId}-sub-${node.id}-${state.stepCount}`;
       const result = await wf.executeChild(runGraph, {
-        workflowId: `${wf.workflowInfo().workflowId}-sub-${node.id}-${state.stepCount}`,
+        workflowId: childRunId,
         args: [
           snapshot.graph,
           childInput,
@@ -446,6 +453,14 @@ async function execNodeInner(
       ctx[node.id] = {
         status: result.status,
         output,
+        // #960: the child's Temporal workflowId — i.e. its key in the Runs list, so the
+        // parent's step can LINK to the child run instead of the user hunting it by
+        // timestamp. Deliberately NOT the Temporal `runId` (the per-attempt uuid), which
+        // is a different value and not what /app/runs/:id takes. Returning it explicitly
+        // (rather than letting the SPA rebuild the format above) means changing that
+        // format can't silently produce dead links. Data-only: adding a ctx field
+        // schedules no command and changes no command attribute, so no wf.patched() gate.
+        childRunId,
       } satisfies NodeOutputMap["executeSubWorkflow"];
       return null;
     }
@@ -497,6 +512,15 @@ async function execNodeInner(
       // A completed child's cost folds into the parent (commutative sum) and its
       // bounded {status, output} projection is collected in ARRAY ORDER, so the graph
       // can branch on `<nodeId>.N.status` without the batch dying.
+      //
+      // Every entry — INCLUDING a failed one — also carries the child's `childRunId`
+      // (#960) so the Run Detail can link each item to its own child run. The failed
+      // entry is the one that matters most (that's the run you want to open), and the
+      // id is known before the launch, so the `.catch` keeps it rather than throwing it
+      // away with the rejection. Each id is built where the workflowId already was —
+      // inside the map callback, synchronously, no await in between — so the committed
+      // command attribute is unchanged; the extra ctx field is data only (no command
+      // scheduled, none changed), hence no new wf.patched() gate.
       if (wf.patched("foreach-chunked-cap-v1")) {
         // Bounded concurrency window + per-window cap divisor (audit A-3/Q-3): run
         // items in chunks of FOREACH_CONCURRENCY so at most that many child runs are
@@ -508,6 +532,7 @@ async function execNodeInner(
         const collected: {
           status: string;
           output: Record<string, unknown>;
+          childRunId: string;
         }[] = [];
         for (
           let start = 0;
@@ -523,12 +548,13 @@ async function execNodeInner(
                 )
               : undefined;
           const settled = await Promise.all(
-            chunk.map((item, j) =>
-              wf
+            chunk.map((item, j) => {
+              // Global index (start + j) — a chunk-local index would collide
+              // workflowIds across chunks.
+              const childRunId = `${parentId}-foreach-${node.id}-${state.stepCount}-${start + j}`;
+              return wf
                 .executeChild(runGraph, {
-                  // Global index (start + j) — a chunk-local index would collide
-                  // workflowIds across chunks.
-                  workflowId: `${parentId}-foreach-${node.id}-${state.stepCount}-${start + j}`,
+                  workflowId: childRunId,
                   args: [
                     snapshot.graph,
                     item,
@@ -544,13 +570,17 @@ async function execNodeInner(
                     } satisfies RunGraphCtx,
                   ],
                 })
-                .then((r) => ({ ok: true as const, r }))
-                .catch(() => ({ ok: false as const })),
-            ),
+                .then((r) => ({ ok: true as const, r, childRunId }))
+                .catch(() => ({ ok: false as const, childRunId }));
+            }),
           );
           for (const s of settled) {
             if (!s.ok) {
-              collected.push({ status: "failed", output: {} });
+              collected.push({
+                status: "failed",
+                output: {},
+                childRunId: s.childRunId,
+              });
               continue;
             }
             const r = s.r;
@@ -560,7 +590,11 @@ async function execNodeInner(
             for (const [k, v] of Object.entries(r.ctx)) {
               if (!k.startsWith("__")) output[k] = v;
             }
-            collected.push({ status: r.status as string, output });
+            collected.push({
+              status: r.status as string,
+              output,
+              childRunId: s.childRunId,
+            });
           }
         }
         ctx.__costUsd = state.costUsd;
@@ -570,16 +604,20 @@ async function execNodeInner(
 
       // LEGACY path (runs started before the patch): single fan-out, one shared cap
       // snapshot. Kept byte-identical so in-flight runs replay without nondeterminism.
+      // "Byte-identical" is about the COMMANDS — the childRunId added below (#960) names
+      // the same workflowId this path always committed and only widens the ctx entry, so
+      // an in-flight legacy run still replays command-for-command.
       const childCap =
         runCtx.perExecutionCapUsd !== undefined
           ? Math.max(0, runCtx.perExecutionCapUsd - state.costUsd)
           : undefined;
 
       const settled = await Promise.all(
-        items.map((item, i) =>
-          wf
+        items.map((item, i) => {
+          const childRunId = `${parentId}-foreach-${node.id}-${state.stepCount}-${i}`;
+          return wf
             .executeChild(runGraph, {
-              workflowId: `${parentId}-foreach-${node.id}-${state.stepCount}-${i}`,
+              workflowId: childRunId,
               args: [
                 snapshot.graph,
                 item,
@@ -595,13 +633,14 @@ async function execNodeInner(
                 } satisfies RunGraphCtx,
               ],
             })
-            .then((r) => ({ ok: true as const, r }))
-            .catch(() => ({ ok: false as const })),
-        ),
+            .then((r) => ({ ok: true as const, r, childRunId }))
+            .catch(() => ({ ok: false as const, childRunId }));
+        }),
       );
 
       const collected = settled.map((s) => {
-        if (!s.ok) return { status: "failed", output: {} };
+        if (!s.ok)
+          return { status: "failed", output: {}, childRunId: s.childRunId };
         const r = s.r;
         state.costUsd +=
           typeof r.ctx.__costUsd === "number" ? r.ctx.__costUsd : 0;
@@ -609,7 +648,7 @@ async function execNodeInner(
         for (const [k, v] of Object.entries(r.ctx)) {
           if (!k.startsWith("__")) output[k] = v;
         }
-        return { status: r.status as string, output };
+        return { status: r.status as string, output, childRunId: s.childRunId };
       });
       ctx.__costUsd = state.costUsd;
       ctx[node.id] = collected;

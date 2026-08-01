@@ -9,6 +9,7 @@
  */
 import { Icon, type IconName } from "../../../components";
 import type { HttpFailure } from "../../../lib/api";
+import { ChildRunLinks } from "./ChildRunLinks";
 import { HttpFailureDetail } from "./HttpFailureDetail";
 import { NodeOutputBody } from "./NodeOutputBody";
 import { STEP_FG, STEP_WORD, type StepState } from "./run-view-model";
@@ -269,6 +270,12 @@ export function StepDetailCard({
           {step.http && <HttpFailureDetail http={step.http} />}
         </div>
       )}
+
+      {/* Child runs (#960) — for the two nodes that spawn them. ABOVE the output because
+          "which run do I open next?" is the question this step raises; the projection below
+          is the answer it already gave. Renders nothing when the step spawned none, or when
+          the run predates the worker returning the child's id. */}
+      <ChildRunLinks output={step.output} nodeType={step.nodeType} />
 
       {/* Step output — the real per-node result from the run ctx. */}
       <div style={{ padding: "14px 18px" }}>
