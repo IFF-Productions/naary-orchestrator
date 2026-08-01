@@ -126,8 +126,12 @@ function effectiveOutputSchema(
     try {
       return handoffOutputSchema(handoff);
     } catch {
-      // A half-authored handoff (a target with no `to`, say). It is still STRUCTURED at run
-      // time — the fact that matters here — we just cannot name its fields.
+      // A malformed target (a non-string `name`, whose `.trim()` throws). It is still
+      // STRUCTURED at run time — the fact that matters here — we just cannot name its fields.
+      //
+      // A target missing `to` does NOT land here: `handoffTargetName` returns `undefined`
+      // rather than throwing, so the derived schema comes back with a junk `enum` but the
+      // right PROPERTY NAMES — which is all this function's callers read.
       return {};
     }
   }
