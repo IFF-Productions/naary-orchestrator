@@ -292,3 +292,25 @@ export class DryRunResponse {
   @ApiProperty({ type: [DryRunNodeResponse] })
   nodes!: DryRunNodeResponse[];
 }
+
+/** The result of a workflow-key rename (#904). */
+export class RenameWorkflowKeyResponse {
+  @ApiProperty({
+    example: "support-triage",
+    description: "The workflow's key from now on.",
+  })
+  workflowKey!: string;
+  @ApiProperty({
+    example: "untitled-workflow",
+    description: "The key it had until this call.",
+  })
+  previousKey!: string;
+  @ApiProperty({
+    example: ["untitled-workflow"],
+    description:
+      "Every retired key that still resolves to this workflow — old webhook/sub-workflow/MCP/CLI " +
+      "references keep working through these.",
+    type: [String],
+  })
+  aliases!: string[];
+}

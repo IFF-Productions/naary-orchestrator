@@ -6,7 +6,7 @@ import {
   NotFoundException,
   Optional,
 } from "@nestjs/common";
-import { getPrisma } from "@naary/db";
+import { getPrisma, resolveWorkflowKey } from "@naary/db";
 import type { Principal } from "../auth/tenant.decorator";
 import { PermissionsService } from "../permissions/permissions.service";
 
@@ -137,6 +137,10 @@ export class TagsService {
     actor?: Principal,
     environmentId?: string,
   ): Promise<TagRef[]> {
+    // Alias-resolve first (#904): WorkflowTag rows AND the tag-derived permission key list both
+    // carry the live key after a rename, so a retired key would silently tag nothing (and, with
+    // TagGrants in play, would be checked against a key no grant mentions).
+    const key = await resolveWorkflowKey(tenantId, workflowKey);
     if (actor) {
       if (!this.permissions) {
         // Fail CLOSED: an actor implies a user-facing call site — authz must run.
@@ -148,7 +152,7 @@ export class TagsService {
         const allowed = await this.permissions.can(
           actor,
           "share",
-          workflowKey,
+          key,
           environmentId,
         );
         if (!allowed) {
@@ -158,12 +162,7 @@ export class TagsService {
           );
         }
       } else {
-        await this.permissions.assertCan(
-          actor,
-          "edit",
-          workflowKey,
-          environmentId,
-        );
+        await this.permissions.assertCan(actor, "edit", key, environmentId);
       }
     }
     const unique = [...new Set(tagIds)];
@@ -180,9 +179,9 @@ export class TagsService {
     }
     const p = getPrisma();
     await p.$transaction([
-      p.workflowTag.deleteMany({ where: { tenantId, workflowKey } }),
+      p.workflowTag.deleteMany({ where: { tenantId, workflowKey: key } }),
       p.workflowTag.createMany({
-        data: unique.map((tagId) => ({ tagId, tenantId, workflowKey })),
+        data: unique.map((tagId) => ({ tagId, tenantId, workflowKey: key })),
       }),
     ]);
     // Tag membership feeds the flattened effective-grant keys (TagGrant expansion) — drop

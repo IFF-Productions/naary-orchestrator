@@ -439,6 +439,41 @@ model WorkflowTag {
   @@index([tenantId, workflowKey])
 }
 
+/// A RETIRED workflow key that STILL RESOLVES to its workflow (#904 — "rename the key").
+///
+/// A key rename REWRITES every row we own (GraphDefinition, Schedule, Execution, pins, tags,
+/// grants, trigger endpoints, …) to the new key, then records the old key here. The alias exists
+/// for the references we physically CANNOT rewrite:
+///   - `executeSubWorkflow.workflowKey` / `forEach.workflowKey` inside OTHER graphs' node configs
+///     (a JSON-body rewrite would be brittle and can't reach other versions/envs),
+///   - MCP tool names + `run_workflow` arguments held in external agent configs,
+///   - the args of in-flight Temporal runs and already-armed schedule handles,
+///   - public-API / `naary` CLI callers and bookmarked canvas URLs.
+/// Rewrite what we own; alias what we don't.
+///
+/// TENANT-WIDE, not env-scoped: `workflowKey` is one logical identity that a copy-on-promote
+/// replicates into each environment (Promotion + WorkflowTag are tenant-wide for the same reason),
+/// so a rename moves every environment's copy at once and one alias covers them all.
+///
+/// The PK is the uniqueness guarantee: two workflows can never claim the same alias. "An alias must
+/// not collide with a LIVE key" cannot be a DB constraint (GraphDefinition has no unique on
+/// (tenantId, workflowKey) — it is versioned), so it is asserted inside the rename transaction.
+/// Aliases are always ONE HOP: a second rename re-points the existing alias rows at the newest key.
+model WorkflowKeyAlias {
+  tenantId    String
+  /// The retired key. Never equals `workflowKey` (no self-aliases).
+  alias       String
+  /// The key it resolves to today.
+  workflowKey String
+  /// Display string for who renamed it (email / "api-token"), like GraphDefinition.savedBy.
+  createdBy   String?
+  createdAt   DateTime @default(now())
+
+  @@id([tenantId, alias])
+  /// Serves the rename's "re-point my existing aliases" update and the delete-workflow cleanup.
+  @@index([tenantId, workflowKey])
+}
+
 // Slice #4 — external integrations.
 
 model WebhookEndpoint {

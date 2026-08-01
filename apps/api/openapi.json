@@ -2703,6 +2703,113 @@
         ]
       }
     },
+    "/graphs/{workflowKey}/key": {
+      "post": {
+        "description": "Moves the workflow to a new key and retires the old one as an alias that still resolves. Run history, schedules, pins, tags and permission grants follow the workflow. Requires the Edit permission in every environment the workflow exists in.",
+        "operationId": "GraphsController_renameKey",
+        "parameters": [
+          {
+            "name": "workflowKey",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RenameWorkflowKeyDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RenameWorkflowKeyResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The resource is in a state that conflicts with the request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Change a workflow's key",
+        "tags": [
+          "Graphs"
+        ]
+      }
+    },
     "/graphs/{workflowKey}/promote": {
       "post": {
         "description": "Copies the active env's graph (a chosen version, default latest) into the target env as a new version, and records lineage. Credentials/connections are not copied.",
@@ -18333,6 +18440,49 @@
           "workflowKey",
           "version",
           "contentHash"
+        ]
+      },
+      "RenameWorkflowKeyDto": {
+        "type": "object",
+        "properties": {
+          "newKey": {
+            "type": "string",
+            "example": "support-triage",
+            "description": "The new key. Lowercase letters, digits and single hyphens (the canvas' own slug rule), max 64 characters. Must not already be in use, and must not be another workflow's retired key."
+          }
+        },
+        "required": [
+          "newKey"
+        ]
+      },
+      "RenameWorkflowKeyResponse": {
+        "type": "object",
+        "properties": {
+          "workflowKey": {
+            "type": "string",
+            "example": "support-triage",
+            "description": "The workflow's key from now on."
+          },
+          "previousKey": {
+            "type": "string",
+            "example": "untitled-workflow",
+            "description": "The key it had until this call."
+          },
+          "aliases": {
+            "example": [
+              "untitled-workflow"
+            ],
+            "description": "Every retired key that still resolves to this workflow — old webhook/sub-workflow/MCP/CLI references keep working through these.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "workflowKey",
+          "previousKey",
+          "aliases"
         ]
       },
       "PromoteGraphDto": {

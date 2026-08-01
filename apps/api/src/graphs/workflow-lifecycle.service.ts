@@ -79,6 +79,9 @@ export class WorkflowLifecycleService {
     workflowKey: string,
     actor?: Principal,
   ): Promise<boolean> {
+    // Resolve a retired key FIRST (#904): the grant list and every row now carry the live key, so
+    // both the §4 assert and the schedule teardown must be addressed at it.
+    const key = await this.graphs.liveKey(tenantId, workflowKey);
     if (actor) {
       if (!this.permissions) {
         // Fail CLOSED: an actor implies a user-facing call site — authz must run.
@@ -86,16 +89,11 @@ export class WorkflowLifecycleService {
           "WorkflowLifecycleService: PermissionsService is not wired",
         );
       }
-      await this.permissions.assertCan(
-        actor,
-        "delete",
-        workflowKey,
-        environmentId,
-      );
+      await this.permissions.assertCan(actor, "delete", key, environmentId);
     }
     await this.schedules
-      .teardownForWorkflow(tenantId, environmentId, workflowKey)
+      .teardownForWorkflow(tenantId, environmentId, key)
       .catch(() => undefined);
-    return this.graphs.deleteWorkflow(tenantId, environmentId, workflowKey);
+    return this.graphs.deleteWorkflow(tenantId, environmentId, key);
   }
 }

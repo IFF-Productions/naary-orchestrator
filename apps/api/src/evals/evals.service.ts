@@ -8,7 +8,7 @@ import {
   Optional,
 } from "@nestjs/common";
 import { Client, Connection } from "@temporalio/client";
-import { getPrisma, Prisma } from "@naary/db";
+import { getPrisma, Prisma, resolveWorkflowKey } from "@naary/db";
 import { EVAL_RUN_WORKFLOW, TASK_QUEUE } from "@naary/contracts";
 import { getBudget } from "@naary/usage";
 import { TracedClass } from "@naary/observability";
@@ -123,6 +123,10 @@ export class EvalsService implements OnModuleInit, OnModuleDestroy {
     workflowKey: string,
     actor?: Principal,
   ): Promise<EvalDatasetView[]> {
+    // #904: re-point a retired key onto the live one BEFORE the §4 assert and the read. Every
+    // eval table is composite-PK'd on the key, so a stale key reads as "no datasets" rather
+    // than as an error, and the grant list carries the live key after a rename.
+    workflowKey = await resolveWorkflowKey(tenantId, workflowKey);
     await this.assertActor(actor, "view", workflowKey, environmentId);
     const rows = await getPrisma().evalDataset.findMany({
       where: { tenantId, environmentId, workflowKey },
@@ -148,6 +152,8 @@ export class EvalsService implements OnModuleInit, OnModuleDestroy {
     name: string,
     actor?: Principal,
   ): Promise<EvalDatasetBody> {
+    // #904 — retired key → live key, before the assert and the read (see listDatasets).
+    workflowKey = await resolveWorkflowKey(tenantId, workflowKey);
     await this.assertActor(actor, "view", workflowKey, environmentId);
     const row = await getPrisma().evalDataset.findUnique({
       where: {
@@ -195,6 +201,8 @@ export class EvalsService implements OnModuleInit, OnModuleDestroy {
     body: unknown,
     actor?: Principal,
   ): Promise<EvalDatasetView> {
+    // #904 — retired key → live key, before the assert and the read (see listDatasets).
+    workflowKey = await resolveWorkflowKey(tenantId, workflowKey);
     await this.assertActor(actor, "edit", workflowKey, environmentId);
     const parsed = evalDatasetBodySchema.safeParse(body);
     if (!parsed.success) {
@@ -248,6 +256,8 @@ export class EvalsService implements OnModuleInit, OnModuleDestroy {
     name: string,
     actor?: Principal,
   ): Promise<void> {
+    // #904 — retired key → live key, before the assert and the read (see listDatasets).
+    workflowKey = await resolveWorkflowKey(tenantId, workflowKey);
     await this.assertActor(actor, "edit", workflowKey, environmentId);
     const row = await getPrisma().evalDataset.findUnique({
       where: {
@@ -284,6 +294,8 @@ export class EvalsService implements OnModuleInit, OnModuleDestroy {
     actor?: Principal,
   ): Promise<EvalRunView> {
     // An eval executes the real workflow with real spend → the `run` verb, not `view`.
+    // #904 — retired key → live key, before the assert and the read (see listDatasets).
+    workflowKey = await resolveWorkflowKey(tenantId, workflowKey);
     await this.assertActor(actor, "run", workflowKey, environmentId);
 
     // Guard BEFORE the query: a missing `dataset` in the body would reach findUnique's compound key
@@ -391,6 +403,8 @@ export class EvalsService implements OnModuleInit, OnModuleDestroy {
     limit = 50,
     actor?: Principal,
   ): Promise<EvalRunView[]> {
+    // #904 — retired key → live key, before the assert and the read (see listDatasets).
+    workflowKey = await resolveWorkflowKey(tenantId, workflowKey);
     await this.assertActor(actor, "view", workflowKey, environmentId);
     const rows = await getPrisma().evalRun.findMany({
       where: { tenantId, environmentId, workflowKey },

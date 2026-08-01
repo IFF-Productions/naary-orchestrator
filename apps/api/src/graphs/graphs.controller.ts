@@ -38,6 +38,7 @@ import {
   GenerateGraphDto,
   ImportN8nDto,
   PromoteGraphDto,
+  RenameWorkflowKeyDto,
   SaveGraphDto,
 } from "./graph.dto";
 import { GraphGeneratorService } from "./graph-generator.service";
@@ -52,10 +53,12 @@ import {
   GraphVersionResponse,
   PromoteGraphResponse,
   PromotionResponse,
+  RenameWorkflowKeyResponse,
   SaveGraphResponse,
 } from "./graph.response";
 import { type GraphSummary, GraphsService } from "./graphs.service";
 import { WorkflowLifecycleService } from "./workflow-lifecycle.service";
+import { WorkflowKeyRenameService } from "./workflow-key-rename.service";
 
 /** Generation ceiling for the SSE route — heartbeats keep the proxy alive, so the
  *  claude-code subprocess may run far past nginx's 60s default read timeout. */
@@ -103,6 +106,7 @@ export class GraphsController {
     private readonly lifecycle: WorkflowLifecycleService,
     private readonly environments: EnvironmentsService,
     private readonly dry: DryRunService,
+    private readonly renames: WorkflowKeyRenameService,
   ) {}
 
   /** List the workflows in the ACTIVE environment (one row per workflowKey, latest version). */
@@ -521,6 +525,42 @@ export class GraphsController {
       version: snap.version,
       contentHash: snap.contentHash,
     };
+  }
+
+  /**
+   * Change a workflow's KEY (#904) — the capability the key's name-derived, frozen-at-first-save
+   * behaviour never had.
+   *
+   * It is an ALIAS, not a hard rename: everything we own is rewritten to the new key (definitions,
+   * run history, schedules, pins, tags, grants, webhook/form/chat bindings), and the OLD key is
+   * retired but keeps RESOLVING — so `executeSubWorkflow`/`forEach` references inside other graphs,
+   * MCP tool arguments, in-flight runs, armed schedules, public-API/CLI callers and bookmarks all
+   * keep working. Public webhook/form/chat URLs were never at risk: they carry the endpoint's
+   * opaque id, not the key.
+   *
+   * TENANT-WIDE — every environment's copy of the workflow moves together — and gated on `edit` in
+   * each of those environments.
+   */
+  @ApiEndpoint({
+    summary: "Change a workflow's key",
+    description:
+      "Moves the workflow to a new key and retires the old one as an alias that still resolves. " +
+      "Run history, schedules, pins, tags and permission grants follow the workflow. Requires the " +
+      "Edit permission in every environment the workflow exists in.",
+    ok: RenameWorkflowKeyResponse,
+    notFound: true,
+    conflict: true,
+  })
+  @Post(":workflowKey/key")
+  async renameKey(
+    @TenantId() tenantId: string,
+    @Param("workflowKey") workflowKey: string,
+    @Body() body: RenameWorkflowKeyDto,
+    @CurrentPrincipal() principal?: Principal,
+  ): Promise<RenameWorkflowKeyResponse> {
+    // No env resolution here on purpose: the rename spans EVERY environment that holds this key,
+    // and the service asserts `edit` in each one.
+    return this.renames.rename(tenantId, workflowKey, body.newKey, principal);
   }
 
   /** Promote a workflow's definition from the ACTIVE env (X-Environment-Id) into a target env

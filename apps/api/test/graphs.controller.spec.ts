@@ -8,6 +8,7 @@ import { GraphsController } from "../src/graphs/graphs.controller";
 import type { GraphGeneratorService } from "../src/graphs/graph-generator.service";
 import type { GraphsService } from "../src/graphs/graphs.service";
 import type { WorkflowLifecycleService } from "../src/graphs/workflow-lifecycle.service";
+import type { WorkflowKeyRenameService } from "../src/graphs/workflow-key-rename.service";
 
 // Save/delete go through the consolidated WorkflowLifecycleService (upsert/delete + the
 // default-env-only schedule side-effects, tested in workflow-lifecycle.service.spec).
@@ -55,6 +56,8 @@ describe("GraphsController", () => {
       envStub,
       // DryRunService — these routes don't use it.
       {} as unknown as DryRunService,
+      // WorkflowKeyRenameService — nor the key-rename route (#904).
+      {} as unknown as WorkflowKeyRenameService,
     );
 
     const res = await controller.save("t-1", dto(validGraph));
@@ -86,6 +89,8 @@ describe("GraphsController", () => {
       envStub,
       // DryRunService — these routes don't use it.
       {} as unknown as DryRunService,
+      // WorkflowKeyRenameService — nor the key-rename route (#904).
+      {} as unknown as WorkflowKeyRenameService,
     );
 
     await expect(
@@ -103,6 +108,8 @@ describe("GraphsController", () => {
       envStub,
       // DryRunService — these routes don't use it.
       {} as unknown as DryRunService,
+      // WorkflowKeyRenameService — nor the key-rename route (#904).
+      {} as unknown as WorkflowKeyRenameService,
     );
 
     expect(await controller.remove("t-1", "canvas")).toEqual({ deleted: true });
@@ -138,6 +145,8 @@ describe("GraphsController", () => {
       envStub,
       // DryRunService — these routes don't use it.
       {} as unknown as DryRunService,
+      // WorkflowKeyRenameService — nor the key-rename route (#904).
+      {} as unknown as WorkflowKeyRenameService,
     );
 
     expect(await controller.list("t-1")).toBe(summaries);
@@ -161,6 +170,8 @@ describe("GraphsController", () => {
       envStub,
       // DryRunService — these routes don't use it.
       {} as unknown as DryRunService,
+      // WorkflowKeyRenameService — nor the key-rename route (#904).
+      {} as unknown as WorkflowKeyRenameService,
     );
 
     expect(await controller.get("t-1", "canvas")).toBe(named);
@@ -183,6 +194,8 @@ describe("GraphsController", () => {
       envStub,
       // DryRunService — these routes don't use it.
       {} as unknown as DryRunService,
+      // WorkflowKeyRenameService — nor the key-rename route (#904).
+      {} as unknown as WorkflowKeyRenameService,
     );
 
     await expect(controller.get("t-1", "nope")).rejects.toBeInstanceOf(
@@ -215,6 +228,7 @@ describe("GraphsController POST /graphs/:key/dry-run", () => {
       lifecycleStub,
       envStub,
       dry as unknown as DryRunService,
+      {} as unknown as WorkflowKeyRenameService,
     );
 
     expect(await controller.dryRun("t-1", "canvas")).toBe(result);
@@ -239,6 +253,7 @@ describe("GraphsController POST /graphs/:key/dry-run", () => {
       lifecycleStub,
       envStub,
       dry as unknown as DryRunService,
+      {} as unknown as WorkflowKeyRenameService,
     );
 
     await expect(controller.dryRun("t-1", "nope")).rejects.toBeInstanceOf(
@@ -309,6 +324,7 @@ function streamController(
     lifecycleStub,
     envStub,
     {} as unknown as DryRunService,
+    {} as unknown as WorkflowKeyRenameService,
   );
 }
 
@@ -598,6 +614,7 @@ describe("GraphsController generate with `previous` (edit)", () => {
       lifecycleStub,
       envStub,
       {} as unknown as DryRunService,
+      {} as unknown as WorkflowKeyRenameService,
     );
 
     const out = await controller.generate(
@@ -627,6 +644,8 @@ describe("GraphsController error-handler env scoping", () => {
       envStub,
       // DryRunService — these routes don't use it.
       {} as unknown as DryRunService,
+      // WorkflowKeyRenameService — nor the key-rename route (#904).
+      {} as unknown as WorkflowKeyRenameService,
     );
     return { controller, graphs };
   }

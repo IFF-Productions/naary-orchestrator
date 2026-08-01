@@ -11,6 +11,7 @@ import { GraphsController } from "./graphs.controller";
 import { GraphsService } from "./graphs.service";
 import { DryRunService } from "./dry-run.service";
 import { WorkflowLifecycleService } from "./workflow-lifecycle.service";
+import { WorkflowKeyRenameService } from "./workflow-key-rename.service";
 
 /** Global so ExecutionsService and the webhook ingress can resolve graphs from DB. */
 @Global()
@@ -36,6 +37,7 @@ import { WorkflowLifecycleService } from "./workflow-lifecycle.service";
   providers: [
     GraphsService,
     WorkflowLifecycleService,
+    WorkflowKeyRenameService,
     GraphGeneratorService,
     DryRunService,
     // Plain class from @naary/secrets (reads ENCRYPTION_KEY at construction); the
@@ -49,6 +51,7 @@ import { WorkflowLifecycleService } from "./workflow-lifecycle.service";
   exports: [
     GraphsService,
     WorkflowLifecycleService,
+    WorkflowKeyRenameService,
     GraphGeneratorService,
     DryRunService,
   ],
