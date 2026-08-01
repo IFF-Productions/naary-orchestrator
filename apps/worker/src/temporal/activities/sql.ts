@@ -8,7 +8,7 @@ import {
   resolveDbConnection,
   resolvePinnedHost,
 } from "@naary/connections";
-import { getAdapter } from "@naary/sql";
+import { dsnHost, getAdapter } from "@naary/sql";
 import {
   getObjectStore,
   maybeOffload,
@@ -58,29 +58,10 @@ export const __sqlDeps = {
   resolvePinnedHost,
 };
 
-/** Best-effort host extraction from a DSN — a URL (postgres:// / mssql://) or an
- *  mssql key=value connection string (`Server=host,port;…`). null when unparseable
- *  (the driver will then fail on a malformed DSN anyway). */
-export function dsnHost(dsn: string): string | null {
-  try {
-    const u = new URL(dsn);
-    if (u.hostname) return u.hostname.replace(/^\[|\]$/g, "");
-  } catch {
-    /* not a URL — try the mssql key=value form below */
-  }
-  const m = dsn.match(
-    /(?:^|;)\s*(?:server|data source|address|addr|network address)\s*=\s*([^;]+)/i,
-  );
-  if (!m) return null;
-  // strip a `tcp:` prefix, an instance suffix (host\INSTANCE), and a ,port suffix.
-  const host = m[1]
-    .trim()
-    .replace(/^tcp:/i, "")
-    .split("\\")[0]
-    .split(",")[0]
-    .trim();
-  return host || null;
-}
+/** Best-effort host extraction from a DSN. MOVED to `@naary/sql` (#1004) so the API's
+ *  authoring-time schema introspection SSRF-checks the host with exactly the same parse —
+ *  re-exported here because this module is the activity surface the tests import. */
+export { dsnHost };
 
 /** mssql/tedious code for a bad login (wrong user/password in the DSN). */
 const MSSQL_AUTH_CODE = "ELOGIN";

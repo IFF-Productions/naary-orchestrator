@@ -2,7 +2,7 @@
   "name": "@naary/sql",
   "version": "0.0.62",
   "private": true,
-  "description": "SQL adapters (Postgres, MSSQL, MySQL) for the sqlQuery (read) + sqlExec (write) nodes. Engine-pluggable; used by worker activities only — NEVER by workflow code.",
+  "description": "SQL adapters (Postgres, MSSQL, MySQL) for the sqlQuery (read) + sqlExec (write) nodes. Engine-pluggable; used by worker activities and by the API's authoring-time schema introspection (#1004) — NEVER by workflow code.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
+    "@naary/dsl": "workspace:*",
     "mssql": "^12.7.0",
     "mysql2": "^3.23.2",
     "pg": "^8.22.0"
