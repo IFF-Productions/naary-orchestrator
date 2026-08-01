@@ -93,6 +93,10 @@ export interface ExecutionsDeps {
     environmentId: string | null,
     workflowKey: string | null,
     nodeId: string,
+    /** The RUN's ctx (from stateQuery), so the prompt's `{{ … }}` render against this run
+     *  (#1019). Omitted / `{}` when the run's context can't be read — the prompt then keeps
+     *  its authored template, which is still approvable. */
+    ctx?: Record<string, unknown>,
   ) => Promise<{ title: string; instructions: string | null }>;
   approve: (
     id: string,
@@ -570,6 +574,10 @@ export async function queryAwaiting(
     rows.map(async (r): Promise<AwaitingApproval | null> => {
       let currentNodeId = "";
       let rec: ApprovalAwaitingRecord | null = null;
+      // The run's own ctx, so each row's prompt renders against ITS run (#1019). Hoisted out
+      // of the try because the approvalPrompt call below sits outside it; `{}` is the honest
+      // fallback (the catch returns first, so it only survives an ctx-less state).
+      let ctx: Record<string, unknown> = {};
       try {
         const s = await deps.client.workflow
           .getHandle(r.workflowId)
@@ -577,6 +585,7 @@ export async function queryAwaiting(
         // Decided/advanced since the read-model write, or closed → not awaiting.
         if (s.status !== "awaiting_approval") return null;
         currentNodeId = s.currentNodeId;
+        ctx = s.ctx ?? {};
         // Slice 1: the pause-time snapshot (contextFields/SLA/approvers) rides the ctx.
         rec = awaitingRecord(s);
       } catch {
@@ -587,6 +596,7 @@ export async function queryAwaiting(
         r.environmentId,
         r.workflowKey,
         currentNodeId,
+        ctx,
       );
       return {
         workflowId: r.workflowId,
@@ -629,6 +639,7 @@ export async function queryPromptByWorkflowId(
       row.environmentId,
       row.workflowKey,
       s.currentNodeId,
+      s.ctx ?? {}, // #1019 — the public approve/reject page renders THIS run's values
     );
     const rec = awaitingRecord(s);
     // Best-effort workspace display name — the public trust line ("on behalf of Acme").

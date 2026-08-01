@@ -29,6 +29,7 @@ import {
   asNodeConfig,
   integrationToolRef,
   mcpToolRef,
+  resolvePromptText,
   type UnresolvedRef,
 } from "@naary/dsl/dist/workflow"; // deterministic-safe entry (#910)
 import type {
@@ -254,6 +255,11 @@ async function toolApprovalGate(
 
   // Best-effort page (a governance pause can last days). Swallowed + gated exactly like the
   // humanApproval notification, so it can never affect the pause.
+  //
+  // NOT display-resolved, unlike the humanApproval title (#1019): `ref` is not authored text but
+  // the RESOLVED tool ref — the one the policy was evaluated against and the one the run will
+  // actually call. Rendering an authored `{{ }}` here would name a tool other than the one being
+  // approved, which is worse than terse.
   if (!runCtx.isErrorHandler) {
     try {
       await sendNotification({
@@ -724,6 +730,22 @@ async function execNodeInner(
     }
     case "humanApproval": {
       const gateCfg = (cfg ?? {}) as ApprovalNodeConfig;
+      // The title the notification carries — Slack, Teams, email (#1019). Resolved from the
+      // AUTHORED config rather than reused from `gateCfg`, because `cfg` was resolved with the
+      // CONFIG rule: a reference the run cannot satisfy became "", so "…issue #{{ start.n }}"
+      // was paging people as "…issue #" — a sentence with a hole in it that reads as fact. The
+      // display rule keeps that reference visible instead, and renders identically to what the
+      // API serves the run-detail card and the signed approve/reject page (one function, so the
+      // surfaces cannot disagree about what is being approved).
+      //
+      // DETERMINISM: a pure read of `node.config` + `ctx`, both of which the workflow already
+      // holds. It schedules no command and reorders none, so it needs no patched() gate of its
+      // own — the same reasoning #987/PR #992 applied to the run-failed notification's added
+      // fields. (A second gate would itself be a history-visible decision.)
+      const notifyTitle = resolvePromptText(
+        ((node.config ?? {}) as ApprovalNodeConfig).title ?? "",
+        ctx,
+      );
       // ---- Approval routing + SLA/escalation (REDESIGN-FUNCTIONALITY-GAPS.md Slice 1) ----
       // REPLAY INVARIANT (two layers): every NEW command below (prepareApproval, the
       // segmented timer loop, reminder/escalation notifications) is gated on
@@ -812,7 +834,7 @@ async function execNodeInner(
             kind: "approval_pending",
             workflowId: wf.workflowInfo().workflowId,
             workflowKey: runCtx.workflowKey,
-            title: gateCfg.title,
+            title: notifyTitle,
           });
         } catch {
           /* best-effort — never block the pause on a notification */
@@ -892,7 +914,7 @@ async function execNodeInner(
                 kind: "approval_pending",
                 workflowId: wf.workflowInfo().workflowId,
                 workflowKey: runCtx.workflowKey,
-                title: gateCfg.title,
+                title: notifyTitle,
                 flavor: t.flavor,
                 ...(t.flavor === "reminder" ? { reminderIndex: t.index } : {}),
                 ...(t.flavor === "escalation" && gateCfg.escalateTo

@@ -2,8 +2,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock the read-model. executions.service imports only getPrisma from @naary/db.
 const findMany = vi.fn();
+const findUnique = vi.fn();
 vi.mock("@naary/db", () => ({
-  getPrisma: () => ({ graphDefinition: { findMany: async () => [] }, execution: { findMany } }),
+  getPrisma: () => ({
+    graphDefinition: { findMany: async () => [] },
+    execution: { findMany, findUnique },
+    // The public prompt's best-effort "on behalf of Acme" line.
+    tenantSettings: { findUnique: async () => ({ displayName: "Acme" }) },
+  }),
 }));
 
 import { ExecutionsService } from "../src/executions/executions.service";
@@ -41,7 +47,10 @@ const approvalGraph = {
   },
 };
 
-beforeEach(() => findMany.mockReset());
+beforeEach(() => {
+  findMany.mockReset();
+  findUnique.mockReset();
+});
 
 describe("listAwaiting (approvals inbox)", () => {
   it("returns awaiting runs enriched with the node's prompt from the graph", async () => {
@@ -175,5 +184,136 @@ describe("approve forwards the reviewer comment to the signal", () => {
     await service.approve("wf-1", false, "t-1");
 
     expect(signal.mock.calls[0][1]).toEqual({ approved: false });
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// #1019 — the prompt renders against the RUN, not as the author typed it.
+//
+// The reported approval read "Approve automated fix for issue #{{ start.issueNumber }}", which
+// tells the approver nothing and makes them go find the run — the opposite of what a durable
+// human-in-the-loop pause is for. These cover BOTH API surfaces (the inbox the run-detail and
+// approvals screens read, and the public signed approve/reject page) plus the two properties
+// that must hold no matter what: secrets stay literal, and nothing is ever silently blanked.
+// ---------------------------------------------------------------------------------------------
+
+const TEMPLATED_GRAPH = {
+  graph: {
+    startNodeId: "start",
+    nodes: [
+      { id: "start", type: "start" },
+      {
+        id: "gate",
+        type: "humanApproval",
+        config: {
+          title: "Approve automated fix for issue #{{ start.issueNumber }}",
+          instructions:
+            "The coding agent prepared a fix for {{ start.owner }}/{{ start.repo }} " +
+            "in {{ $vars.REGION }}. Token {{ $secrets.GH_TOKEN }} was used. " +
+            "Reviewer: {{ start.reviewer }}.",
+        },
+      },
+      { id: "end", type: "end" },
+    ],
+    edges: [],
+  },
+};
+
+// A run ctx as stateQuery returns it — carrying `$secrets` ON PURPOSE (the API never sees one in
+// practice, but an absent key would make the "secrets stay literal" assertion below vacuous).
+const RUN_CTX = {
+  $vars: { REGION: "eu-central" },
+  $secrets: { GH_TOKEN: "ghp-super-secret-value" },
+  start: { issueNumber: 42, owner: "IFF-Productions", repo: "naary" },
+};
+
+const awaitingHandle = (ctx: Record<string, unknown>) => () => ({
+  query: async () => ({
+    status: "awaiting_approval",
+    currentNodeId: "gate",
+    ctx,
+  }),
+});
+
+describe("#1019 approval prompt renders against the run", () => {
+  const row = {
+    workflowId: "wf-1",
+    workflowKey: "fix",
+    tenantId: "t-1",
+    environmentId: null,
+    status: "awaiting_approval",
+    createdAt: new Date("2026-07-04T00:00:00Z"),
+  };
+
+  it("fills the inbox row's title/instructions from the run ctx", async () => {
+    findMany.mockResolvedValue([row]);
+    const service = makeService({
+      getLatest: async () => TEMPLATED_GRAPH,
+      getHandle: awaitingHandle(RUN_CTX),
+    });
+
+    const [item] = await service.listAwaiting("t-1");
+
+    expect(item.title).toBe("Approve automated fix for issue #42");
+    expect(item.instructions).toContain("IFF-Productions/naary");
+    // $vars ARE resolved (the recorded decision — see approval-prompt.ts).
+    expect(item.instructions).toContain("eu-central");
+  });
+
+  it("keeps $secrets LITERAL — this text is also emailed and posted to Slack", async () => {
+    findMany.mockResolvedValue([row]);
+    const service = makeService({
+      getLatest: async () => TEMPLATED_GRAPH,
+      getHandle: awaitingHandle(RUN_CTX),
+    });
+
+    const [item] = await service.listAwaiting("t-1");
+
+    expect(JSON.stringify(item)).not.toContain("ghp-super-secret-value");
+    expect(item.instructions).toContain("{{ $secrets.GH_TOKEN }}");
+  });
+
+  it("keeps an unresolvable reference legible rather than blanking it", async () => {
+    findMany.mockResolvedValue([row]);
+    const service = makeService({
+      getLatest: async () => TEMPLATED_GRAPH,
+      getHandle: awaitingHandle(RUN_CTX),
+    });
+
+    const [item] = await service.listAwaiting("t-1");
+
+    // `start.reviewer` is absent from ctx: "Reviewer: ." would read as a fact.
+    expect(item.instructions).toContain("Reviewer: {{ start.reviewer }}.");
+    expect(item.instructions).not.toContain("undefined");
+  });
+
+  it("degrades to the authored template when the run has no ctx to render against", async () => {
+    findMany.mockResolvedValue([row]);
+    const service = makeService({
+      getLatest: async () => TEMPLATED_GRAPH,
+      getHandle: awaitingHandle({}),
+    });
+
+    const [item] = await service.listAwaiting("t-1");
+
+    // Still approvable, and honest about what did not resolve.
+    expect(item.title).toBe(
+      "Approve automated fix for issue #{{ start.issueNumber }}",
+    );
+  });
+
+  it("renders the PUBLIC signed approve/reject page's prompt too", async () => {
+    findUnique.mockResolvedValue(row);
+    const service = makeService({
+      getLatest: async () => TEMPLATED_GRAPH,
+      getHandle: awaitingHandle(RUN_CTX),
+    });
+
+    const prompt = await service.promptByWorkflowId("wf-1");
+
+    expect(prompt.awaiting).toBe(true);
+    expect(prompt.title).toBe("Approve automated fix for issue #42");
+    expect(prompt.instructions).toContain("IFF-Productions/naary");
+    expect(JSON.stringify(prompt)).not.toContain("ghp-super-secret-value");
   });
 });

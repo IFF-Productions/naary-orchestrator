@@ -1,5 +1,6 @@
 import { ForbiddenException, NotFoundException } from "@nestjs/common";
 import { stateQuery, type ExecutionState } from "@naary/contracts";
+import { resolveApprovalPrompt, type ApprovalPromptText } from "@naary/dsl";
 import { getPrisma } from "@naary/db";
 import type { Principal } from "../auth/tenant.decorator";
 import { buildViewTerms } from "../permissions/permissions.service";
@@ -171,13 +172,28 @@ export async function accessAssertApprover(
   );
 }
 
-/** Resolve a humanApproval node's title/instructions from the tenant's stored graph. */
+/**
+ * Resolve a humanApproval node's title/instructions from the tenant's stored graph, RENDERED
+ * against the run that is waiting on it (#1019).
+ *
+ * An approval prompt is the one screen whose whole job is to give a person enough context to
+ * decide, so the authored `title: "Approve fix for issue #{{ start.issueNumber }}"` has to come
+ * back as `issue #42` — served verbatim it told the approver nothing and made them go find the
+ * run. `resolvePromptText` is the same resolver the interpreter uses, so `{{ $secrets.NAME }}`
+ * stays literal (it is never resolved outside the activity that needs it — Tier-1 §4) and a
+ * reference this run cannot satisfy stays a visible token rather than becoming a blank.
+ *
+ * BEST-EFFORT ALL THE WAY DOWN: no graph, no node, or no `ctx` (a closed/expired run, a snapshot
+ * that aged out) each degrade to the authored template or the standing default. An approval that
+ * cannot be rendered must still be approvable.
+ */
 export async function accessApprovalPrompt(
   deps: ExecutionsDeps,
   tenantId: string,
   environmentId: string | null,
   workflowKey: string | null,
   nodeId: string,
+  ctx?: Record<string, unknown>,
 ): Promise<{ title: string; instructions: string | null }> {
   if (!workflowKey) return { title: "Approval required", instructions: null };
   // Best-effort read of the graph for the node's title, IN THE RUN'S OWN ENV (Slice 6) — the run
@@ -189,14 +205,9 @@ export async function accessApprovalPrompt(
     .getLatest(tenantId, envId, workflowKey)
     .catch(() => null);
   const node = snap?.graph.nodes.find((n) => n.id === nodeId);
-  const cfg = (node?.config ?? {}) as {
-    title?: string;
-    instructions?: string;
-  };
-  return {
-    title: cfg.title?.trim() || "Approval required",
-    instructions: cfg.instructions?.trim() || null,
-  };
+  // Resolve BEFORE the empty-fallback: `{{ x }}` that renders to nothing must fall back to
+  // "Approval required", not be kept as a token because the RAW string was non-empty.
+  return resolveApprovalPrompt((node?.config ?? {}) as ApprovalPromptText, ctx);
 }
 
 /** Elapsed run time, or null when there is no finish time to measure to. Clamped at 0: the two

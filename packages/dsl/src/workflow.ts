@@ -37,6 +37,9 @@ export {
   resolveTemplateString,
   collectUnresolved,
 } from "./template";
+// Approval-prompt display rendering (#1019): pure, and it imports only ./template + ./mcp-args,
+// both already in this entry — so it adds nothing to the workflow bundle's require graph.
+export { resolvePromptText, resolveApprovalPrompt } from "./approval-prompt";
 export {
   computeItemsRegions,
   BATCHABLE_REGION_ACTIVITIES,

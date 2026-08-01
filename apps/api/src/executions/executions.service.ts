@@ -189,8 +189,8 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
         this.assertApprover(actor, workflowId, tenantId),
       runViewFilter: (actor, tenantId) => this.runViewFilter(actor, tenantId),
       toRunSummary: (r) => this.toRunSummary(r),
-      approvalPrompt: (tenantId, environmentId, workflowKey, nodeId) =>
-        this.approvalPrompt(tenantId, environmentId, workflowKey, nodeId),
+      approvalPrompt: (tenantId, environmentId, workflowKey, nodeId, ctx) =>
+        this.approvalPrompt(tenantId, environmentId, workflowKey, nodeId, ctx),
       approve: (id, approved, tenantId, comment, actor) =>
         this.approve(id, approved, tenantId, comment, actor),
     };
@@ -1015,6 +1015,7 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     environmentId: string | null,
     workflowKey: string | null,
     nodeId: string,
+    ctx?: Record<string, unknown>,
   ): Promise<{ title: string; instructions: string | null }> {
     return accessApprovalPrompt(
       this.deps(),
@@ -1022,6 +1023,7 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
       environmentId,
       workflowKey,
       nodeId,
+      ctx,
     );
   }
 
