@@ -627,9 +627,9 @@ export function CanvasPage() {
      *
      * THE ONE PLACE `loaded` DOES NOT MEAN "the workflow is on the canvas". The nodes here are
      * still SEED_NODES, so `/app/canvas?fix=<runId>` with no `?key=` would let useFixFromRun
-     * describe the run's failure against the seed. Not reachable from the product — the run
-     * detail's "Fix with AI" is gated on the run's workflow key, so every URL it builds carries a
-     * non-empty one — and a much weaker version of #1006 even if it were: with no workflow loaded
+     * describe the run's failure against the seed. Not reachable from the product — RunDetail
+     * renders "Fix with AI" behind `runWorkflowKey &&` (truthy, so an empty key is excluded) and
+     * builds the URL from that same value — and a much weaker version of #1006 even if it were: with no workflow loaded
      * there is no version banner to contradict, and "no longer in the workflow" is TRUE of a blank
      * draft. Written down rather than silently relied on, so a future ungated `?fix=` link has
      * something to trip over.

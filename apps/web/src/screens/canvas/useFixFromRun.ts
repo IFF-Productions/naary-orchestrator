@@ -47,6 +47,10 @@ export interface FixFromRun {
  * compiles, a `loading` boolean would spin forever — a spinner that promises something is coming
  * and never delivers is a worse version of the very complaint being fixed. Once the canvas has
  * finished LOADING and still has no graph, that is an answer, not a wait.
+ *
+ * `blocked` DOES NOT MEAN "no graph", though, and reading it that way is how #1006 shipped: a
+ * workflow that failed to OPEN also blocks, with a graph — the seed left on the canvas, compiling.
+ * Two routes in, and the panel needs both apart to say anything true (see {@link blockedReason}).
  */
 export type FixStage =
   "idle" | "loading-canvas" | "reading-run" | "blocked" | "done";
@@ -243,9 +247,9 @@ export function useFixFromRun({
    * ONE PLACE `loaded` DOES NOT MEAN "the workflow is on the canvas": a canvas opened with no
    * `?key=` and no `?template=` has nothing to fetch, so `CanvasPage` reports it loaded
    * immediately — with SEED_NODES mounted. `/app/canvas?fix=<runId>` with no key would therefore
-   * build the description against the seed. It is not reachable from the product (the run detail's
-   * button is gated on the run's workflow key, so the URL it builds always carries one) and it is
-   * a much weaker version of the bug — with no workflow loaded there is no version banner to
+   * build the description against the seed. It is not reachable from the product — RunDetail
+   * renders "Fix with AI" behind `runWorkflowKey &&` (truthy, so `""` is excluded) and builds the
+   * URL from that same value — and it is a much weaker version of the bug — with no workflow loaded there is no version banner to
    * contradict, and "no longer in the workflow" is TRUE of a blank draft. Noted rather than
    * guarded, so the reliance on that gating is at least visible; see the same note at the
    * `setCanvasLoad` call in CanvasPage.

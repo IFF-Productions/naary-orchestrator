@@ -55,7 +55,7 @@ import { expect, type Page, type Route, test } from "@playwright/test";
  *
  * WHERE THE FAILING RUN COMES FROM. It is stubbed, not executed. A real failing Temporal run would
  * need a workflow seeded to fail, a poll to terminal, and would still hand us a run whose error
- * text, ctx and timing we do not control — and none of the five bugs above is about the
+ * text, ctx and timing we do not control — and none of the bugs above is about the
  * orchestrator producing a failure correctly. What they are about is the SPA's handling of a
  * failed run's data, so the run's data is the input, and stubbing it is what makes the error text,
  * the executed-version drift, and above all the RESPONSE TIMING assertable at all. The stubs are

@@ -82,6 +82,11 @@ describe("driftBetween", () => {
 // to be right is `blocked`: the build effect refuses to run without a compiled graph, so a plain
 // loading boolean would spin forever on a canvas that never compiles. A spinner that never
 // resolves is a worse version of the complaint it was added to fix.
+//
+// `blocked` is NOT "there is no graph", though — that reading is how #1006 shipped. A workflow
+// that failed to OPEN blocks too, and it has a graph: the seed left on the canvas, compiling. Two
+// routes in, which is why `canvasLoad` is asked before `hasGraph` and why the cases below pass
+// `hasGraph: true` on the failed open.
 describe("fixStage", () => {
   const RUN = "exec-t-demo-1";
 
