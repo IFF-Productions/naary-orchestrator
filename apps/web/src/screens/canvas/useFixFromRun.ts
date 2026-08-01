@@ -70,8 +70,21 @@ export function fixStage({
   // by run id so arriving from a SECOND failed run starts reporting again instead of showing the
   // previous run's result as though it were this one's.
   if (doneFor === fixRunId) return "done";
-  if (hasGraph) return "reading-run";
-  return canvasLoaded ? "blocked" : "loading-canvas";
+  /**
+   * THE LOAD IS THE FIRST WAIT, AND `hasGraph` CANNOT ANSWER IT (#998).
+   *
+   * This used to read `if (hasGraph) return "reading-run"` first, which made `loading-canvas`
+   * dead code: the canvas mounts with SEED_NODES (start → approval → end) and those COMPILE, so
+   * `hasGraph` is true on the very first render — before the workflow has even been requested.
+   * The panel therefore said it was "reading the run" while what it was really waiting for was
+   * the workflow, and the effect below, reading the same condition, would build the description
+   * against the seed canvas.
+   *
+   * A graph is not THE workflow. `canvasLoaded` is the only signal that separates "the canvas
+   * hasn't loaded yet" from "this is what the canvas has", so it is asked first.
+   */
+  if (!canvasLoaded) return "loading-canvas";
+  return hasGraph ? "reading-run" : "blocked";
 }
 
 /** What the fetch produced. Kept apart from `drift`, which also depends on live canvas state. */
@@ -145,12 +158,22 @@ export function useFixFromRun({
 }: {
   fixRunId: string | null;
   /**
-   * The LIVE compiled canvas — the graph the fix will actually change. Undefined until the
-   * workflow has loaded and compiled, which is why the build below waits for it.
+   * The LIVE compiled canvas — the graph the fix will actually change.
+   *
+   * NOT a signal that the workflow has arrived: the canvas mounts with SEED_NODES, which compile,
+   * so this is defined from the first render (#998). Undefined only means nothing on the canvas
+   * compiles right now. `canvasLoaded` is what says whether it is the workflow.
    */
   currentGraph: GraphDef | undefined;
   currentVersion: number | null;
-  /** Whether the workflow fetch has settled — see `fixStage`, which needs it to stop waiting. */
+  /**
+   * Whether the workflow fetch has SETTLED — the gate on the build below, and what lets
+   * `fixStage` stop waiting.
+   *
+   * "Settled", not "succeeded": a workflow that failed to open is an answer too. The gap that
+   * leaves — a failed `/graphs` read still shows the seed canvas, which this then treats as the
+   * canvas — is #1006; it is a load failure the screen already reports, not the silent race.
+   */
   canvasLoaded: boolean;
   setAiPrompt: (v: string) => void;
   setAiMode: (m: "edit" | "create") => void;
@@ -204,9 +227,31 @@ export function useFixFromRun({
 
   useEffect(() => {
     if (!fixRunId) return;
-    // Wait for the canvas to have compiled. The fix targets the CURRENT graph (decision 1), so
-    // building the description before it exists would describe the failing step as the RUN saw
-    // it — which is the stale snapshot this whole path exists to avoid editing.
+    /**
+     * WAIT FOR THE WORKFLOW, NOT MERELY FOR A GRAPH (#998).
+     *
+     * The fix targets the CURRENT graph (decision 1) and the banner says so, so the description
+     * has to be built against the workflow the user is looking at. `currentGraph` alone does not
+     * establish that: the canvas mounts with SEED_NODES, which COMPILE, so it is defined on the
+     * first render and this effect would start against `start → approval → end`.
+     *
+     * It used to recover by accident. The workflow lands, the nodes are replaced, `currentGraph`
+     * is a new object, the effect is torn down, and the cleanup releases the `builtFor` claim —
+     * so the re-run rebuilt against the real graph. But that only holds while the workflow wins
+     * the race: land the run reads first and `handedOver` is true, the claim survives, and the
+     * seed-built description stands. It reads `Failed at node: "x" (no longer in the workflow)`
+     * under a banner naming the workflow on screen — a confident falsehood, in the feature that
+     * exists to stop the user re-describing a failure from memory.
+     *
+     * Gating on `canvasLoaded` makes the ordering irrelevant rather than merely unlikely: it is
+     * set only once the workflow fetch has SETTLED, which is after the state update that puts
+     * the workflow on the canvas, so no render can pair `canvasLoaded` with the seed. Nothing
+     * about how fast the run reads come back can change that. It also removes the teardown +
+     * re-run this effect used to depend on.
+     */
+    if (!canvasLoaded) return;
+    // Nothing on the canvas compiles — `fixStage` reports `blocked`, and there is nothing to
+    // describe the failing step against. (Never a wait once the canvas has loaded.)
     if (!currentGraph) return;
     // Already described this run: never rebuild over a prompt the user may have edited.
     if (builtFor.current === fixRunId) return;
@@ -309,6 +354,8 @@ export function useFixFromRun({
        *
        * The claim outlived the work it was standing for. StrictMode makes it happen every time in
        * dev, but one recompile during load is enough in production — which is where it was seen.
+       * (The load-time teardown is gone with #998 — this effect no longer starts before the
+       * workflow lands — but any later recompile, an edit or a run overlay, still produces one.)
        *
        * Releasing on an unfinished cancel means the re-run does the work instead of trusting a
        * claim nobody is honouring. `handedOver` keeps the original guarantee intact: once the
@@ -316,7 +363,7 @@ export function useFixFromRun({
        */
       if (!handedOver) builtFor.current = null;
     };
-  }, [fixRunId, currentGraph]);
+  }, [fixRunId, currentGraph, canvasLoaded]);
 
   // Derived HERE, against the version the canvas has now — see the header. A run that executed
   // v3 of a workflow that is now v7 is the case the banner exists for, and it is only knowable

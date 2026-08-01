@@ -32,6 +32,13 @@ import { expect, type Page, type Route, test } from "@playwright/test";
  *      per step, so one step's name matches two buttons that do different things. Fixed by naming
  *      BOTH lists as ARIA groups — not by tightening a selector, which would have left the screen
  *      ambiguous for anyone navigating it by name.
+ *   6. THE DESCRIPTION BUILT AGAINST THE SEED CANVAS (#998). The canvas mounts with SEED_NODES,
+ *      which COMPILE, so the build effect could start before the workflow had loaded and — if the
+ *      run reads won the race — finish against the seed. The prompt then named a step "no longer
+ *      in the workflow" beneath a banner saying the fix applied to the workflow on screen: a
+ *      confident falsehood, in the feature that exists to prevent one. Fixed by waiting for the
+ *      workflow fetch to SETTLE (`canvasLoaded`) rather than for a graph to compile — which also
+ *      made the `loading-canvas` stage reachable, having been dead for the same reason.
  *
  * DELAYED ROUTE STUBS ARE THE WHOLE TECHNIQUE. An instantly-fulfilled route gives no observable
  * window, so an assertion about a loading state cannot fail and the test is vacuous — it would
@@ -198,23 +205,23 @@ function apiPath(suffix: string): RegExp {
 }
 
 /**
- * ORDERING INVARIANT: `graphDelayMs` must be strictly below `runDelayMs`. ENFORCED at the top of
- * `stubFixPath`, which throws — a rule that only a comment keeps is the kind of thing this file
- * exists to catch.
+ * THE TWO DELAYS ARE INDEPENDENT — which is itself an assertion (bug 6).
  *
- * The canvas mounts with SEED_NODES (start → approval → end), which COMPILE — so `currentGraph`
- * is already defined on the first render, before the real workflow has loaded. The build effect
- * therefore starts against the seed graph, and only re-runs against the real one because the
- * incoming workflow replaces the nodes and its cleanup releases the `builtFor` claim. If the run
- * reads finish FIRST, the claim is kept and the description is built against the seed canvas —
- * it comes out reading `Failed at node: "notify" (no longer in the workflow)`.
+ * They used to be constrained: `graphDelayMs` had to stay strictly below `runDelayMs`, enforced by
+ * a throw, because the canvas mounts with SEED_NODES (start → approval → end) and those COMPILE.
+ * `currentGraph` was therefore defined on the first render, before the real workflow had loaded,
+ * and the build effect started against the seed graph — recovering only because the incoming
+ * workflow replaced the nodes and the teardown released the `builtFor` claim. Land the run reads
+ * first and the claim was kept: the description came out describing the SEED canvas, reading
+ * `Failed at node: "notify" (no longer in the workflow)` under a banner naming the workflow on
+ * screen.
  *
- * That is a real latent race in the app (#998), not something these tests exist to
- * assert; every test here holds the realistic ordering — one round trip for the workflow versus
- * three sequential reads of the run — so it exercises the path a user actually takes.
+ * `useFixFromRun` now waits for `canvasLoaded` — the workflow fetch having SETTLED — rather than
+ * for whatever happens to compile, so neither ordering can build against the seed. The throw is
+ * gone with the race, and the inverted ordering has its own test below.
  */
 interface StubOptions {
-  /** How long the canvas's workflow fetch takes. Must be below `runDelayMs` — see above. */
+  /** How long the canvas's workflow fetch takes. Free of `runDelayMs` since #998 — see above. */
   graphDelayMs?: number;
   /** How long the run's state + executed-graph reads take. */
   runDelayMs?: number;
@@ -241,8 +248,10 @@ interface StubOptions {
 async function stubFixPath(page: Page, opts: StubOptions = {}): Promise<void> {
   const {
     graphDelayMs = 0,
-    // Never zero by default: the run reads have to lose the race against the workflow load for
-    // the description to be built against the workflow the user is looking at. See StubOptions.
+    // The realistic ordering, kept as the default: one round trip for the workflow versus three
+    // sequential reads of the run. Non-zero so the `reading-run` window is real on the wire — an
+    // instantly-fulfilled route gives nothing to observe (see the header). Correctness no longer
+    // depends on it; the inverted ordering has its own test.
     runDelayMs = 600,
     historyDelayMs = 0,
     canvasGraph = GRAPH,
@@ -250,34 +259,6 @@ async function stubFixPath(page: Page, opts: StubOptions = {}): Promise<void> {
     runVersion = 3,
     omitCurrentNodeId = false,
   } = opts;
-
-  /**
-   * ENFORCE the ordering the type's doc comment describes.
-   *
-   * A documented invariant that nothing checks is the exact shape of the bugs this file exists
-   * to catch. Inverted, these tests do not fail loudly — they build the description against the
-   * SEED canvas (#998), which produces a full, plausible instruction naming a step that "no
-   * longer exists". Some assertions would then flake, and the rest would quietly stop testing
-   * the path they claim to. Throwing here is the difference between a wrong test and a stopped
-   * one.
-   *
-   * The message carries the RACE, not just the rule: whoever trips this has to understand why
-   * the ordering matters before they can sensibly choose new numbers.
-   */
-  if (graphDelayMs >= runDelayMs) {
-    throw new Error(
-      `stubFixPath: graphDelayMs (${graphDelayMs}) must be strictly below runDelayMs (${runDelayMs}).\n` +
-        "The canvas mounts with SEED_NODES, which COMPILE — so useFixFromRun starts building " +
-        "against the seed graph on the first render, and only rebuilds against the real workflow " +
-        "because the incoming graph tears the effect down and releases its `builtFor` claim. If " +
-        "the run reads land FIRST, the claim is kept and the description is built against the " +
-        'seed canvas (#998) — the prompt comes out reading `Failed at node: "…" (no longer in ' +
-        "the workflow)`.\n" +
-        "These tests hold the realistic ordering — one round trip for the workflow versus three " +
-        "sequential reads of the run — so they exercise the path a user actually takes. Lower " +
-        "graphDelayMs, or raise runDelayMs.",
-    );
-  }
 
   await page.route(apiPath(`/graphs/${KEY}`), (route) =>
     json(
@@ -353,11 +334,9 @@ test("fix: the AI panel opens on ARRIVAL and names each wait, not just the resul
   await expect(
     page.getByText(/^Reading the run — the error, the step that failed/),
   ).toBeVisible();
-  // NOT ASSERTED: the `loading-canvas` line ("Opening the workflow…"). It is unreachable (#998) from
-  // this screen — the canvas mounts with SEED_NODES, which compile, so `hasGraph` is already true
-  // on the first render and `fixStage` goes straight to `reading-run`. An assertion for it would
-  // be one that can only ever fail, and `reading-run` guards the same thing (a stage line, up
-  // from the first render after the click) on the path that actually runs.
+  // The `loading-canvas` line ("Opening the workflow…") precedes this one and is asserted in the
+  // slow-workflow test below, where its window is 1.2s wide. Not asserted here: it closes as soon
+  // as `/graphs` lands, and pinning a 700ms window in two places buys nothing.
 
   // …and the wait ends with the description actually in the box. The sentinel is what proves the
   // run's history was read rather than an empty instruction being rendered (see its declaration).
@@ -379,6 +358,40 @@ test("fix: the AI panel opens on ARRIVAL and names each wait, not just the resul
   await expect(
     page.getByRole("radio", { name: "Change this workflow" }),
   ).toHaveAttribute("aria-checked", "true");
+});
+
+test("fix: a SLOW workflow load still describes the failure against the workflow, not the seed canvas", async ({
+  page,
+}) => {
+  // BUG 6, and the ordering the old invariant forbade: the run reads come back FIRST — instantly —
+  // and the workflow takes 1.2s. In production this is one slow `/graphs` response; here it is the
+  // race made deterministic. Before the fix the description was built on the first render, against
+  // the SEED canvas (start → approval → end), and the finished claim survived the real workflow
+  // landing.
+  await stubFixPath(page, { graphDelayMs: 1200, runDelayMs: 0 });
+  await page.goto(`/app/canvas?key=${KEY}&fix=${RUN}`);
+
+  // The wait is now NAMED rather than skipped past. `loading-canvas` was unreachable for exactly
+  // the reason the race existed — the seed graph compiles, so `hasGraph` was true on render 1 and
+  // the stage went straight to `reading-run` — so this line is the visible half of the fix.
+  await expect(page.getByText("Opening the workflow…")).toBeVisible();
+
+  const box = await promptBox(page);
+  // TWO-SIDED, because either half alone can pass on a broken build. The negative is the exact
+  // falsehood the seed canvas produces; the positive is something ONLY the real workflow can say —
+  // the seed has no `notify` node, so it can neither name its type nor quote its URL. Together
+  // they also rule out an empty or half-built instruction.
+  await expect(box).toHaveValue(
+    new RegExp(`Failed at node: "${FAILED_NODE}" \\(type: httpRequest\\)`),
+  );
+  await expect(box).toHaveValue(/https:\/\/example\.invalid\/page\//);
+  await expect(box).not.toHaveValue(/no longer in the workflow/);
+
+  // And the banner still agrees with the box: the fix applies to the version on the canvas, which
+  // is the claim that was false while the description described a different graph.
+  await expect(
+    page.getByText(/That run used v3; this workflow is now v7/),
+  ).toBeVisible();
 });
 
 test("fix: the prompt box is read-only while the description is being written — not disabled", async ({
@@ -550,8 +563,8 @@ test("run detail: an open payload row does not follow you to the next run of the
   //   1. RunLog resets `open` when `events` goes null (the fix this bug produced);
   //   2. RunView clears `graph` on an id change, which unmounts the whole pane holding the log;
   //   3. AppShell keys the routed screen by `pathname`, so a run→run navigation remounts the
-  //      screen outright — which also makes RunView's own "this screen isn't unmounted" comment
-  //      stale.
+  //      screen outright — which is why RunView's clears no longer carry the reason they were
+  //      written with, and now say so.
   // Verified by removing them one at a time: only with all three gone does the row come back
   // open. So this guards the OBSERVABLE property — no row is pre-opened on the next run — rather
   // than pinning any one mechanism, and it turns red the moment the property genuinely breaks.

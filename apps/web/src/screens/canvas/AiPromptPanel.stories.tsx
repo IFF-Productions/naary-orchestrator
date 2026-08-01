@@ -192,6 +192,12 @@ export const VersionDrift: Story = {
  * This is the state that was MISSING: the canvas appeared, the panel didn't, and nothing said the
  * description was on its way, so the honest reading was that the button had done nothing. The box
  * is already full height here, so the description lands without the panel jumping.
+ *
+ * It was also, for a while, a story for a state the app could not reach: `fixStage` asked
+ * `hasGraph` first, and the canvas's SEED nodes compile, so it went straight to `reading-run`
+ * (#998). Kept rather than deleted because the wait is real and worth naming — it is the whole
+ * window between the click and the workflow arriving — and the stage now reports it, having been
+ * made the gate on building the description at all.
  */
 export const FixOpeningWorkflow: Story = {
   args: {
