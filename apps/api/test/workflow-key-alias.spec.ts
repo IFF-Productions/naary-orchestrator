@@ -34,7 +34,10 @@ const aliasFindMany = vi.fn(
 );
 const aliasCreate = vi.fn(
   async ({ data }: { data: { alias: string; workflowKey: string } }) => {
-    if (aliases.has(data.alias)) throw new Error("unique violation");
+    if (aliases.has(data.alias))
+      throw Object.assign(new Error("Unique constraint failed"), {
+        code: "P2002",
+      });
     aliases.set(data.alias, data.workflowKey);
     return data;
   },
@@ -117,8 +120,11 @@ moved.graphDefinition.mockImplementation(
   },
 );
 
+const grantFindMany = vi.fn(async () => [{ id: "grant-1" }]);
+
 function tx() {
   const t: Record<string, unknown> = {
+    workflowGrant: { findMany: grantFindMany },
     workflowKeyAlias: {
       create: aliasCreate,
       updateMany: aliasUpdateMany,
@@ -223,6 +229,7 @@ beforeEach(() => {
   ])
     m.mockClear();
   for (const m of Object.values(moved)) m.mockClear();
+  grantFindMany.mockClear();
 
   graphFindFirst.mockReset();
   graphFindFirst.mockImplementation(
@@ -287,10 +294,14 @@ describe("#904 — renaming a workflow key", () => {
     // ErrorHandler is rewritten in BOTH directions (this workflow's handler, and every workflow
     // that nominates this one as ITS handler).
     expect(moved.errorHandler).toHaveBeenCalledTimes(2);
-    // The grant rewrite is scoped through the group relation — a bare `workflowKey` filter would
+    // The grant rewrite is scoped to THIS tenant's grant ids — a bare `workflowKey` filter would
     // reach into other tenants' grants (WorkflowGrantKey has no tenantId column).
+    expect(grantFindMany).toHaveBeenCalledWith({
+      where: { group: { tenantId: T } },
+      select: { id: true },
+    });
     expect(moved.workflowGrantKey.mock.calls[0][0].where).toMatchObject({
-      grant: { group: { tenantId: T } },
+      grantId: { in: ["grant-1"] },
     });
   });
 
@@ -470,6 +481,29 @@ describe("#904 — renaming a workflow key", () => {
         data: { workflowKey: NEW },
       });
     });
+  });
+
+  it("propagates a NON-constraint transaction failure instead of mislabelling it a collision", async () => {
+    // The rewrite's own budget (or a dropped connection) must not surface as "pick a different
+    // key" — that is the wrong diagnostic on exactly the failure this rewrite is most likely to hit.
+    moved.execution.mockRejectedValueOnce(
+      Object.assign(new Error("Transaction already closed"), { code: "P2028" }),
+    );
+    const { svc } = renameService();
+    await expect(svc.rename(T, OLD, NEW)).rejects.toThrow(
+      /Transaction already closed/,
+    );
+  });
+
+  it("refuses to bind a workflow as its OWN error handler through a retired key", async () => {
+    const { svc, graphs } = renameService();
+    await svc.rename(T, OLD, NEW);
+
+    // The controller's string comparison passes here (`new` !== `old`), but both keys resolve to
+    // the SAME workflow — and a self-binding means a failing run spawns itself as its handler.
+    await expect(
+      graphs.setErrorHandler(T, "env-prod", NEW, OLD),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   describe("permissions (§4)", () => {

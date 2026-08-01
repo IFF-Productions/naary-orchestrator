@@ -195,15 +195,22 @@ export class WorkflowKeyRenameService {
           // --- tags + permission grants (both are TENANT-wide, not env-scoped) ----------------
           await tx.workflowTag.updateMany({ where: byKey, data: move });
           // WorkflowGrantKey has no tenantId column — it hangs off a grant, which hangs off a
-          // group, which is the tenant's. Scope through the relation so one tenant's rename can
-          // never touch another's grant rows.
-          await tx.workflowGrantKey.updateMany({
-            where: {
-              workflowKey: current,
-              grant: { group: { tenantId } },
-            },
-            data: move,
-          });
+          // group, which is the tenant's. Resolve the tenant's grant ids FIRST and filter the write
+          // by a plain `in`, rather than putting a two-hop relation filter inside an `updateMany`:
+          // same tenant-scoping guarantee, but expressed as an ordinary column predicate that
+          // cannot depend on relation-filter support in a write.
+          const grantIds = (
+            await tx.workflowGrant.findMany({
+              where: { group: { tenantId } },
+              select: { id: true },
+            })
+          ).map((g) => g.id);
+          if (grantIds.length > 0) {
+            await tx.workflowGrantKey.updateMany({
+              where: { workflowKey: current, grantId: { in: grantIds } },
+              data: move,
+            });
+          }
 
           // --- trigger endpoints (the column is `workflowId`, not `workflowKey`) --------------
           // The PUBLIC URL is the endpoint's opaque uuid and is untouched: a webhook/form/chat URL
@@ -250,13 +257,20 @@ export class WorkflowKeyRenameService {
         { timeout: RENAME_TRANSACTION_MS },
       );
     } catch (e) {
-      if (e instanceof ConflictException) throw e;
-      // A composite-PK clash (an orphan row already sitting under the target key) lands here. The
-      // transaction rolled back, so the workflow is untouched — report it as the collision it is.
-      throw new ConflictException(
-        `Could not rename '${current}' to '${target}' — something already occupies that key. ` +
-          "Pick a different key.",
-      );
+      // ONLY a real constraint violation becomes a 409: a composite-PK clash (an orphan row already
+      // sitting under the target key) is the collision this message describes. Everything else — the
+      // transaction budget above, a dropped connection, a Prisma validation error — propagates
+      // untouched, because telling someone to "pick a different key" when the write actually TIMED
+      // OUT is the wrong diagnostic on precisely the failure mode this rewrite is most likely to
+      // hit. The transaction rolled back either way, so the workflow is untouched.
+      const code = (e as { code?: string } | null)?.code;
+      if (code === "P2002" || code === "P2003") {
+        throw new ConflictException(
+          `Could not rename '${current}' to '${target}' — something already occupies that key. ` +
+            "Pick a different key.",
+        );
+      }
+      throw e;
     }
 
     // The cached scope='selected' key list (WorkflowGrantKey ∪ tag-carried keys) still holds the

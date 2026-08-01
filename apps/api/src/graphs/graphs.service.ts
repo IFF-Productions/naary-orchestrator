@@ -817,6 +817,16 @@ export class GraphsService {
       return;
     }
     const handler = await this.liveKey(tenantId, errorWorkflowKey);
+    // The self-handler guard lives HERE, after both resolutions — not in the controller, where the
+    // raw strings are compared. Post-rename `PUT /graphs/<new>/error-handler {errorWorkflowKey:
+    // "<old>"}` passes a string comparison (the two differ) yet resolves to the SAME workflow, and
+    // a self-binding means a failing run spawns itself as its own error handler (run-graph.ts
+    // launches the handler as a child). An invariant belongs where the resolution happens.
+    if (handler === key) {
+      throw new BadRequestException(
+        "A workflow cannot be its own error handler",
+      );
+    }
     await getPrisma().errorHandler.upsert({
       where: {
         tenantId_environmentId_workflowKey: {

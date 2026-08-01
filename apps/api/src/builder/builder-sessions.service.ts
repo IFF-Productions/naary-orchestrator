@@ -78,7 +78,7 @@ export class BuilderSessionsService {
     input: { workflowKey?: string; title?: string },
     actor?: Principal,
   ): Promise<BuilderSessionResponse> {
-    const workflowKey = input.workflowKey?.trim() || null;
+    let workflowKey = input.workflowKey?.trim() || null;
 
     // Seed the draft from the named workflow's latest graph in this environment, if it exists.
     //
@@ -100,6 +100,10 @@ export class BuilderSessionsService {
         actor,
       );
       currentGraph = snapshot?.graph ?? null;
+      // #904: seeding from a RETIRED key resolves, so persist the key the read actually returned —
+      // storing the retired one would leave the session pointing at a name the workflows list no
+      // longer shows.
+      workflowKey = snapshot?.workflowKey ?? workflowKey;
     }
 
     const row = await getPrisma().builderSession.create({
