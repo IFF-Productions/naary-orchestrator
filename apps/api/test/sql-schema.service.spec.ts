@@ -29,12 +29,21 @@ function withFakeDb(opts: {
   throwOnRun?: unknown;
   throwOnResolve?: unknown;
   now?: () => number;
+  /** Which (env, connection) pairs exist. Default: every pair — the env gate is not what most
+   *  of these tests are about, so it must not become a silent precondition for all of them. */
+  inEnv?: (
+    tenantId: string,
+    environmentId: string,
+    connectionId: string,
+  ) => boolean;
 }): { service: SqlSchemaService; rec: Recorder } {
   const rec: Recorder = { sql: [], dsns: [], calls: 0 };
   __sqlIntrospectDeps.resolveDbConnection = async () => {
     if (opts.throwOnResolve) throw opts.throwOnResolve;
     return { engine: opts.engine ?? "postgres", dsn: DSN };
   };
+  __sqlIntrospectDeps.connectionInEnv = async (t, e, c) =>
+    opts.inEnv ? opts.inEnv(t, e, c) : true;
   __sqlIntrospectDeps.resolvePinnedHost = async () => "93.184.216.34";
   __sqlIntrospectDeps.getAdapter = (() => ({
     engine: opts.engine ?? "postgres",
@@ -68,7 +77,7 @@ describe("SqlSchemaService", () => {
     const { service, rec } = withFakeDb({
       rows: [col("users", "id"), col("users", "email")],
     });
-    const out = await service.introspect("t1", "c1");
+    const out = await service.introspect("t1", "e1", "c1");
     expect(out.tables).toEqual([
       {
         schema: "public",
@@ -85,11 +94,11 @@ describe("SqlSchemaService", () => {
 
   it("uses the per-engine query, not one query for all three", async () => {
     const pg = withFakeDb({ engine: "postgres" });
-    await pg.service.introspect("t1", "c1");
+    await pg.service.introspect("t1", "e1", "c1");
     const my = withFakeDb({ engine: "mysql" });
-    await my.service.introspect("t1", "c1");
+    await my.service.introspect("t1", "e1", "c1");
     const ms = withFakeDb({ engine: "mssql" });
-    await ms.service.introspect("t1", "c1");
+    await ms.service.introspect("t1", "e1", "c1");
     expect(pg.rec.sql[0]).toContain("information_schema.columns");
     expect(my.rec.sql[0]).toContain("DATABASE()");
     expect(ms.rec.sql[0]).toContain("sys.columns");
@@ -98,7 +107,7 @@ describe("SqlSchemaService", () => {
   describe("degradation — introspection must never block authoring", () => {
     it("a credential that can see nothing yields an empty list with an explanation", async () => {
       const { service } = withFakeDb({ rows: [] });
-      const out = await service.introspect("t1", "c1");
+      const out = await service.introspect("t1", "e1", "c1");
       expect(out.tables).toEqual([]);
       expect(out.note).toMatch(/No tables were visible/i);
     });
@@ -106,7 +115,7 @@ describe("SqlSchemaService", () => {
     it("a partially-visible catalog returns exactly what was visible", async () => {
       // Every engine's catalog is privilege-filtered, so a restricted login simply sees fewer rows.
       const { service } = withFakeDb({ rows: [col("users", "id")] });
-      const out = await service.introspect("t1", "c1");
+      const out = await service.introspect("t1", "e1", "c1");
       expect(out.tables.map((t) => t.name)).toEqual(["users"]);
       expect(out.truncated).toBe(false);
     });
@@ -117,7 +126,7 @@ describe("SqlSchemaService", () => {
         col(`t${String(i).padStart(6, "0")}`, "id"),
       );
       const { service } = withFakeDb({ rows });
-      const out = await service.introspect("t1", "c1");
+      const out = await service.introspect("t1", "e1", "c1");
       expect(out.truncated).toBe(true);
       expect(out.note).toBeTruthy();
       expect(out.tables.length).toBeLessThanOrEqual(1_500);
@@ -130,7 +139,7 @@ describe("SqlSchemaService", () => {
         { code: "ECONNREFUSED" },
       );
       const { service } = withFakeDb({ throwOnRun: driverError });
-      await expect(service.introspect("t1", "c1")).rejects.toMatchObject({
+      await expect(service.introspect("t1", "e1", "c1")).rejects.toMatchObject({
         status: 503,
       });
     });
@@ -147,7 +156,9 @@ describe("SqlSchemaService", () => {
     for (const [i, err] of leaky.entries()) {
       it(`case ${i + 1}: no host, user or password reaches the response`, async () => {
         const { service } = withFakeDb({ throwOnRun: err });
-        const thrown = await service.introspect("t1", "c1").catch((e) => e);
+        const thrown = await service
+          .introspect("t1", "e1", "c1")
+          .catch((e) => e);
         const text = JSON.stringify({
           message: (thrown as Error).message,
           response: (thrown as { response?: unknown }).response,
@@ -165,9 +176,61 @@ describe("SqlSchemaService", () => {
           "host resolves to a private/reserved address",
         ),
       });
-      const thrown = await service.introspect("t1", "c1").catch((e) => e);
+      const thrown = await service.introspect("t1", "e1", "c1").catch((e) => e);
       expect((thrown as { status?: number }).status).toBe(400);
       expect((thrown as Error).message).toMatch(/private\/reserved/);
+    });
+  });
+
+  /**
+   * The active-environment gate (#1004 review). `/connections` LIST is env-scoped, so scoping this
+   * route by tenant alone made it a way around that list: a sandbox editor could read the shape of
+   * the production database. Table names are not credentials, but they are the map of one.
+   */
+  describe("environment scoping", () => {
+    it("a connection in ANOTHER environment is not readable", async () => {
+      const { service, rec } = withFakeDb({
+        rows: [col("users", "id")],
+        inEnv: (_t, e) => e === "sandbox",
+      });
+      await expect(
+        service.introspect("t1", "prod", "c1"),
+      ).rejects.toMatchObject({ status: 404 });
+      // And it never reached the database — the gate is ahead of credential resolution, so a
+      // connection you cannot see is not one you can make the server dial.
+      expect(rec.calls).toBe(0);
+    });
+
+    // Same NotFoundException as an id that does not exist, deliberately: telling the two apart
+    // would let a member enumerate connection ids in environments they cannot otherwise read,
+    // which is a strictly worse leak than the table names this route exists to return.
+    it("is indistinguishable from an id that does not exist", async () => {
+      // `rejects` FIRST, then compare. Catching into a value and comparing `.message` would pass
+      // vacuously the moment the gate stopped rejecting: both sides resolve to a summary, both
+      // `.message`s are undefined, undefined === undefined, green. The typechecker caught that
+      // (`Property 'message' does not exist on type 'SqlSchemaSummary'`) — worth keeping the
+      // reason next to the fix, since the vacuous version reads perfectly well.
+      const reject = (inEnvExists: boolean, id: string) =>
+        expect(
+          withFakeDb({
+            rows: inEnvExists ? [col("users", "id")] : [],
+            inEnv: () => false,
+          }).service.introspect("t1", "prod", id),
+        ).rejects.toMatchObject({
+          status: 404,
+          message: expect.stringContaining("No such connection"),
+        });
+      await reject(true, "c1"); // exists, wrong environment
+      await reject(false, "does-not-exist"); // never existed
+    });
+
+    it("the SAME connection IS readable from its own environment", async () => {
+      const { service } = withFakeDb({
+        rows: [col("users", "id")],
+        inEnv: (_t, e) => e === "sandbox",
+      });
+      const out = await service.introspect("t1", "sandbox", "c1");
+      expect(out.tables.map((t) => t.name)).toEqual(["users"]);
     });
   });
 
@@ -176,7 +239,9 @@ describe("SqlSchemaService", () => {
       const { service } = withFakeDb({
         throwOnResolve: new Error("Unknown connection 'nope'"),
       });
-      await expect(service.introspect("t1", "nope")).rejects.toMatchObject({
+      await expect(
+        service.introspect("t1", "e1", "nope"),
+      ).rejects.toMatchObject({
         status: 404,
       });
     });
@@ -187,7 +252,7 @@ describe("SqlSchemaService", () => {
           "Connection 'c1' is not a SQL database connection",
         ),
       });
-      await expect(service.introspect("t1", "c1")).rejects.toMatchObject({
+      await expect(service.introspect("t1", "e1", "c1")).rejects.toMatchObject({
         status: 400,
       });
     });
@@ -195,7 +260,7 @@ describe("SqlSchemaService", () => {
     it("a missing connectionId is rejected before anything is resolved", async () => {
       const { service, rec } = withFakeDb({});
       await expect(
-        service.introspect("t1", "" as string),
+        service.introspect("t1", "e1", "" as string),
       ).rejects.toMatchObject({ status: 400 });
       expect(rec.calls).toBe(0);
     });
@@ -204,24 +269,36 @@ describe("SqlSchemaService", () => {
   describe("caching", () => {
     it("serves a second read from cache — the editor must not re-introspect per keystroke", async () => {
       const { service, rec } = withFakeDb({ rows: [col("users", "id")] });
-      await service.introspect("t1", "c1");
-      await service.introspect("t1", "c1");
-      await service.introspect("t1", "c1");
+      await service.introspect("t1", "e1", "c1");
+      await service.introspect("t1", "e1", "c1");
+      await service.introspect("t1", "e1", "c1");
       expect(rec.calls).toBe(1);
     });
 
     it("scopes the cache by tenant AND connection", async () => {
       const { service, rec } = withFakeDb({ rows: [col("users", "id")] });
-      await service.introspect("t1", "c1");
-      await service.introspect("t2", "c1"); // another tenant — never a shared hit
-      await service.introspect("t1", "c2");
+      await service.introspect("t1", "e1", "c1");
+      await service.introspect("t2", "e1", "c1"); // another tenant — never a shared hit
+      await service.introspect("t1", "e1", "c2");
       expect(rec.calls).toBe(3);
+    });
+
+    // The one that decides whether the env gate is real. Scoping the LOOKUP while leaving the key
+    // `tenantId:connectionId` would leave the gate decorative: sandbox warms the entry, prod asks
+    // for the same connection id and is served sandbox's schema without the gate ever running
+    // again. A cache keyed more loosely than the authorization in front of it IS the
+    // authorization. Both envs are allowed here on purpose — this asserts KEYING, not the gate.
+    it("scopes the cache by ENVIRONMENT — one env never serves another's schema", async () => {
+      const { service, rec } = withFakeDb({ rows: [col("users", "id")] });
+      await service.introspect("t1", "sandbox", "c1");
+      await service.introspect("t1", "prod", "c1");
+      expect(rec.calls).toBe(2);
     });
 
     it("refresh:true bypasses the cache (a migration just dropped a column)", async () => {
       const { service, rec } = withFakeDb({ rows: [col("users", "id")] });
-      await service.introspect("t1", "c1");
-      await service.introspect("t1", "c1", { refresh: true });
+      await service.introspect("t1", "e1", "c1");
+      await service.introspect("t1", "e1", "c1", { refresh: true });
       expect(rec.calls).toBe(2);
     });
 
@@ -231,12 +308,12 @@ describe("SqlSchemaService", () => {
         rows: [col("users", "id")],
         now: () => clock,
       });
-      await service.introspect("t1", "c1");
+      await service.introspect("t1", "e1", "c1");
       clock += 4 * 60_000;
-      await service.introspect("t1", "c1");
+      await service.introspect("t1", "e1", "c1");
       expect(rec.calls).toBe(1);
       clock += 2 * 60_000; // now past the 5-minute TTL
-      await service.introspect("t1", "c1");
+      await service.introspect("t1", "e1", "c1");
       expect(rec.calls).toBe(2);
     });
 
@@ -244,8 +321,8 @@ describe("SqlSchemaService", () => {
       const { service, rec } = withFakeDb({
         throwOnRun: new Error("boom"),
       });
-      await service.introspect("t1", "c1").catch(() => undefined);
-      await service.introspect("t1", "c1").catch(() => undefined);
+      await service.introspect("t1", "e1", "c1").catch(() => undefined);
+      await service.introspect("t1", "e1", "c1").catch(() => undefined);
       expect(rec.calls).toBe(2);
     });
   });
