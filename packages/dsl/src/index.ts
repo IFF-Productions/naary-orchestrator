@@ -75,6 +75,26 @@ export {
   resolveApprovalPrompt,
   type ApprovalPromptText,
 } from "./approval-prompt";
+// The agent output CONTRACT (#830 / #1016): an agent promises structured fields only when its
+// config carries an `outputSchema`. One definition of "reads a field" / "promises a field",
+// shared by the shipped-template drift guard, the canvas lint and the fork migration.
+export {
+  agentOutputReads,
+  promisedAgentFields,
+  hasStructuredOutput,
+  promptRequestsJson,
+  lintAgentOutputContract,
+  type AgentOutputRead,
+} from "./agent-output-contract";
+// #1016 — recognise and correct a graph forked from a template that failed OPEN. Migration is
+// deliberately narrow; everything it declines is warned about by `lintAgentOutputContract`.
+export {
+  FAILING_OPEN_FINGERPRINTS,
+  matchFailingOpenFork,
+  migrateFailingOpenFork,
+  type FailingOpenFingerprint,
+  type FailingOpenMigration,
+} from "./failing-open-templates";
 export { isPureNode, runPureNode } from "./pure-node";
 // Items model (design ITEMS-MODEL.md) — Slice 1 normalize primitive only; no interpreter change yet.
 export { type Item, toItems, itemsJson } from "./items";

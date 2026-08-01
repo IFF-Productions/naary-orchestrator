@@ -16,7 +16,10 @@ import {
   supervisorHandoffGraph,
   supportReplyGraph,
 } from "../src";
-import { HANDOFF_TARGET_FIELD } from "../src/handoff";
+import {
+  agentOutputReads,
+  promisedAgentFields,
+} from "../src/agent-output-contract";
 import { validateGraph } from "../src/validate-graph";
 import type { GraphDef } from "../src/types";
 
@@ -92,64 +95,21 @@ describe("templates — every agent output a template reads is one its schema de
     escalationGraph,
   };
 
-  /** The fields an agent node actually promises: its declared `outputSchema` properties. A node
-   *  with no schema promises exactly one thing — `text` — so that is the whole allowed set.
-   *  `handoff` is the one exemption, and a real one rather than a hole: the activity DERIVES the
-   *  schema from `handoff.targets` (an enum of target names in `HANDOFF_TARGET_FIELD`), so that
-   *  field is guaranteed to exist by construction. */
-  function promisedFields(node: GraphDef["nodes"][number]): Set<string> {
-    const cfg = node.config as
-      { outputSchema?: unknown; handoff?: unknown } | undefined;
-    const schema = cfg?.outputSchema as
-      { properties?: Record<string, unknown> } | undefined;
-    const derived = cfg?.handoff ? [HANDOFF_TARGET_FIELD] : [];
-    if (!schema?.properties) return new Set(["text", ...derived]);
-    return new Set([...Object.keys(schema.properties), ...derived]);
-  }
-
-  /** Every `(agentNodeId, field)` a graph reads: edge conditions (`<id>.output.<field>`) and
-   *  mcpTool `argumentBindings` (`{ from: <id>, path: "output.<field>" }`).
-   *  `[\w-]` not `\w`: node ids may contain hyphens, and a guard against silent skipping that
-   *  silently skips `check-content.output.flagged` would be its own punchline. */
-  function reads(graph: GraphDef): { nodeId: string; field: string }[] {
-    const out: { nodeId: string; field: string }[] = [];
-    for (const e of graph.edges) {
-      const path = e.condition?.path;
-      const m =
-        typeof path === "string"
-          ? /^([\w-]+)\.output\.([\w-]+)/.exec(path)
-          : null;
-      if (m) out.push({ nodeId: m[1], field: m[2] });
-    }
-    for (const n of graph.nodes) {
-      const bindings = (
-        n.config as
-          | {
-              argumentBindings?: Record<
-                string,
-                { from?: string; path?: string }
-              >;
-            }
-          | undefined
-      )?.argumentBindings;
-      for (const b of Object.values(bindings ?? {})) {
-        const bm =
-          typeof b?.path === "string" ? /^output\.([\w-]+)/.exec(b.path) : null;
-        if (bm && b.from) out.push({ nodeId: b.from, field: bm[1] });
-      }
-    }
-    return out;
-  }
+  // `promisedAgentFields` and `agentOutputReads` used to live here as local helpers. They moved
+  // into `src/agent-output-contract.ts` for #1016, because the canvas lint and the fork
+  // migration have to answer the SAME two questions about tenant-authored graphs — and three
+  // copies of "what does this node promise" would be exactly the drift this guard exists to
+  // catch. This spec still owns the assertion; it no longer owns the definition.
 
   for (const [name, graph] of Object.entries(ALL)) {
     it(`${name}: reads only declared agent fields`, () => {
       const byId = new Map(graph.nodes.map((n) => [n.id, n]));
-      for (const { nodeId, field } of reads(graph)) {
-        const node = byId.get(nodeId);
+      for (const { from, field } of agentOutputReads(graph)) {
+        const node = byId.get(from);
         if (node?.type !== "agent") continue; // only agents have an outputSchema contract
         expect(
-          [...promisedFields(node)],
-          `${name}: node "${nodeId}" is read for "${field}", which its outputSchema does not declare — it would be undefined at run time`,
+          [...promisedAgentFields(node)],
+          `${name}: node "${from}" is read for "${field}", which its outputSchema does not declare — it would be undefined at run time`,
         ).toContain(field);
       }
     });

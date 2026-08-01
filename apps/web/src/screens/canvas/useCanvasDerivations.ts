@@ -4,6 +4,7 @@
 import { useCallback, useMemo } from "react";
 import { type Node } from "@xyflow/react";
 import {
+  lintAgentOutputContract,
   lintBindings,
   lintTemplates,
   validateIntegrationConfig,
@@ -89,8 +90,27 @@ export function useCanvasDerivations({
   // Non-blocking lint: references to a node not in the graph — both `{{ nodeId.path }}` string
   // tokens AND structured `{from,path}` bindings (fieldBindings etc.). Each names WHICH source is
   // missing, so a typo'd/deleted binding source is caught at author time, not as an empty run.
+  //
+  // `lintAgentOutputContract` (#1016) is the third of the same kind: an agent returns structured
+  // fields ONLY when its config carries an `outputSchema`, so a graph that asks for JSON in the
+  // prompt and then reads `agent.output.<field>` reads a field that can never exist. That is the
+  // bug that made the shipped `moderation` template's gate fail OPEN — every submission
+  // auto-accepted, human review unreachable, nothing erroring anywhere.
+  //
+  // Deliberately HERE and not in the save gate. #1016's decision migrates only graphs that are
+  // recognisably a fork of a shipped template; everything merely similar gets NOTIFIED, because
+  // a free-text agent whose prompt happens to mention JSON is a legitimate authoring choice and
+  // rejecting the save would break workflows already sitting in tenants' workspaces. A warning
+  // next to the node, to the person who can judge it, is the whole point.
   const templateWarnings = useMemo(
-    () => (graph ? [...lintTemplates(graph), ...lintBindings(graph)] : []),
+    () =>
+      graph
+        ? [
+            ...lintTemplates(graph),
+            ...lintBindings(graph),
+            ...lintAgentOutputContract(graph),
+          ]
+        : [],
     [graph],
   );
 
