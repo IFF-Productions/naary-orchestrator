@@ -14,7 +14,8 @@ import { expect, type Page, type Route, test } from "@playwright/test";
  *
  *   1. A DEAD WINDOW. The panel opened on COMPLETION rather than on arrival, so the canvas
  *      appeared and nothing said a description was coming — the button read as broken. Fixed with
- *      the four-state `FixStage` + the arrival effect (useFixFromRun).
+ *      the `FixStage` enum + the arrival effect (useFixFromRun). (Not counted here: the enum is
+ *      right there to be read, and a number in prose goes stale the next time a stage is added.)
  *   2. TYPING DURING THE WAIT WAS SILENTLY OVERWRITTEN when the description landed. Fixed with
  *      `readOnly` — deliberately NOT `disabled`, which drops the field out of the tab order and
  *      out of reach of a screen reader. The test below has to tell those two apart, so it asserts
@@ -197,7 +198,9 @@ function apiPath(suffix: string): RegExp {
 }
 
 /**
- * ORDERING INVARIANT: keep `graphDelayMs` below `runDelayMs`.
+ * ORDERING INVARIANT: `graphDelayMs` must be strictly below `runDelayMs`. ENFORCED at the top of
+ * `stubFixPath`, which throws — a rule that only a comment keeps is the kind of thing this file
+ * exists to catch.
  *
  * The canvas mounts with SEED_NODES (start → approval → end), which COMPILE — so `currentGraph`
  * is already defined on the first render, before the real workflow has loaded. The build effect
@@ -211,7 +214,7 @@ function apiPath(suffix: string): RegExp {
  * three sequential reads of the run — so it exercises the path a user actually takes.
  */
 interface StubOptions {
-  /** How long the canvas's workflow fetch takes. Keep below `runDelayMs` — see above. */
+  /** How long the canvas's workflow fetch takes. Must be below `runDelayMs` — see above. */
   graphDelayMs?: number;
   /** How long the run's state + executed-graph reads take. */
   runDelayMs?: number;
@@ -247,6 +250,34 @@ async function stubFixPath(page: Page, opts: StubOptions = {}): Promise<void> {
     runVersion = 3,
     omitCurrentNodeId = false,
   } = opts;
+
+  /**
+   * ENFORCE the ordering the type's doc comment describes.
+   *
+   * A documented invariant that nothing checks is the exact shape of the bugs this file exists
+   * to catch. Inverted, these tests do not fail loudly — they build the description against the
+   * SEED canvas (#998), which produces a full, plausible instruction naming a step that "no
+   * longer exists". Some assertions would then flake, and the rest would quietly stop testing
+   * the path they claim to. Throwing here is the difference between a wrong test and a stopped
+   * one.
+   *
+   * The message carries the RACE, not just the rule: whoever trips this has to understand why
+   * the ordering matters before they can sensibly choose new numbers.
+   */
+  if (graphDelayMs >= runDelayMs) {
+    throw new Error(
+      `stubFixPath: graphDelayMs (${graphDelayMs}) must be strictly below runDelayMs (${runDelayMs}).\n` +
+        "The canvas mounts with SEED_NODES, which COMPILE — so useFixFromRun starts building " +
+        "against the seed graph on the first render, and only rebuilds against the real workflow " +
+        "because the incoming graph tears the effect down and releases its `builtFor` claim. If " +
+        "the run reads land FIRST, the claim is kept and the description is built against the " +
+        'seed canvas (#998) — the prompt comes out reading `Failed at node: "…" (no longer in ' +
+        "the workflow)`.\n" +
+        "These tests hold the realistic ordering — one round trip for the workflow versus three " +
+        "sequential reads of the run — so they exercise the path a user actually takes. Lower " +
+        "graphDelayMs, or raise runDelayMs.",
+    );
+  }
 
   await page.route(apiPath(`/graphs/${KEY}`), (route) =>
     json(
