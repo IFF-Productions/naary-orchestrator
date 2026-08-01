@@ -165,7 +165,27 @@ export const moderationGraph: GraphDef = {
         provider: "anthropic",
         model: "claude-opus-4-8",
         systemPrompt:
-          'Classify the submitted content for policy violations. Respond with a JSON object: { "flagged": boolean, "reason": string }. Flag anything unsafe, spammy, or abusive.',
+          "Classify the submitted content for policy violations. Flag anything unsafe, spammy, or abusive.",
+        // REQUIRED, not decorative (#830). An agent returns a structured object ONLY when its
+        // config carries an `outputSchema`; without one it returns free text as `{ text }` — so
+        // asking for JSON in the prompt and reading `classify.output.flagged` in the edges below
+        // meant `flagged` was ALWAYS undefined. `eq true` never matched and `neq true` always did:
+        // the gate failed OPEN, auto-accepting every submission and making the review branch
+        // unreachable. The schema is what makes the field exist.
+        outputSchema: {
+          type: "object",
+          properties: {
+            flagged: {
+              type: "boolean",
+              description: "True when the content violates policy.",
+            },
+            reason: {
+              type: "string",
+              description: "Why it was flagged (or why it is clean).",
+            },
+          },
+          required: ["flagged", "reason"],
+        },
       },
     },
     {
@@ -221,7 +241,25 @@ export const githubIssueTriageGraph: GraphDef = {
         provider: "anthropic",
         model: "claude-opus-4-8",
         systemPrompt:
-          'A GitHub issue was just opened. Read its title and body and respond with ONLY a JSON object: { "summary": string (a one-line triage note), "labels": string[] (from: "bug", "enhancement", "question", "documentation"), "priority": "low" | "medium" | "high" }. Be decisive.',
+          "A GitHub issue was just opened. Read its title and body and triage it. Be decisive.",
+        // See moderationGraph: the prompt asking for JSON does not make the output structured, and
+        // the `output.summary` / `output.labels` bindings below read fields that would never have
+        // existed — the comment would post nothing and the label call would send no labels (#830).
+        outputSchema: {
+          type: "object",
+          properties: {
+            summary: { type: "string", description: "A one-line triage note." },
+            labels: {
+              type: "array",
+              items: {
+                type: "string",
+                enum: ["bug", "enhancement", "question", "documentation"],
+              },
+            },
+            priority: { type: "string", enum: ["low", "medium", "high"] },
+          },
+          required: ["summary", "labels", "priority"],
+        },
       },
     },
     {
@@ -277,7 +315,23 @@ export const jiraTicketGraph: GraphDef = {
         provider: "anthropic",
         model: "claude-opus-4-8",
         systemPrompt:
-          'You turn an inbound request (a bug report, feature ask, or support message) into a Jira ticket. Respond with ONLY a JSON object: { "summary": string (a concise issue title), "description": string (clear, actionable detail), "issueType": "Bug" | "Task" | "Story", "priority": "Low" | "Medium" | "High" }.',
+          "You turn an inbound request (a bug report, feature ask, or support message) into a Jira ticket.",
+        // See moderationGraph. Without this, the four `output.*` bindings below resolved to nothing
+        // and Jira's create_issue was called with empty required arguments — AFTER a human had
+        // already approved a ticket the run could not actually create (#830).
+        outputSchema: {
+          type: "object",
+          properties: {
+            summary: { type: "string", description: "A concise issue title." },
+            description: {
+              type: "string",
+              description: "Clear, actionable detail.",
+            },
+            issueType: { type: "string", enum: ["Bug", "Task", "Story"] },
+            priority: { type: "string", enum: ["Low", "Medium", "High"] },
+          },
+          required: ["summary", "description", "issueType", "priority"],
+        },
       },
     },
     {

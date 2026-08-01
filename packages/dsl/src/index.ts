@@ -203,6 +203,13 @@ export { deriveSampleInput } from "./trigger-sample";
 // deterministic workflow bundle. Split, but re-exported here identically — no caller changed.
 export { evaluateCondition, nextNodes } from "./branch";
 export { validateGraph, type GraphValidation } from "./validate-graph";
+// Which connection types each node accepts. Shared (not web-only) since #830 so the AI generator
+// can reject a connection of the WRONG TYPE, not just an unknown id — see the module header.
+export {
+  CONNECTION_TYPES,
+  requiredConnectionTypes,
+  type ConnectionType,
+} from "./connection-types";
 // `./integration-write` (the interpreter's write/read, i.e. at-most-once vs retryable,
 // classification) is deliberately NOT re-exported here, for the same reason as ./registry and
 // ./n8n-import: the barrel is the authoring-time surface, and this module exists only to keep the

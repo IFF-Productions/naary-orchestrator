@@ -32,6 +32,14 @@ const config: StorybookConfig = {
               import.meta.url,
             ),
           ),
+          // Same rule again for the shared connection-type map (#830) — canvas config panels and
+          // the Templates checklist deep-import it, and Storybook renders both.
+          "@naary/dsl/dist/connection-types": fileURLToPath(
+            new URL(
+              "../../../packages/dsl/src/connection-types.ts",
+              import.meta.url,
+            ),
+          ),
           "@naary/dsl": fileURLToPath(
             new URL("../../../packages/dsl/src/index.ts", import.meta.url),
           ),

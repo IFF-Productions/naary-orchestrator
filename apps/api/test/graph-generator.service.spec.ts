@@ -69,6 +69,9 @@ beforeEach(() => {
   listProviders
     .mockReset()
     .mockResolvedValue([{ provider: "anthropic", isValid: true }]);
+  // Reset per test: a case that makes this REJECT (the unreadable-connections tests below) would
+  // otherwise leak into every case after it, since vitest runs a file in declaration order.
+  listConnections.mockReset().mockResolvedValue([]);
 });
 
 describe("GraphGeneratorService", () => {
@@ -700,5 +703,214 @@ describe("generate — self-repairs its own catalog mistakes", () => {
     await makeService().generate("t-1", "e-1", "file an issue");
 
     expect(generateText).toHaveBeenCalledTimes(1);
+  });
+
+  /**
+   * A repair that THREW and a repair that legitimately declined both end with "keep the original
+   * draft" — so the outcome alone can't tell them apart, and the swallow used to make sure nothing
+   * else could either (#830). Behaviour is unchanged; the reason is now on the record.
+   */
+  it("logs WHY when the repair call itself fails (never silently)", async () => {
+    listConnections.mockResolvedValue(conns);
+    const warn = vi
+      .spyOn(Logger.prototype, "warn")
+      .mockImplementation(() => {});
+    generateText
+      .mockResolvedValueOnce({ text: JSON.stringify(graphWithFields({})) })
+      .mockRejectedValueOnce(new Error("provider 429 slow down"));
+
+    const res = await makeService().generate("t-1", "e-1", "file an issue");
+
+    // Unchanged: the original draft still reaches the author rather than the request failing.
+    expect(
+      (
+        res.graph.nodes.find((n) => n.id === "gh")?.config as {
+          fields?: object;
+        }
+      ).fields,
+    ).toEqual({});
+    const line = warn.mock.calls.map((c) => String(c[0])).join("\n");
+    expect(line).toContain("self-repair call failed");
+    expect(line).toContain("provider 429 slow down");
+    warn.mockRestore();
+  });
+});
+
+/**
+ * AN UNREADABLE CONNECTION LIST IS NOT "NO CONNECTIONS" (#830).
+ *
+ * The read was `.catch(() => [])`, which broke the generation twice over and said nothing: the
+ * resource block then tells the model "NO CONNECTIONS are configured" (so it drops or blanks the
+ * integration/SQL/email nodes the user asked for), AND the id map is empty, so the scrub blanks
+ * every connectionId in the draft. The user gets a plausible-looking workflow that quietly ignored
+ * their connections. Same signature as the bug #829 fixed — it just came from our side.
+ */
+describe("generate — a failed connections read fails LOUDLY", () => {
+  it("throws 503 instead of generating against an empty resource block", async () => {
+    listConnections.mockRejectedValue(new Error("connection pool exhausted"));
+    generateText.mockResolvedValue({ text: JSON.stringify(validOut) });
+
+    await expect(
+      makeService().generate("t-1", "e-1", "file a github issue"),
+    ).rejects.toBeInstanceOf(ServiceUnavailableException);
+    // And it costs the tenant nothing: we never reach the model.
+    expect(generateText).not.toHaveBeenCalled();
+  });
+
+  it("names the real cause in the log (the operator's half of the fix)", async () => {
+    const error = vi
+      .spyOn(Logger.prototype, "error")
+      .mockImplementation(() => {});
+    listConnections.mockRejectedValue(new Error("connection pool exhausted"));
+
+    await expect(
+      makeService().generate("t-1", "e-1", "file a github issue"),
+    ).rejects.toBeTruthy();
+
+    const line = error.mock.calls.map((c) => String(c[0])).join("\n");
+    expect(line).toContain("could not read connections");
+    expect(line).toContain("connection pool exhausted");
+    error.mockRestore();
+  });
+
+  /** The builder turn is applied to the draft the user then SAVES — same rule, same enforcement. */
+  it("applies on the conversational builder path too", async () => {
+    listConnections.mockRejectedValue(new Error("connection pool exhausted"));
+    generateText.mockResolvedValue({ text: JSON.stringify(validOut) });
+
+    await expect(
+      makeService().editStream("t-1", "e-1", { instruction: "add a step" }),
+    ).rejects.toBeInstanceOf(ServiceUnavailableException);
+  });
+});
+
+/**
+ * A REAL id of the WRONG TYPE — the gap #829 named and deferred: "a connection of the wrong type
+ * for the node … is equally bogus and still passes — the id exists, so the check accepts it."
+ *
+ * The resource block lists every connection WITH its `type=` so the model can match them up, and
+ * matching them up is one more thing the prompt only ASKS for. The failure is the same shape as an
+ * invented id and the error is worse: a Postgres DSN reaches the GitHub request builder.
+ */
+describe("generate — a connection of the WRONG TYPE is blanked too", () => {
+  const conns = [
+    {
+      id: "conn_pg",
+      type: "postgres",
+      label: "Reporting DB",
+      serverUrl: "postgres://db.internal",
+    },
+    {
+      id: "conn_gh",
+      type: "github",
+      label: "GitHub",
+      serverUrl: "https://api.github.com",
+    },
+  ];
+  const graphWith = (nodeType: string, connectionId: string) => ({
+    name: "Flow",
+    startNodeId: "start",
+    nodes: [
+      { id: "start", type: "start" },
+      {
+        id: "n",
+        type: nodeType,
+        config:
+          nodeType === "integration"
+            ? {
+                provider: "github",
+                action: "create_issue",
+                connectionId,
+                fields: { owner: "acme", repo: "api", title: "It broke" },
+              }
+            : { connectionId, query: "select 1" },
+      },
+      { id: "end", type: "end" },
+    ],
+    edges: [
+      { from: "start", to: "n" },
+      { from: "n", to: "end" },
+    ],
+  });
+  const connectionIdOf = (graph: {
+    nodes: { id: string; config?: unknown }[];
+  }) =>
+    (graph.nodes.find((n) => n.id === "n")?.config as { connectionId?: string })
+      .connectionId;
+
+  it("blanks a postgres connection put on an integration node", async () => {
+    listConnections.mockResolvedValue(conns);
+    generateText.mockResolvedValue({
+      text: JSON.stringify(graphWith("integration", "conn_pg")),
+    });
+
+    const res = await makeService().generate("t-1", "e-1", "file an issue");
+
+    expect(connectionIdOf(res.graph)).toBe("");
+  });
+
+  it("blanks a github connection put on a sqlQuery node", async () => {
+    listConnections.mockResolvedValue(conns);
+    generateText.mockResolvedValue({
+      text: JSON.stringify(graphWith("sqlQuery", "conn_gh")),
+    });
+
+    const res = await makeService().generate("t-1", "e-1", "read the db");
+
+    expect(connectionIdOf(res.graph)).toBe("");
+  });
+
+  /** The other half: a scrub that blanks CORRECT ids is its own bug. */
+  it("leaves a correctly-typed connection alone on each node type", async () => {
+    listConnections.mockResolvedValue(conns);
+    generateText.mockResolvedValueOnce({
+      text: JSON.stringify(graphWith("sqlQuery", "conn_pg")),
+    });
+    expect(
+      connectionIdOf(
+        (await makeService().generate("t-1", "e-1", "read")).graph,
+      ),
+    ).toBe("conn_pg");
+
+    generateText.mockResolvedValueOnce({
+      text: JSON.stringify(graphWith("integration", "conn_gh")),
+    });
+    expect(
+      connectionIdOf(
+        (await makeService().generate("t-1", "e-1", "file")).graph,
+      ),
+    ).toBe("conn_gh");
+  });
+
+  it("names the type mismatch in the log, not just 'invented'", async () => {
+    const warn = vi
+      .spyOn(Logger.prototype, "warn")
+      .mockImplementation(() => {});
+    listConnections.mockResolvedValue(conns);
+    generateText.mockResolvedValue({
+      text: JSON.stringify(graphWith("integration", "conn_pg")),
+    });
+
+    await makeService().generate("t-1", "e-1", "file an issue");
+
+    const line = warn.mock.calls.map((c) => String(c[0])).join("\n");
+    expect(line).toContain(
+      "connection type postgres, but node type integration needs",
+    );
+    warn.mockRestore();
+  });
+
+  /** Same enforcement on the path whose draft the user actually saves. */
+  it("applies on the conversational builder path too", async () => {
+    listConnections.mockResolvedValue(conns);
+    generateText.mockResolvedValue({
+      text: JSON.stringify(graphWith("integration", "conn_pg")),
+    });
+
+    const res = await makeService().editStream("t-1", "e-1", {
+      instruction: "add a github issue step",
+    });
+
+    expect(connectionIdOf(res.graph)).toBe("");
   });
 });

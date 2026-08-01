@@ -1,30 +1,22 @@
 /**
- * Which connection types each connection-based node can use — the ONE map for it, so the
- * canvas inspector's connection picker and the Templates screen's post-import connection
- * checklist can never drift apart.
+ * Connection-type helpers for the web app: the node→accepted-types map (re-exported from
+ * @naary/dsl) plus the presentation bits only the SPA needs (labels, which Integrations tab
+ * hosts each type's connect form).
  *
- * Extracted from screens/canvas/fields.tsx (which still re-exports it) so a non-canvas
- * screen can import it WITHOUT pulling the canvas/react-flow chunk in: this module is
- * pure data with a type-only import.
- *
- * Mirrors the Integrations forms: MCP/app servers = github/atlassian/custom; SQL engines;
- * smtp; signing.
+ * The map itself moved to `@naary/dsl/connection-types` in #830 — the AI graph generator has to
+ * apply the same rule server-side, and two copies of it would be exactly the kind of drift this
+ * module was created to prevent. Still re-exported here (and from screens/canvas/fields.tsx) so
+ * every existing importer is unchanged, and so a non-canvas screen can read it WITHOUT pulling
+ * the canvas/react-flow chunk in.
  */
 import type { ConnectionType } from "./api/types";
 
-export const CONNECTION_TYPES: Record<string, ConnectionType[]> = {
-  mcpTool: ["github", "atlassian", "custom"],
-  integration: ["github", "atlassian", "custom"],
-  // codeAgent write mode authorizes the clone + PR via a GitHub App connection.
-  codeAgent: ["github"],
-  httpRequest: ["github", "atlassian", "custom"],
-  sqlQuery: ["postgres", "mssql", "mysql"],
-  sqlExec: ["postgres", "mssql", "mysql"],
-  sendEmail: ["smtp"],
-  hmac: ["signing"],
-  jwt: ["signing"],
-  totp: ["signing"],
-};
+// The shared map + its "does this node REQUIRE one" helper. Web's `ConnectionType` and the DSL's
+// are the same union, so the re-export is transparent to every caller.
+export {
+  CONNECTION_TYPES,
+  requiredConnectionTypes,
+} from "@naary/dsl/dist/connection-types";
 
 /**
  * Connection types that are apps/servers, i.e. the Integrations screen's "Apps & agents"
@@ -60,28 +52,4 @@ export function connectionTypeLabel(types: readonly ConnectionType[]): string {
   const names = types.map((t) => TYPE_LABEL[t] ?? t);
   if (names.length <= 1) return names[0] ?? "";
   return `${names.slice(0, -1).join(", ")} or ${names[names.length - 1]}`;
-}
-
-/**
- * The connection types a node MUST have configured, or null when it needs none.
- *
- * `codeAgent` is the reason this is a function rather than a lookup. Its `connectionId` is
- * OPTIONAL and only used in write mode — read mode (the DEFAULT) runs in-worker with no repo and
- * no clone, so it needs no connection at all. The canvas used to demand one from every codeAgent,
- * which put an author in a dead end: the inspector only renders the connection picker under
- * `mode === "write"`, so the error told them to pick a connection in a control the UI was
- * deliberately hiding. Reported from a real graph whose codeAgent had no `mode` set.
- *
- * `httpRequest`'s is optional for the plainer reason that a public API needs no auth.
- */
-export function requiredConnectionTypes(node: {
-  type: string;
-  config?: Record<string, unknown> | null;
-}): ConnectionType[] | null {
-  const types = CONNECTION_TYPES[node.type];
-  if (!types) return null;
-  if (node.type === "httpRequest") return null;
-  if (node.type === "codeAgent")
-    return node.config?.mode === "write" ? types : null;
-  return types;
 }
