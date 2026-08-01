@@ -171,12 +171,18 @@ const tablet = { viewport: { defaultViewport: "tablet" } };
  * 60px is the name input's `minWidth` floor on the non-phone branch — the workflow you are
  * editing was ~7 characters wide — and the primary CTA sat 89 to 381px past the right edge of a
  * root that is `overflow-x: hidden`, so it could not be scrolled to either (#511's trap). Over
- * the whole `Canvas/TopBar` set — all 11 stories, count it, because this pair of numbers is a
- * SUM and silently goes stale the moment a story is added — the responsive audit goes 32 clipped
- * elements / 23 unreachable controls -> 0 / 0 at this width. Storybook builds without a
+ * the whole `Canvas/TopBar` set — the 11 stories there were then, count them, because this pair of
+ * numbers is a SUM and silently goes stale the moment a story is added (there are 12 now,
+ * `InvalidLongError` having joined in #997) — the responsive audit goes 32 clipped elements /
+ * 23 unreachable controls -> 0 / 0 at this width. Storybook builds without a
  * `VITE_SENTRY_DSN`, so the 34px
  * "Send feedback" button is absent from these numbers; re-measured with it present, the same
  * stories fit at 768 and 834 (the workflow name takes the difference: 142 -> 98).
+ *
+ * This story is also the most dressed one in the file, which makes it the one that shows what the
+ * DESKTOP tier does (#997) — it is not tablet-only. At 1025 it was 156px over with the name
+ * already at its floor; it now fits at every width, paying with the status text, then the mono
+ * meta, then the name (1440 / 1280 / 1025, no DSN: meta 201 / 73 / 0, name 196 / 185 / 60).
  *
  * What the tablet tier gives up (and why): the mono `key · v19` meta (~200px — a reference detail
  * with its own desktop home), the RUN CAP chip (Settings → Usage & budgets states the policy), and
@@ -233,10 +239,14 @@ export const TabletAiOpen: Story = {
  * the TOUCH tier, so a tooltip-only fallback would have withheld the reason the graph is invalid
  * from precisely the users the tier exists for. `title` stays for the pointer case only.
  *
- * HONEST DATA: this story is still 48px over at 1440. That is the SAME unbounded label on the
- * DESKTOP bar, which #989's compact tier does not touch — measured identical before and after —
- * and it is left visible on purpose rather than tuned out of the story. Tracked as #997, with
- * the 1025–~1200 desktop band it shares a cause with.
+ * It was ALSO the story that proved the desktop bar had the same defect one breakpoint up. At
+ * 1440 the label is the whole of it: nothing else in this row overflows there, and the pill alone
+ * put "Save & run" 48px past the viewport (76px on a build carrying the production-only "Send
+ * feedback" button — #1002's lesson). At 1025 it is a contributor rather than the cause — the
+ * dressed bar was 276px over here against 156px for `Tablet`, so ~120 of it is the pill. #989
+ * left both visible on purpose rather than tuning them out of the story; #997 made the pill
+ * shrinkable and ellipsized its label on desktop, so at 1440 it renders 155px of the message
+ * instead of 202, and the row fits at every width.
  */
 export const TabletInvalid: Story = {
   ...Tablet,
@@ -244,6 +254,38 @@ export const TabletInvalid: Story = {
     ...Tablet.args,
     graphValid: false,
     graphError: "Start node has no outgoing edge",
+    status: null,
+  },
+};
+
+/**
+ * …and the same pill with a message nobody chose the length of (#997). `TabletInvalid` above is a
+ * 31-character error and was already 48px over at 1440; this is what the bar does when the error
+ * is simply longer, which is not a hypothetical — the string below is `validate-graph.ts`'s own
+ * `conditional edge into merge node '…' is not supported (merge requires unconditional fan-in)`,
+ * verbatim, with a node id of the length this file's other args already use. At 116 characters it
+ * still wants a 578px pill at 1920.
+ *
+ * Deliberately a SECOND story rather than a longer `graphError` on the first: `TabletInvalid`'s
+ * numbers are quoted in three places across #989 and this file, and re-tuning its args would make
+ * every one of them incomparable.
+ *
+ * It is here to be measured, and what it measures is that a message five times the length of the
+ * one that broke the bar costs only its own legibility: 0 clipped elements and 0 unreachable
+ * controls at 390 / 834 / 1024 / 1025 / 1440, on a build with the "Send feedback" button and one
+ * without. The pill renders 291px of it at 1440, 196 at 1280 and 44 at 1025 (22 with that button
+ * present). Those last two are the honest floor of this approach — at the very bottom of the
+ * desktop band, a fully dressed bar with a pathological error keeps every control and leaves the
+ * pill a stub. The message is still in the DOM (the truncation is CSS), in the accessibility tree
+ * and in the `title`; what is gone is only the reading of it at a glance.
+ */
+export const InvalidLongError: Story = {
+  ...Tablet,
+  args: {
+    ...Tablet.args,
+    graphValid: false,
+    graphError:
+      "conditional edge into merge node 'pagerduty-escalation-merge' is not supported (merge requires unconditional fan-in)",
     status: null,
   },
 };

@@ -19,6 +19,29 @@
  *
  * `compact` is a superset of `phone`, so a compact rule reaches a phone too; the phone-only rules
  * stay on `phone`.
+ *
+ * DESKTOP (>1024px) drops nothing, and that is exactly why it needed work of its own (#997). The
+ * fully dressed bar wants ~1200px but desktop starts at 1025, and at any width the validity pill
+ * may carry an arbitrarily long `graphError`. Both ended with "Save & run" past the right edge of
+ * a root that is `overflow-x: hidden` — unreachable, not merely clipped.
+ *
+ * The answer is not a fourth breakpoint (the canvas would then own a threshold no other screen
+ * knows about); it is that every piece of TEXT in the row is elastic and every CONTROL is not.
+ * The floor is the action cluster's own min-content, so the row can never shrink past its buttons,
+ * and above that floor the shortfall is shared out in a fixed order of PREFERENCE — not in
+ * sequence; flexbox shrinks every elastic item at once, and the ranks below only decide how fast
+ * each gives. Measured on the `Tablet` story, the most dressed state there is, at three widths:
+ *
+ *                     1440   1280   1025   natural
+ *    status text         0      0      0      260   transient, has a `title`: first to go
+ *    mono key · vN     201     73      0      215   reference; the `title` still names the key
+ *    workflow name     196    185     60      197   never past #964's 60px floor
+ *    validity pill      61     40     22       63   ellipsized; full text stays in the DOM
+ *
+ * None of that is a media query — they are flex SHRINK FACTORS, so the row degrades continuously
+ * instead of falling off a cliff at some width, and a bar carrying less (no status, no run cap)
+ * never reaches the later rungs at all: every story that is not fully dressed still renders at
+ * full size at 1280.
  */
 import { Fragment, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -391,6 +414,15 @@ export function CanvasTopBar({
           display: "flex",
           alignItems: "baseline",
           gap: 8,
+          // KEEP `minWidth: 0` — including on desktop, where #997 tried the opposite and measured
+          // it making every width worse. The automatic floor this overrides is the box's
+          // MIN-CONTENT, and an <input> contributes its intrinsic `size` width (197px at these
+          // 25 characters), not its own `minWidth: 60`; the mono meta contributes its whole
+          // string even with `overflow: hidden` (the same trap #989 hit on the status text).
+          // A floor of 412px on the one box that is supposed to yield first pinned the name at
+          // full width and pushed the shortfall back onto the right edge: measured at 1025,
+          // `Tablet` went from 194px over to 420. What the children can give is enforced on the
+          // children instead — the input's `minWidth: 60` below, and the meta's ellipsis.
           minWidth: 0,
           flex: phone ? "1 1 auto" : "0 1 auto",
         }}
@@ -421,18 +453,48 @@ export function CanvasTopBar({
             <span style={{ color: "var(--ink-3)", flex: "none" }}>/</span>
             <span
               className="mono"
-              style={{ ...monoLabel, fontSize: 11, whiteSpace: "nowrap" }}
+              style={{
+                ...monoLabel,
+                fontSize: 11,
+                whiteSpace: "nowrap",
+                // The second rung of the desktop sacrifice order (#997), and the one that makes
+                // the band 1025–~1200 fit at all: ~215px of `nowrap` text with no way to shrink
+                // was the single biggest thing between the name and the CTA. `overflow: hidden`
+                // + `minWidth: 0` is what actually lets it give — without the `minWidth` its
+                // min-content contribution is still the whole string — and the ellipsis is what
+                // makes the truncation legible as truncation rather than as a wrong key. The
+                // full key is in the `title` below at every width.
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                minWidth: 0,
+                // …and it gives BEFORE the name it sits next to. Flexbox shares a shortfall out
+                // in proportion to base × factor, so at the default 1 the two shrank in step and
+                // a squeezed row cost the user both: measured at 1280, the fully dressed bar put
+                // the name at 108px with 111px of key still showing. A factor of 10 against the
+                // input's 1 makes this the box's donor — 10× the shortfall per pixel of its own
+                // width, so the key is nearly gone before the name has given much (185 of 197 at
+                // that same 1280, with 73 of key left). A BIAS, not a sequence: flexbox shrinks
+                // both at once, always. Expressed by raising the donor rather than by lowering
+                // the name, so the unfrozen factors here can never sum to under 1 — see the
+                // validity pill for what §9.7 3b does when they do.
+                flexShrink: 10,
+              }}
               // The old title just restated the two labels. It sits inches from a live-editable
               // name and does NOT follow it, which reads as a bug unless something says why —
               // so say why, and only for a SAVED workflow, since on a draft the key does track
               // the name and claiming otherwise would be the opposite lie.
+              //
+              // BOTH branches name the key now (#997): the label above can be ellipsized on a
+              // narrow desktop, and a tooltip that omits the very string that got truncated is
+              // no fallback at all.
               title={
                 version != null
                   ? `Workflow key: ${activeKey} — permanent.\n\n` +
                     "Renaming the workflow deliberately does NOT change it. Schedules, webhook " +
                     "URLs, sub-workflow references and API/CLI callers all address this workflow " +
                     "by its key; changing it would break them silently."
-                  : "Workflow key · saved version. The key comes from the name and is fixed when you first save — after that, renaming won't change it."
+                  : `Workflow key: ${activeKey} · draft (never saved).\n\n` +
+                    "The key comes from the name and is fixed when you first save — after that, renaming won't change it."
               }
             >
               {activeKey} · {version != null ? `v${version}` : "draft"}
@@ -459,6 +521,15 @@ export function CanvasTopBar({
           than only the iPad-portrait one. At compact the pill states the STATE and the message
           rides alongside it.
 
+          DESKTOP keeps the message in the pill, and bounds it a different way (#997): the pill is
+          made shrinkable and its label ellipsizes, so nothing is dropped while the row has room
+          and the CTA never leaves the screen when it does not. Substituting "invalid" here too
+          would have been the cheap fix and the wrong one — it would take information away from
+          the width that has always had it, and desktop can afford to keep it. Truncation is
+          CSS-only, so unlike the compact tier no `srOnly` twin is needed: the whole string is in
+          the DOM (and in the `title`), whatever the pixels show. That same 31-character message
+          put "Save & run" 76px past the right edge of a 1440px viewport before this.
+
           It rides in `srOnly` text, NOT only in `title`. A `title` is a pointer affordance: it
           needs a hover, which a touch screen does not have — and the compact tier IS the touch
           tier, so "the detail is in the tooltip" would mean the reason the graph is invalid is
@@ -468,9 +539,30 @@ export function CanvasTopBar({
       {!phone && (
         <span
           title={!graphValid && graphError ? graphError : undefined}
-          style={{ flex: "none", display: "inline-flex", alignItems: "center" }}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            // On DESKTOP the label is `graphError`, which no compiler promises to keep short, and
+            // a pill is `white-space: nowrap`, so this was simply not shrinkable at any width —
+            // 31 characters of it took the primary CTA off a 1440px screen (#997). Making it a
+            // NORMAL elastic item is the fix: it now gives up width in proportion to how much it
+            // has, alongside the workflow name and the status text, and the row's floor is the
+            // controls.
+            //
+            // The shrink factor is deliberately a plain 1, and NOT the small fraction that would
+            // express "truncate this last". Flexbox §9.7 3b scales the free space by the sum of
+            // the flex factors when that sum is below 1, so a 0.05 here does not mean "yields
+            // slowly" — it means this item can absorb at most 5% of the deficit and the other 95%
+            // overflows the viewport, which is the exact defect being fixed. Measured: with 0.05,
+            // `InvalidLongError` at 1025 gave up 53px of a 958px overflow.
+            //
+            // Compact stays `flex: none` — its label is the fixed word "invalid" (see below), so
+            // there is nothing to bound and a shrinkable pill could only truncate that.
+            ...(compact ? { flex: "none" } : { flex: "0 1 auto", minWidth: 0 }),
+          }}
         >
           <StatusPill
+            truncate={!compact}
             state={generating ? "running" : graphValid ? "done" : "error"}
             label={
               generating
@@ -596,6 +688,11 @@ export function CanvasTopBar({
             alignItems: "center",
             gap: 6,
             flex: "none",
+            // Same reason as the RUN CAP chip's (#997) — a chip that cannot shrink must not be
+            // able to under-report its own min-content either, or the row's floor lands below
+            // what the row actually occupies. Environment names are user-supplied, so unlike
+            // that chip this one really can contain a space.
+            whiteSpace: "nowrap",
             fontSize: "var(--text-xs)",
             padding: "3px 10px",
             borderRadius: 999,
@@ -627,10 +724,18 @@ export function CanvasTopBar({
           clipped-but-scrollable, just gone. Anything added here must be `!phone` unless the row
           is measured again.
 
-          DESKTOP: the original min-width:0, so it can still shrink if needed.
+          EVERYTHING ELSE (compact AND desktop, one rule): it GROWS into the free space
+          (`flex: 1 1 auto`, contents right-aligned) and carries no `minWidth: 0`, so the automatic
+          min-content floor applies (#989 wrote this for compact; #997 measured that desktop wants
+          the identical thing and deleted the third branch).
 
-          COMPACT: neither. It GROWS into the free space (`flex: 1 1 auto`, contents right-aligned)
-          and its `minWidth: 0` is dropped so the automatic min-content floor applies (#989).
+          Desktop had the original `minWidth: 0` + `marginLeft: auto` until then, which is how the
+          same defect the floor fixed at tablet survived one breakpoint up: at 1025 the fully
+          dressed bar wants ~1200px, and the cluster answered by shrinking past its own buttons
+          rather than by pushing back. Restoring the floor alone was not enough either — with
+          `marginLeft: auto` still eating the free space, the status text below (a `width: 0` item
+          that has to GROW back) measured 0 at 1440, where the row is 400px wider than it needs to
+          be. A rule that only reads correctly when the row is full is not a rule.
 
           That floor is the whole fix at tablet. `minWidth: 0` let the CLUSTER shrink past buttons
           that cannot themselves shrink, so the difference left the right edge instead of pushing
@@ -640,11 +745,12 @@ export function CanvasTopBar({
           action stays on screen. It is the same conclusion as the phone rule (the name yields
           before a control does), reached without having to move an action out of the bar.
 
-          `marginLeft: auto` has to go with it at compact: an auto margin eats ALL positive free
-          space before flex-grow is even considered, so keeping it would pin the cluster at its
-          floor and leave the status text at zero width at every compact size.
+          `marginLeft: auto` has to go with it: an auto margin eats ALL positive free space before
+          flex-grow is even considered, so keeping it pins the cluster at its floor and leaves the
+          status text at zero width at every size — measured at both tiers.
           `justifyContent: flex-end` is what keeps the buttons against the right edge once the
-          cluster is the elastic one. */}
+          cluster is the elastic one. The base `marginLeft: auto` below is therefore the PHONE
+          rule now; the other branch overrides it. */}
       <div
         style={{
           marginLeft: "auto",
@@ -657,9 +763,7 @@ export function CanvasTopBar({
           gap: phone ? 6 : 10,
           ...(phone
             ? { flex: "none" }
-            : compact
-              ? { marginLeft: 0, flex: "1 1 auto", justifyContent: "flex-end" }
-              : { minWidth: 0 }),
+            : { marginLeft: 0, flex: "1 1 auto", justifyContent: "flex-end" }),
         }}
       >
         {/* `status` is the ONLY channel for "Save failed." / "Run failed." / an import error —
@@ -691,9 +795,15 @@ export function CanvasTopBar({
               // name sat at its 60px floor while this sentence kept a full 150. A definite
               // `width` overrides that contribution; `flex: 1 1 150px` is what grows it back to
               // readable as soon as the row has room (0 at 834px, 135 at 1024px).
+              //
+              // Desktop needs the identical treatment for the identical reason, now that its
+              // cluster has a floor too (#997) — only the basis differs, matching the `maxWidth`
+              // above. Without it the floor would include a full 260px sentence and the first
+              // rung of the desktop sacrifice order would be skipped: the workflow name would go
+              // to 60px while this stayed at its full width.
               ...(compact
                 ? { width: 0, flex: "1 1 150px", minWidth: 0 }
-                : null),
+                : { width: 0, flex: "1 1 260px", minWidth: 0 }),
             }}
           >
             {status}
@@ -707,7 +817,18 @@ export function CanvasTopBar({
         {!compact && runCapUsd != null && runCapUsd > 0 && (
           <span
             title="Per-execution budget cap (Usage & budgets policy)"
-            style={{ textAlign: "right", flex: "none" }}
+            style={{
+              textAlign: "right",
+              flex: "none",
+              // `nowrap` is not cosmetic here, and it is the second half of #997's desktop fix.
+              // A cluster's min-content floor is only as honest as its children's: this chip
+              // never wraps in practice, but "$2.5 / run" CAN, so its min-content is the width of
+              // its longest word — 40px less than the 69px it occupies. The floor came out 40px
+              // short of the buttons it is supposed to protect, the cluster was handed a box
+              // smaller than its own contents, and "Save & run" ended 9px past the right edge of
+              // a 1440px viewport with the name and the error pill both still holding slack.
+              whiteSpace: "nowrap",
+            }}
           >
             <span
               className="mono"

@@ -1,11 +1,13 @@
 /**
- * Regression guard for the canvas top bar BELOW DESKTOP — both narrow tiers, in one file because
+ * Regression guard for the canvas top bar at EVERY width — all three tiers, in one file because
  * they are one bar and their rules only make sense against each other.
  *
  *   `compact`  ≤1024px (tablet and down) — gives up LABELS AND REFERENCE TEXT, never controls
  *              (#989). Every action that is a button at 1440 is still a button at 834.
  *   `phone`    ≤640px — ~440px less to work with, so it also moves ACTIONS: Save and "Check flow"
  *              become rows in the "…" menu (#964).
+ *   desktop    >1024px — gives up nothing, so instead every piece of TEXT in it is elastic and
+ *              every control is not (#997). No fourth breakpoint: shrink factors, not a query.
  *
  * `compact` is a superset of `phone`, so a compact rule reaches a phone too. The phone tier's own
  * `it()` blocks below started life as `canvas-top-bar-phone.spec.ts` (PR #988) and were folded in
@@ -36,6 +38,25 @@
  * `overflow-x: hidden` (styles/global.css), so the overflow was not clipped-but-scrollable: the
  * primary CTA did not exist for the user (#511's trap).
  *
+ * 1025×844 — the FIRST desktop pixel, where the bar puts its full dress back on and #989's tier
+ * therefore cannot help. Same two measures (#997):
+ *
+ *   Tablet ............... 1181 (+156 out)  ->  993 (ok)     60  ->   60
+ *   TabletAiOpen ......... 1143 (+118 out)  ->  993 (ok)     60  ->   74
+ *   TabletInvalid ........ 1301 (+276 out)  ->  993 (ok)     60  ->   60
+ *   WithIssues ........... 1067  (+42 out)  ->  993 (ok)    125  ->  187
+ *   TabletQuiet ..........       1017 (ok)  ->  993 (ok)    174  ->  194
+ *
+ * …and 1440×844, where only the unbounded label overflowed:
+ *
+ *   TabletInvalid ........ 1488  (+48 out)  -> 1408 (ok)    131  ->  189
+ *   InvalidLongError ..... (new story)         1408 (ok)           176
+ *
+ * The name gets WIDER at both widths, which is the tell that this was never a "not enough room"
+ * problem: the row's own reference text (a ~215px mono `key · vN`) and a 260px status sentence
+ * were outranking it, and an action cluster that could shrink past its buttons was paying for
+ * both by pushing the CTA off screen.
+ *
  * `apps/web/scripts/responsive-audit.mjs --filter canvas-topbar`, all 11 stories, #989 measured
  * against a tree that already had #964's fix:
  *
@@ -44,9 +65,22 @@
  *    834           32  ->  0           23  ->  0        (14 were WHOLLY offscreen)
  *   1440            1  ->  1            0  ->  0        (identical)
  *
- * 390 and 1440 are byte-identical per story, not merely equal in the totals. The one 1440 clip is
- * `TabletInvalid` before AND after: the desktop bar's own unbounded `graphError`, a pre-existing
- * defect neither tier reaches — #997.
+ * 390 and 1440 are byte-identical per story, not merely equal in the totals. The one 1440 clip was
+ * `TabletInvalid` before AND after: the desktop bar's own unbounded `graphError`, a defect neither
+ * narrow tier reaches. That, and the 1025–~1200 band where the fully dressed bar simply does not
+ * fit, is #997 — same harness, 12 stories now (`InvalidLongError` joined them), and this time both
+ * builds, because the production-only "Send feedback" button changes the numbers (#1002):
+ *
+ *              clipped elements   unreachable controls        no DSN         with a dummy DSN
+ *    390            0  ->  0            0  ->  0          byte-identical per story, both builds
+ *    834            0  ->  0            0  ->  0          byte-identical per story, both builds
+ *   1024            0  ->  0            0  ->  0          byte-identical per story, both builds
+ *   1025           15  ->  0           12  ->  0          23 -> 0 clipped, 15 -> 0 unreachable
+ *   1440            1  ->  0            0  ->  0           1 -> 0 clipped
+ *
+ * "Byte-identical per story" is the load-bearing half of that table: every desktop rule is gated
+ * `!compact`, so the three narrow widths must not move AT ALL, and the audit's per-story records
+ * were diffed rather than its totals compared.
  */
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -78,6 +112,16 @@ const code = topBar
 const clusterCode = code.slice(
   code.indexOf('marginLeft: "auto"'),
   code.lastIndexOf("</header>"),
+);
+
+/** The shared pill (#997 gave it the opt-in truncation the top bar's validity pill needs). */
+const dataDisplay = readFileSync(
+  path.resolve(__dirname, "../src/components/data-display.tsx"),
+  "utf8",
+);
+const statusPill = dataDisplay.slice(
+  dataDisplay.indexOf("export function StatusPill"),
+  dataDisplay.indexOf("/* ---------------- Avatar"),
 );
 
 describe("canvas top bar — phone row (#964)", () => {
@@ -164,10 +208,14 @@ describe("canvas top bar — compact/tablet tier (#989)", () => {
     // margin eats all positive free space before flex-grow is considered — with it the status
     // text measured 0 at every compact width instead of growing back.
     expect(clusterCode).toMatch(
-      /compact\s*\?\s*\{\s*marginLeft: 0,\s*flex: "1 1 auto",\s*justifyContent: "flex-end"\s*\}/,
+      /\{\s*marginLeft: 0,\s*flex: "1 1 auto",\s*justifyContent: "flex-end"\s*\}/,
     );
-    // …and desktop keeps the original, so 1440 is untouched.
-    expect(clusterCode).toMatch(/:\s*\{\s*minWidth: 0\s*\}/);
+    // …and it is now the rule for everything that is not a phone: desktop kept `minWidth: 0` +
+    // `marginLeft: auto` until #997, which is exactly how the same defect survived one breakpoint
+    // up. What is left here is a two-arm split, phone against the rest.
+    expect(clusterCode).toMatch(
+      /\.\.\.\(phone\s*\?\s*\{ flex: "none" \}\s*:\s*\{ marginLeft: 0,/,
+    );
   });
 
   it("status keeps its place, and a width that cannot hold the row open", () => {
@@ -297,6 +345,17 @@ describe("canvas top bar — compact/tablet tier (#989)", () => {
     );
   });
 
+  it("compact does NOT adopt the desktop tier's elastic pieces", () => {
+    // #997 made the desktop bar degrade text before it moves a control, using the same mechanism
+    // #989 used here. None of those rules may leak DOWN: at compact the mono meta is not rendered
+    // at all, the validity pill's label is the fixed word "invalid" (so a shrinkable pill could
+    // only truncate THAT), and the name box relies on `minWidth: 0` for #964's phone behaviour.
+    // Every one of them is therefore gated the other way round, and 390/834/1024 measured
+    // byte-identical per story across the change because of it.
+    expect(code).toMatch(/compact\s*\?\s*\{ flex: "none" \}/);
+    expect(code).toContain("truncate={!compact}");
+  });
+
   it("touch spacing is not what pays for the row", () => {
     // The header's 12px gap tightens to 8; the CLUSTER's does not. Those are 34px icon buttons,
     // and 10px is the clearance that keeps a 44px touch target growable without overlapping its
@@ -304,5 +363,140 @@ describe("canvas top bar — compact/tablet tier (#989)", () => {
     // a near-miss into a WRONG action.
     expect(code).toContain("gap: compact ? 8 : 12");
     expect(clusterCode).toContain("gap: phone ? 6 : 10");
+  });
+});
+
+describe("canvas top bar — desktop tier (#997)", () => {
+  it("the cluster's min-content floor is at EVERY tier, not only compact", () => {
+    // The same defect as #989's, one breakpoint up and therefore missed by it: `DESKTOP_QUERY` is
+    // `> 1024px`, but the fully dressed bar (mono meta, RUN CAP, "✨ Build with AI", 260px status)
+    // wants ~1200. With `minWidth: 0` the cluster answered by shrinking past its own buttons and
+    // the primary CTA left the right edge of an `overflow-x: hidden` root — measured at 1025,
+    // "Save & run" ended at 1219 in `Tablet` and at 1337 in `TabletInvalid`.
+    //
+    // There is no desktop-only arm left to get this wrong in: the tier split is phone vs. the
+    // rest. Half-fixing it — taking the floor but keeping `marginLeft: auto` — was measured too,
+    // and pinned the status text at 0 even at 1440, where the row has room to spare: an auto
+    // margin eats the free space that the `width: 0` status below has to GROW back into.
+    // The cluster's OWN style object only — the children below have `minWidth: 0`s of their own.
+    const clusterStyle = clusterCode.slice(0, clusterCode.indexOf("}}"));
+    expect(clusterStyle).not.toContain("minWidth");
+    expect(clusterStyle).not.toContain("compact");
+    // `marginLeft` survives twice: the base `auto` (the phone rule) and the 0 that overrides it.
+    expect(clusterStyle.match(/marginLeft/g)?.length).toBe(2);
+  });
+
+  it("the fixed-width chips cannot under-report that floor", () => {
+    // A floor is only as honest as the children it is computed from, and min-content is computed
+    // from the longest WORD of anything that may wrap. "$2.5 / run" may: the RUN CAP chip
+    // occupies 69px and contributed 29, so the cluster's floor came out 40px below the buttons it
+    // exists to protect, the cluster was handed a box narrower than its own contents, and
+    // "Save & run" sat 9px past the right edge of a 1440px viewport with the workflow name and
+    // the error pill both still holding slack. Neither chip shrinks, so neither may wrap.
+    const runCap = clusterCode.slice(
+      clusterCode.indexOf("runCapUsd != null"),
+      clusterCode.indexOf("Run cap"),
+    );
+    expect(runCap).toContain('whiteSpace: "nowrap"');
+    const envFrom = code.indexOf("title={`Active environment:");
+    const envChip = code.slice(
+      envFrom,
+      code.indexOf("borderRadius: 999", envFrom),
+    );
+    expect(envChip).toContain('whiteSpace: "nowrap"');
+  });
+
+  it("the status text is outside that floor at BOTH tiers", () => {
+    // #989's finding, re-applied: `overflow: hidden` does NOT zero a flex item's contribution to
+    // its parent's min-content — the contribution is the text clamped to `maxWidth`. Without the
+    // definite `width: 0` the new floor would bake in a full 260px sentence, and the shortfall
+    // would land on the workflow name instead (measured at 834 in #989: the name at its 60px
+    // floor while the sentence kept its full width). The basis mirrors the `maxWidth` per tier so
+    // it grows back to readable the moment the row has room.
+    expect(clusterCode).toMatch(/maxWidth: compact \? 150 : 260/);
+    expect(clusterCode).toMatch(
+      /compact\s*\?\s*\{ width: 0, flex: "1 1 150px", minWidth: 0 \}\s*:\s*\{ width: 0, flex: "1 1 260px", minWidth: 0 \}/,
+    );
+  });
+
+  it("the mono key · vN meta can give, and its tooltip still names the key", () => {
+    // ~215px of `nowrap` reference text with no way to shrink was the single biggest thing
+    // between the workflow name and the CTA in the 1025–~1200 band. `overflow: hidden` alone is
+    // not enough for the same reason as the status text above — `minWidth: 0` is what actually
+    // drops its min-content contribution to zero — and the ellipsis is what makes a truncated key
+    // read as truncated rather than as a DIFFERENT key.
+    const meta = code.slice(
+      code.indexOf('<span\n              className="mono"'),
+      code.indexOf("{activeKey} · {version"),
+    );
+    expect(meta, "the key · version meta moved").toContain("whiteSpace");
+    expect(meta).toContain('overflow: "hidden"');
+    expect(meta).toContain('textOverflow: "ellipsis"');
+    expect(meta).toContain("minWidth: 0");
+    // …and it is the box's DONOR: shrink is shared out in proportion to base × factor, so at the
+    // default 1 the name shrank in step with it (108px of name next to 111px of key, at 1280).
+    // A bias, not a sequence — flexbox shrinks both at once — and expressed by raising the donor
+    // rather than lowering the name, so the unfrozen factors cannot sum to under 1 and trip
+    // §9.7 3b the way the pill's own factor did.
+    expect(meta).toMatch(/flexShrink: (\d+)/);
+    expect(Number(meta.match(/flexShrink: (\d+)/)[1])).toBeGreaterThan(1);
+    // A tooltip that omits the very string that got truncated is not a fallback, so BOTH branches
+    // name the key now — the draft one used not to.
+    expect(meta.match(/Workflow key: \$\{activeKey\}/g)?.length).toBe(2);
+  });
+
+  it("the name box keeps `minWidth: 0`; its floor lives on the CHILDREN", () => {
+    // The tempting symmetry — "give the name box the min-content floor the cluster now has" — was
+    // tried and measured backwards: an <input>'s min-content contribution is its intrinsic `size`
+    // width (197px for the stories' 25-character name), and the mono meta contributes its whole
+    // string despite `overflow: hidden`, so the automatic floor is ~412px on the one box that is
+    // meant to yield FIRST. At 1025 `Tablet` went from 194px over to 420. The floor that matters
+    // is the input's own `minWidth: 60` (#964's), which applies to the input as a flex item and
+    // is unaffected by any of this.
+    const nameBox = code.slice(
+      code.indexOf('alignItems: "baseline"'),
+      code.indexOf('placeholder="Workflow name"'),
+    );
+    expect(nameBox).toMatch(/minWidth: 0,/);
+    expect(nameBox).not.toMatch(/minWidth: (compact|!phone|!compact)/);
+    expect(code).toMatch(/minWidth: phone \? 0 : 60/);
+  });
+
+  it("the validity pill shrinks last, and never at compact", () => {
+    // `graphError` is unbounded and a pill is `white-space: nowrap`, so it could not shrink at
+    // all: 31 characters of "Start node has no outgoing edge" is a 202px pill and put "Save & run"
+    // 76px past the right edge of a 1440px viewport. Desktop keeps the message (compact swaps in
+    // "invalid" instead — see the block above) and makes the pill a normal elastic item.
+    //
+    // The factor must stay >= 1. Expressing "yield this one last" as a fraction is the obvious
+    // move and a trap: flexbox §9.7 3b scales the free space by the sum of the flex factors when
+    // that sum is under 1, so a 0.05 absorbs 5% of the deficit and overflows the other 95% —
+    // measured, `InvalidLongError` gave up 53px of 958 at 1025.
+    // The wrapper span and the pill it holds — up to the compact-only off-screen copy that ends
+    // the block, so nothing after it can satisfy these on the pill's behalf.
+    const pill = code.slice(
+      code.indexOf("title={!graphValid && graphError"),
+      code.indexOf("{compact && !generating && !graphValid && graphError"),
+    );
+    expect(pill).toMatch(
+      /\.\.\.\(compact \? \{ flex: "none" \} : \{ flex: "0 1 auto", minWidth: 0 \}\)/,
+    );
+    // …and the shrink is only useful if the LABEL ellipsizes inside the pill, which is a prop on
+    // the shared component, not something the top bar can do from outside.
+    expect(pill).toContain("truncate={!compact}");
+    expect(statusPill).toMatch(/truncate\?: boolean/);
+    expect(statusPill).toMatch(/truncate \? \{ minWidth: 0 \}/);
+    expect(statusPill).toMatch(/textOverflow: "ellipsis"/);
+  });
+
+  it("truncating the error costs pixels, not meaning", () => {
+    // The compact tier had to add an `srOnly` twin because it SUBSTITUTES a shorter label. Desktop
+    // does not substitute anything: the label expression is unchanged and CSS ellipsis leaves the
+    // whole string in the DOM, so the accessibility tree and the `title` both still carry it. If
+    // this ever becomes a substitution, it needs the same off-screen copy #989 added.
+    expect(code).toMatch(
+      /: compact\s*\? "invalid"\s*: \(graphError \?\? "invalid"\)/,
+    );
+    expect(statusPill).not.toMatch(/slice\(|substring\(/);
   });
 });

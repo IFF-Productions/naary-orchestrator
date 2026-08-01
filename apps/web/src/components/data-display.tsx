@@ -17,12 +17,31 @@ const PILL_LABEL: Record<RunState, string> = {
 export function StatusPill({
   state,
   label,
+  truncate,
 }: {
   state: RunState;
   label?: string;
+  /**
+   * Let the label ellipsize instead of setting the pill's width (#997).
+   *
+   * A pill is `white-space: nowrap` by default and therefore CANNOT shrink, which is fine for the
+   * fixed vocabulary above but not for a caller that puts an arbitrary message in `label` — the
+   * canvas top bar renders the compiler's `graphError` here, and 31 characters of it pushed the
+   * bar's primary CTA off a 1440px screen. Opt-in, because everywhere else the pill IS its label
+   * and truncating it would lose the whole word ("Failed" -> "Fa…").
+   *
+   * Truncation is CSS-only: the full string stays in the DOM, so the accessibility tree is
+   * unaffected and nothing needs an off-screen twin. The caller owns the width — this only makes
+   * the pill capable of taking one (`min-width: 0`, so it can shrink inside a flex parent).
+   */
+  truncate?: boolean;
 }) {
+  const text = label ?? PILL_LABEL[state];
   return (
-    <span className={`pill pill-${state}`}>
+    <span
+      className={`pill pill-${state}`}
+      style={truncate ? { minWidth: 0 } : undefined}
+    >
       {state === "done" ? (
         <Icon name="check" size={10} strokeWidth={3} />
       ) : state === "error" ? (
@@ -30,7 +49,15 @@ export function StatusPill({
       ) : (
         <span className={`pill-dot${state === "running" ? " live" : ""}`} />
       )}
-      {label ?? PILL_LABEL[state]}
+      {truncate ? (
+        <span
+          style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis" }}
+        >
+          {text}
+        </span>
+      ) : (
+        text
+      )}
     </span>
   );
 }
