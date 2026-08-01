@@ -31,6 +31,13 @@ export default defineConfig({
       "@naary/dsl/dist/template-blocks": fileURLToPath(
         new URL("../../packages/dsl/src/template-blocks.ts", import.meta.url),
       ),
+      // The node→connection-type map, shared with the API since #830 (the AI generator applies the
+      // same rule server-side). Deep-imported for the reason above: lib/connection-types.ts is
+      // reachable from non-canvas screens, and pulling it through the barrel would colour the
+      // catalog into their chunks. Same ordering rule — subpaths BEFORE the bare prefix alias.
+      "@naary/dsl/dist/connection-types": fileURLToPath(
+        new URL("../../packages/dsl/src/connection-types.ts", import.meta.url),
+      ),
       "@naary/dsl": fileURLToPath(
         new URL("../../packages/dsl/src/index.ts", import.meta.url),
       ),

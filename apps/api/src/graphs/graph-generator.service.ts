@@ -15,6 +15,7 @@ import {
 } from "@nestjs/common";
 import type { GraphDef } from "@naary/dsl";
 import {
+  CONNECTION_TYPES,
   INTEGRATION_PROVIDERS,
   NODE_TYPES,
   validateGraph,
@@ -139,10 +140,25 @@ export class GraphGeneratorService {
   private async buildResourceContext(
     tenantId: string,
     environmentId: string,
-  ): Promise<{ text: string; connectionIds: Set<string> }> {
-    const conns = await this.connections
-      .list(tenantId, environmentId)
-      .catch(() => []);
+  ): Promise<{ text: string; connections: Map<string, string> }> {
+    // NOT best-effort (#830). This read used to be `.catch(() => [])`, which failed twice over and
+    // silently: the resource block then claims "NO CONNECTIONS are configured" (so the model drops
+    // or blanks the very integration/SQL/email nodes the user asked for), AND the id map is empty,
+    // so `scrubInventedConnections` blanks EVERY connectionId in the draft. The user gets a
+    // plausible-looking workflow that quietly ignored their connections, with nothing in the
+    // response or the log to say why. A read failure here is a DB problem they can retry past in
+    // two seconds — so say so, exactly as #829 argued for the invented-id case.
+    let conns: Awaited<ReturnType<ConnectionService["list"]>>;
+    try {
+      conns = await this.connections.list(tenantId, environmentId);
+    } catch (e) {
+      this.logger.error(
+        `graph generate: could not read connections for env ${environmentId} — refusing to generate against an ungrounded resource block: ${e instanceof Error ? e.message : String(e)}`,
+      );
+      throw new ServiceUnavailableException(
+        "Couldn't read this workspace's connections, so the workflow would have been built without them. Try again.",
+      );
+    }
     const lines: string[] = [];
     if (conns.length > 0) {
       lines.push(
@@ -175,41 +191,60 @@ export class GraphGeneratorService {
       }
     }
     // The ids are returned as well as described: the prompt SAYS "never invent a connectionId",
-    // and a prompt is not an enforcement mechanism (see scrubInventedConnections).
+    // and a prompt is not an enforcement mechanism (see scrubInventedConnections). Id → TYPE, not
+    // just the id, because "exists" was never the whole rule — a Postgres connection on an
+    // integration node exists and is still wrong (#830).
     return {
       text: lines.join("\n") + "\n\n",
-      connectionIds: new Set(conns.map((c) => c.id)),
+      connections: new Map(conns.map((c) => [c.id, c.type as string])),
     };
   }
 
   /**
-   * Blank every `connectionId` the model invented.
+   * Blank every `connectionId` the model made up — an id the tenant does not have, OR a real id
+   * whose connection is the wrong TYPE for the node it landed on.
    *
    * Reported as "build with AI … auto populated bogus connections". The resource block tells the
    * model to use one of the tenant's EXACT ids and never to invent one — but nothing checked, and
-   * `validate()` only covers structure and node types. An invented id is the worst possible
-   * outcome: the node LOOKS configured, passes the save gate, and fails at run time with "unknown
+   * `validate()` only covers structure and node types. A bogus id is the worst possible outcome:
+   * the node LOOKS configured, passes the save gate, and fails at run time with "unknown
    * connection" — long after the author stopped looking.
+   *
+   * The WRONG-TYPE case was the acknowledged gap in the first fix (#829: "a connection of the wrong
+   * type … is equally bogus and still passes — the id exists, so the check accepts it"). The
+   * resource block lists every connection with its `type=` precisely so the model can match them
+   * up, and matching them up is another thing the prompt merely ASKS for. It is the same failure
+   * with a worse error: a Postgres connection on a GitHub integration node reaches the driver
+   * before anything notices. `CONNECTION_TYPES` (shared with the canvas picker since #830, so the
+   * two can't disagree) is the rule. A node type that takes no connection is left alone — the map
+   * has no entry, so there is no rule to apply and inventing one would blank valid config.
    *
    * Blanked rather than dropped, because empty is the state the rest of the product already
    * understands: the canvas lints it, the save gate reports it, and the config panel shows an empty
    * picker. The author is told to choose, which is exactly what the model couldn't do for them.
    *
-   * Returns the ids it removed so the caller can log them (never the graph, never config values).
+   * Returns one `nodeId:connectionId (reason)` per removal so the caller can log them — ids and the
+   * connection TYPE only, never the graph and never config values.
    */
   private scrubInventedConnections(
     graph: GraphDef,
-    real: Set<string>,
+    real: Map<string, string>,
   ): string[] {
     const removed: string[] = [];
     for (const node of graph.nodes) {
       const cfg = node.config as { connectionId?: unknown } | undefined;
       const id = cfg?.connectionId;
       if (typeof id !== "string" || id === "") continue;
-      if (real.has(id)) continue;
+      const actualType = real.get(id);
+      const allowed = CONNECTION_TYPES[node.type];
+      let reason: string | undefined;
+      if (actualType === undefined) reason = "no such connection";
+      else if (allowed && !allowed.includes(actualType as never))
+        reason = `connection type ${actualType}, but node type ${node.type} needs ${allowed.join("/")}`;
+      if (!reason) continue;
       // The NODE ID, not the node type: the id is what the author sees on the canvas and what the
       // issues panel names, so a log line points at the thing they can actually click.
-      removed.push(`${node.id}:${id}`);
+      removed.push(`${node.id}:${id} (${reason})`);
       (cfg as { connectionId?: string }).connectionId = "";
     }
     return removed;
@@ -308,7 +343,7 @@ export class GraphGeneratorService {
       environmentId,
       provider,
     );
-    const { text: resources, connectionIds } = await this.buildResourceContext(
+    const { text: resources, connections } = await this.buildResourceContext(
       tenantId,
       environmentId,
     );
@@ -395,10 +430,10 @@ export class GraphGeneratorService {
 
     // Same enforcement as the create path: a conversational EDIT can invent a connectionId just as
     // easily, and the turn is applied to the draft the user then saves.
-    const inventedEdit = this.scrubInventedConnections(graph, connectionIds);
+    const inventedEdit = this.scrubInventedConnections(graph, connections);
     if (inventedEdit.length > 0) {
       this.logger.warn(
-        `builder turn: blanked ${inventedEdit.length} invented connectionId(s) — ${inventedEdit.join(", ")}`,
+        `builder turn: blanked ${inventedEdit.length} bogus connectionId(s) — ${inventedEdit.join(", ")}`,
       );
     }
 
@@ -449,7 +484,7 @@ export class GraphGeneratorService {
     );
 
     // Ground the model in this env's real connections + the integration action catalog.
-    const { text: resources, connectionIds } = await this.buildResourceContext(
+    const { text: resources, connections } = await this.buildResourceContext(
       tenantId,
       environmentId,
     );
@@ -513,10 +548,10 @@ export class GraphGeneratorService {
     // The model is TOLD to use only real connection ids and not to invent any; this is where that
     // is enforced (see scrubInventedConnections). Runs after the repair loop so a repaired draft is
     // scrubbed too, and logs the ids only — never the graph, never config values.
-    const invented = this.scrubInventedConnections(graph, connectionIds);
+    const invented = this.scrubInventedConnections(graph, connections);
     if (invented.length > 0) {
       this.logger.warn(
-        `graph generate: blanked ${invented.length} invented connectionId(s) — ${invented.join(", ")}`,
+        `graph generate: blanked ${invented.length} bogus connectionId(s) — ${invented.join(", ")}`,
       );
     }
 
@@ -601,8 +636,17 @@ export class GraphGeneratorService {
       repaired = await repair(
         `The workflow uses the integration catalog incorrectly. Fix ONLY these, keeping everything else identical:\n${errors.join("\n")}`,
       );
-    } catch {
-      return graph; // a failed repair must never fail the generation
+    } catch (e) {
+      // Still never fatal — but no longer silent (#830). A repair that throws (provider 429, a
+      // timeout, a truncated draft) and a repair that legitimately declined to change anything
+      // produced the SAME outcome — the original draft, with its known config gaps, handed to the
+      // author — and nothing anywhere said which had happened. The author sees a node the issues
+      // panel flags and no reason we didn't fix it; the operator sees a "self-repairing N issue(s)"
+      // line with no ending. Same swallow, one line of why (the shape #825 established).
+      this.logger.warn(
+        `graph generate: self-repair call failed — keeping the original draft (${errors.length} issue(s) remain): ${e instanceof Error ? e.message : String(e)}`,
+      );
+      return graph;
     }
     if (!repaired || !this.validate(repaired).valid) return graph;
     const after = this.modelFixableConfigErrors(repaired);
@@ -891,6 +935,9 @@ export class GraphGeneratorService {
         system: SYSTEM_PROMPT,
         prompt: `${userPrompt}\n\n${resources}Respond with ONLY the JSON graph object — start at { and end at }. No prose, no markdown code fences.`,
         maxOutputTokens: 16000,
+        // Same rationale as callModelStreaming's: not a swallow — `textStream` rethrows the error
+        // below, and this only suppresses the SDK's default console.error (which could echo
+        // request detail). Spelled out here too so the next reader doesn't have to go and check.
         onError: () => {},
       });
       for await (const delta of result.textStream) {

@@ -202,8 +202,16 @@ export class TurnstileConfigService {
           `[bot-gate] ${count} environment(s) have App Check bot protection enabled, but this instance has no Firebase service account — those gates CANNOT be enforced and their public pages are ungated. Configure FIREBASE_SERVICE_ACCOUNT_JSON (or GOOGLE_APPLICATION_CREDENTIALS), or switch those environments to Turnstile.`,
         );
       }
-    } catch {
-      // Deliberately silent: this is a diagnostic, not a gate.
+    } catch (e) {
+      // Still never throws — a DB hiccup here must not block startup. But it must not be SILENT
+      // either (#830): the only two outcomes used to be "nothing printed because every gate is
+      // enforceable" and "nothing printed because the check itself died", and an operator reading
+      // the boot log cannot tell those apart. For a check whose entire subject is "are public
+      // pages ungated right now", clean-looking silence is the wrong default — say the check
+      // didn't run, so the absence of the warning below can be trusted when it IS absent.
+      console.warn(
+        `[bot-gate] could not check for unenforceable App Check gates at boot — treat the absence of a warning as unknown, not as all-clear: ${e instanceof Error ? e.message : String(e)}`,
+      );
     }
   }
 

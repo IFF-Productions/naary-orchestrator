@@ -5,6 +5,7 @@ const turnstileConfig = {
   findUnique: vi.fn(),
   upsert: vi.fn(),
   deleteMany: vi.fn(),
+  count: vi.fn(),
 };
 vi.mock("@naary/db", () => ({ getPrisma: () => ({ turnstileConfig }) }));
 
@@ -45,6 +46,53 @@ beforeEach(() => {
   turnstileConfig.findUnique.mockReset();
   turnstileConfig.upsert.mockReset().mockResolvedValue(undefined);
   turnstileConfig.deleteMany.mockReset().mockResolvedValue({ count: 1 });
+  turnstileConfig.count.mockReset().mockResolvedValue(0);
+});
+
+/**
+ * THE BOOT DIAGNOSTIC MUST NOT GO SILENT ABOUT ITSELF (#830).
+ *
+ * This check exists to shout when environments rely on an App Check gate this deployment cannot
+ * verify — i.e. when public forms are ungated right now. It swallowed its own failure, so the boot
+ * log had two indistinguishable meanings: "checked, all enforceable" and "the check died". For a
+ * diagnostic whose whole subject is a security gate, clean-looking silence is the wrong default.
+ */
+describe("bot-gate boot diagnostic", () => {
+  it("warns when App Check gates exist but cannot be enforced", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { service } = makeService({ enabled: false });
+    turnstileConfig.count.mockResolvedValue(2);
+
+    await service.onApplicationBootstrap();
+
+    expect(String(warn.mock.calls[0]?.[0])).toContain("CANNOT be enforced");
+    warn.mockRestore();
+  });
+
+  it("says so when the check itself could not run (never silently)", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { service } = makeService({ enabled: false });
+    turnstileConfig.count.mockRejectedValue(new Error("db unreachable"));
+
+    // Unchanged: a DB hiccup here must never block startup.
+    await expect(service.onApplicationBootstrap()).resolves.toBeUndefined();
+
+    const line = warn.mock.calls.map((c) => String(c[0])).join("\n");
+    expect(line).toContain("could not check for unenforceable App Check gates");
+    expect(line).toContain("db unreachable");
+    warn.mockRestore();
+  });
+
+  it("stays quiet when this deployment CAN verify App Check", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { service } = makeService({ enabled: true });
+
+    await service.onApplicationBootstrap();
+
+    expect(warn).not.toHaveBeenCalled();
+    expect(turnstileConfig.count).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
 });
 
 describe("TurnstileConfigService", () => {
