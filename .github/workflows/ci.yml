@@ -81,6 +81,19 @@ jobs:
       - name: Check API types drift (openapi spec)
         run: pnpm check:api-types
 
+      # docs/integrations holds one generated page per provider in INTEGRATION_CATALOG, and
+      # integration-docs.spec.ts already byte-diffs every one of them against disk — but it
+      # imports the renderer from `src` and only COMPARES, and check:mjs-syntax only PARSES.
+      # Nothing yet RUNS gen-integration-docs.mjs, which reads the BUILT `dist`: an export that
+      # stops surviving the build, a bad path join, or its missing-prose exit passes both of
+      # those and still leaves the generator — the only writer of those pages — unable to
+      # produce them. Executing it for real costs seconds, not minutes. See #1033.
+      # The diff is path-scoped to docs/integrations, so the dummy .env that setup-workspace
+      # writes cannot dirty it. Untracked files are outside `git diff` — a brand-new provider
+      # page is what the spec's existsSync assertion covers.
+      - name: Check integration docs drift (generated provider pages)
+        run: pnpm check:integration-docs
+
       - name: Web build (vite)
         run: pnpm --filter @naary/web run build
 
