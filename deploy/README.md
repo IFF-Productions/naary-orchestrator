@@ -280,15 +280,17 @@ Set two repo secrets (*Settings → Secrets and variables → Actions*):
 - `DEPLOY_SSH_KEY` — the **private** half of the deploy keypair (`deploy_key`).
 - `DEPLOY_HOST` — `terraform output -raw server_ipv4`.
 
-And, if you use Firebase login / browser Sentry, set repo **variables** (same page,
-*Variables* tab — they're publishable client-side values, inlined into the web bundle
-at image build): `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`,
+And, if you use Firebase login / browser Sentry, set these as repo **secrets** too
+(*Secrets* tab, same page). They are publishable client-side values inlined into the
+web bundle at image build, so nothing is actually being kept secret — but the workflow
+reads them as `${{ secrets.VITE_* }}`, so a value put on the *Variables* tab is NOT
+read: `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`,
 `VITE_FIREBASE_PROJECT_ID`, `VITE_FIREBASE_STORAGE_BUCKET`,
 `VITE_FIREBASE_MESSAGING_SENDER_ID`, `VITE_FIREBASE_APP_ID`, `VITE_SENTRY_DSN`,
 `VITE_SENTRY_TRACES_SAMPLE_RATE`. Unset `VITE_SENTRY_DSN` ⇒ browser Sentry is off
 entirely. With the DSN set, an unset **rate** now means "use the built-in default"
 (#1034): tracing samples 10% of transactions and a session replay is kept whenever an
-error occurs — set the rate variables explicitly to change either.
+error occurs — set the rate secrets explicitly (e.g. to `0`) to change either.
 (The server `.env` copies of `VITE_*` are ignored in this variant — the web image is
 already built when it reaches the box.)
 
