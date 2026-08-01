@@ -354,6 +354,20 @@ export async function runGraph(
   // so replay of an existing history reaches the identical decision and no patched() gate applies.
   const isFailure =
     threw !== undefined || RETURNED_FAILURE_STATUSES.has(state.status);
+  // ONE extraction of what actually went wrong, shared by the failure NOTIFICATION and the
+  // error-handler payload below (#987). It used to exist only for the handler, so the Slack
+  // message said "Reason: failed" while the real message/type sat twenty lines away. Two
+  // copies of one rule is the drift bug #982/#984 fixed — so this is derived once.
+  //
+  // DETERMINISM: pure computation over an already-replayed value (`threw`) — it issues no
+  // command, so it needs no patched() gate.
+  const failure =
+    threw !== undefined
+      ? {
+          message: threw instanceof Error ? threw.message : String(threw),
+          type: threw instanceof wf.ApplicationFailure ? threw.type : undefined,
+        }
+      : undefined;
   // Notify the tenant (best-effort) that a run failed — same swallow + patch gate as
   // the approval notification. Skipped for error-handler runs (they ARE the response).
   if (isFailure && !runCtx.isErrorHandler && wf.patched("notify-v1")) {
@@ -364,7 +378,23 @@ export async function runGraph(
         kind: "run_failed",
         workflowId: wf.workflowInfo().workflowId,
         workflowKey: runCtx.workflowKey,
-        detail: threw !== undefined ? "failed" : state.status,
+        // The real failure, not the literal "failed" (#987): the message a human can act on,
+        // the ApplicationFailure type, and the node it failed AT (same first-writer-wins
+        // attribution the read-model row uses below — never a second rule for the same fact).
+        // Extra ARGUMENT FIELDS on an activity already inside `notify-v1` add no command and
+        // reorder nothing, so replay of an in-flight run is unaffected and no new gate is due.
+        detail: failure?.message ?? state.status,
+        // ApplicationFailure.type is `string | null` — the notification field is optional,
+        // so a null type is simply absent rather than rendered as "null".
+        errorType: failure?.type ?? undefined,
+        // ONLY for a THROWN failure, where the attribution is real. A RETURNED terminal is
+        // not always attributable to where the walk stopped — `invalid_graph` is decided
+        // AFTER the walk (a stranded fan-in join), so `currentNodeId` there is an unrelated
+        // node and "at step X" would be confidently wrong. Those statuses carry an
+        // informative `detail` already.
+        failedNodeId: failure
+          ? (state.failedNodeId ?? state.currentNodeId)
+          : undefined,
       });
     } catch {
       /* best-effort — a notification problem must not mask the failure */
@@ -387,16 +417,9 @@ export async function runGraph(
         failedWorkflowId: parentId,
         workflowKey: runCtx.workflowKey,
         status: threw !== undefined ? "failed" : state.status,
-        error:
-          threw !== undefined
-            ? {
-                message: threw instanceof Error ? threw.message : String(threw),
-                type:
-                  threw instanceof wf.ApplicationFailure
-                    ? threw.type
-                    : undefined,
-              }
-            : undefined,
+        // The SAME derivation the notification uses (hoisted above) — byte-identical payload
+        // to what this built inline before.
+        error: failure,
       };
       await wf.startChild(runGraph, {
         workflowId: `${parentId}-onerror`,

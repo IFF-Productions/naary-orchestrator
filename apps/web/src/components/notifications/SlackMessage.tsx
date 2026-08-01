@@ -28,6 +28,10 @@ type SlackButton = {
 type SlackBlock =
   | { type: "header"; text: SlackText }
   | { type: "section"; text?: SlackText; fields?: SlackText[] }
+  // Slack's small grey line under a message — where the machine facts (a truncated run id,
+  // the source env) live after the fields-grid redesign (#987). Unsupported here meant the
+  // preview would silently DROP them, so it is rendered explicitly.
+  | { type: "context"; elements: SlackText[] }
   | { type: "actions"; elements: SlackButton[] };
 
 type SlackTheme = "dark" | "light";
@@ -326,6 +330,29 @@ function SlackBlockView({ block, c }: { block: SlackBlock; c: Palette }) {
             ))}
           </div>
         )}
+      </div>
+    );
+  }
+  if (block.type === "context") {
+    // Slack renders context elements inline at ~12px in the muted text colour, separated by
+    // a small gap — deliberately quieter than the message body.
+    return (
+      <div
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          gap: 8,
+          fontSize: 12.5,
+          lineHeight: "17px",
+          color: c.muted,
+        }}
+      >
+        {block.elements.map((el, i) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: fixed, ordered context elements
+          <span key={i}>
+            <Mrkdwn text={el.text} c={c} />
+          </span>
+        ))}
       </div>
     );
   }

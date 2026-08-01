@@ -53,7 +53,9 @@ beforeEach(() => {
     .mockResolvedValue("smtps://ops%40acme.io:s3cret@smtp.acme.io:465");
   pinnedSmtpUri
     .mockReset()
-    .mockImplementation(async (uri: string) => `${uri}?servername=smtp.acme.io`);
+    .mockImplementation(
+      async (uri: string) => `${uri}?servername=smtp.acme.io`,
+    );
   __notifyDeps.resolveSmtpUri = resolveSmtpUri as never;
   __notifyDeps.pinnedSmtpUri = pinnedSmtpUri as never;
   __notifyDeps.createTransport = (() => ({ sendMail })) as never;
@@ -145,7 +147,7 @@ describe("sendNotification", () => {
     ).toBe(true);
   });
 
-  it("formats Slack blocks: a header + a fields section with the run as an inline link", async () => {
+  it("formats Slack blocks: header + prose headline + a grey context line, no fields grid", async () => {
     await sendNotification({
       ...BASE,
       kind: "approval_pending",
@@ -161,25 +163,22 @@ describe("sendNotification", () => {
     expect(header.text.type).toBe("plain_text");
     expect(header.text.text).toContain("Approval needed");
 
-    // The section carries mrkdwn fields, and the Run field is an ACTUAL link
-    // (<url|label>) to the run — not a bare id reference.
+    // The body is one prose section — what is waiting, said as a sentence. NO `fields`
+    // array anywhere: Slack renders that as the two-column form this replaced (#987).
     const section = body.blocks.find(
-      (b: { type: string; fields?: unknown }) =>
-        b.type === "section" && b.fields,
+      (b: { type: string; text?: unknown }) => b.type === "section" && b.text,
     );
-    expect(section).toBeTruthy();
-    const joined = section.fields
-      .map((f: { text: string }) => f.text)
-      .join("\n");
-    expect(joined).toContain("<https://app.naary.test/app/runs/wf-1|run wf-1>");
-    expect(joined).toContain("*Workflow*");
-    // The approval title is its own FULL-WIDTH section (a section with `text`, not `fields`) —
-    // free text doesn't belong in the cramped 2-column fields grid.
-    const titleSection = body.blocks.find(
-      (b: { type: string; text?: { text?: string }; fields?: unknown }) =>
-        b.type === "section" && b.text && !b.fields,
+    expect(section.text.text).toBe("*poller* — Ship it?");
+    expect(
+      body.blocks.some((b: { fields?: unknown }) => b.fields !== undefined),
+    ).toBe(false);
+
+    // The run id lives in the small grey context line, never as a link label.
+    const context = body.blocks.find(
+      (b: { type: string }) => b.type === "context",
     );
-    expect(titleSection?.text.text).toContain("Ship it?");
+    expect(context.elements[0].text).toBe("Run `wf-1`");
+    expect(JSON.stringify(body.blocks)).not.toContain("|run wf-1>");
   });
 
   it("escapes Slack mrkdwn control chars (& < >) in interpolated ids/labels", async () => {
@@ -191,25 +190,19 @@ describe("sendNotification", () => {
       detail: "timeout & <reset>",
     });
     const body = JSON.parse(fetch.mock.calls[0][1].body as string);
+    // Headline (workflow + reason) and context (run id) are both mrkdwn — the raw control
+    // chars must not survive in either, so they can't break markup or inject a link.
     const section = body.blocks.find(
-      (b: { type: string; fields?: unknown }) =>
-        b.type === "section" && b.fields,
+      (b: { type: string; text?: unknown }) => b.type === "section" && b.text,
     );
-    expect(section).toBeTruthy();
-    const joined = section.fields
-      .map((f: { text: string }) => f.text)
-      .join("\n");
-    // The raw control chars must not appear inside the link label / fields — they're escaped,
-    // so they can't break the <url|label> markup.
-    expect(joined).toContain("run wf-&lt;a&amp;b&gt;");
-    expect(joined).toContain("orders&lt;x&gt;");
-    expect(joined).not.toMatch(/run wf-<a&b>/);
-    // The failure reason is its own full-width section — also escaped.
-    const reasonSection = body.blocks.find(
-      (b: { type: string; text?: { text?: string }; fields?: unknown }) =>
-        b.type === "section" && b.text && !b.fields,
+    expect(section.text.text).toContain("orders&lt;x&gt;");
+    expect(section.text.text).toContain("timeout &amp; &lt;reset&gt;");
+    expect(section.text.text).not.toMatch(/orders<x>/);
+    const context = body.blocks.find(
+      (b: { type: string }) => b.type === "context",
     );
-    expect(reasonSection?.text.text).toContain("timeout &amp; &lt;reset&gt;");
+    expect(context.elements[0].text).toContain("wf-&lt;a&amp;b&gt;");
+    expect(context.elements[0].text).not.toMatch(/wf-<a&b>/);
     // The top-level `text` fallback (Slack renders it as mrkdwn too) is ALSO escaped, so control
     // chars can't break/inject in clients that show the fallback line.
     expect(body.text).toContain("orders&lt;x&gt;");
@@ -240,7 +233,7 @@ describe("sendNotification", () => {
     expect(codeSpans).toContain("boomʼcode");
   });
 
-  it("renders the run id (no link) in the fields section when APP_BASE_URL is unset", async () => {
+  it("still names the run (context line) and the reason when APP_BASE_URL is unset", async () => {
     process.env.APP_BASE_URL = "";
     await sendNotification({
       ...BASE,
@@ -248,23 +241,17 @@ describe("sendNotification", () => {
       detail: "timed_out",
     });
     const body = JSON.parse(fetch.mock.calls[0][1].body as string);
+    const context = body.blocks.find(
+      (b: { type: string }) => b.type === "context",
+    );
+    // No URL to link to → the id still reads in the context line, and no <…|…> markup.
+    expect(context.elements[0].text).toBe("Run `wf-1`");
+    expect(JSON.stringify(body.blocks)).not.toContain("|run wf-1>");
+    // The reason rides the headline (short + no error type → inline).
     const section = body.blocks.find(
-      (b: { type: string; fields?: unknown }) =>
-        b.type === "section" && b.fields,
+      (b: { type: string; text?: unknown }) => b.type === "section" && b.text,
     );
-    expect(section).toBeTruthy();
-    const joined = section.fields
-      .map((f: { text: string }) => f.text)
-      .join("\n");
-    // No URL to link to → the bare id in backticks, and no <…|…> link markup.
-    expect(joined).toContain("`wf-1`");
-    expect(joined).not.toContain("|run wf-1>");
-    // The failure reason is its own full-width section (not a fields entry).
-    const reasonSection = body.blocks.find(
-      (b: { type: string; text?: { text?: string }; fields?: unknown }) =>
-        b.type === "section" && b.text && !b.fields,
-    );
-    expect(reasonSection?.text.text).toContain("timed_out");
+    expect(section.text.text).toBe("*poller* — timed_out");
   });
 
   it("includes a View-run deep link on a failed-run notification (the prior gap)", async () => {
@@ -634,11 +621,13 @@ describe("sendNotification — approval reminder/escalation flavors (Slice 1)", 
       (b: { type: string }) => b.type === "header",
     );
     expect(header.text.text).toBe("🚨 Approval escalated");
+    // The target is named on its own line of the headline — it is WHO must act, not a
+    // label/value pair in a grid.
     const target = body.blocks.find(
       (b: { type: string; text?: { text?: string } }) =>
-        b.type === "section" && b.text?.text?.includes("*Escalated to*"),
+        b.type === "section" && b.text?.text?.includes("Escalated to"),
     );
-    expect(target?.text.text).toContain("@ops-oncall &lt;primary&gt;");
+    expect(target?.text.text).toContain("*@ops-oncall &lt;primary&gt;*");
     expect(body.text).toContain("escalated to @ops-oncall &lt;primary&gt;");
     expect(body.escalateTo).toBe("@ops-oncall <primary>");
   });

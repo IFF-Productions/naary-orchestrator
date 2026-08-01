@@ -16,6 +16,7 @@ const LINKS: NotificationLinks = {
     "https://app.naary.io/approve/wh-t1-9a8b7c?token=deadbeefcafef00d",
   runUrl: "https://app.naary.io/app/runs/wh-t1-9a8b7c",
   usageUrl: "https://app.naary.io/app/billing",
+  workflowUrl: "https://app.naary.io/app/workflows/invoice-sync",
 };
 
 const APPROVAL: NotificationInput = {
@@ -25,11 +26,52 @@ const APPROVAL: NotificationInput = {
   title: "Refund over $500 needs a human",
 };
 
+// What the worker sends for a failed run after #987: the thrown error's message, its
+// ApplicationFailure type and the node it failed at. (It used to send the literal "failed"
+// and nothing else, next to a 48-character run id used as a link label.)
 const FAILED: NotificationInput = {
   kind: "run_failed",
-  workflowId: "wh-t1-deadbeef",
+  workflowId: "exec-t-demo-9f44d033-8bac-4418-98ec-5550172e7100",
   workflowKey: "invoice-sync",
-  detail: "AGENT_TIMEOUT",
+  detail: "Agent call timed out after 60s",
+  errorType: "AGENT_TIMEOUT",
+  failedNodeId: "summarize",
+};
+
+/** The old payload, kept as a story: a reason that only restates the header is now DROPPED
+ *  rather than rendered as "Reason: failed". */
+const FAILED_BARE: NotificationInput = {
+  kind: "run_failed",
+  workflowId: "exec-t-demo-9f44d033-8bac-4418-98ec-5550172e7100",
+  workflowKey: "invoice-sync",
+  detail: "failed",
+};
+
+// A run that ended on a RETURNED terminal status rather than a throw — the reason carries
+// real information, so it must survive the redundancy suppression.
+const FAILED_STATUS: NotificationInput = {
+  kind: "run_failed",
+  workflowId: "exec-t-demo-9f44d033-8bac-4418-98ec-5550172e7100",
+  workflowKey: "invoice-sync",
+  detail: "budget_exceeded",
+};
+
+// A promotion (Slice 4) — no run at all; `workflowId` carries the workflow KEY.
+const PROMOTION: NotificationInput = {
+  kind: "promotion",
+  workflowId: "invoice-sync",
+  workflowKey: "invoice-sync",
+  fromEnv: "sandbox",
+  toEnv: "prod",
+  version: 7,
+};
+
+// A self-healing fix proposal (Phase 2) — also keyed, also runless.
+const FIX_PROPOSAL: NotificationInput = {
+  kind: "fix_proposal",
+  workflowId: "pagerduty-triage",
+  workflowKey: "pagerduty-triage",
+  title: "pagerduty: Missing required header 'From'",
 };
 
 // Slice-1 approval flavors: a scheduled reminder (#2) and an escalation naming its target.
@@ -137,4 +179,32 @@ export const SlackBudgetThreshold: Story = {
 
 export const TeamsBudgetThreshold: Story = {
   render: () => <Teams input={BUDGET_THRESHOLD} />,
+};
+
+/** A run that ended on a returned terminal status — the reason is real information. */
+export const SlackRunFailedStatus: Story = {
+  render: () => <Slack input={FAILED_STATUS} />,
+};
+
+/** Nothing known but the workflow: the redundant "Reason: failed" is dropped, not shown. */
+export const SlackRunFailedBare: Story = {
+  render: () => <Slack input={FAILED_BARE} />,
+};
+
+/** Promotion (Slice 4) — runless: workflow + version + target env, a workflow link. */
+export const SlackPromotion: Story = {
+  render: () => <Slack input={PROMOTION} />,
+};
+
+export const TeamsPromotion: Story = {
+  render: () => <Teams input={PROMOTION} />,
+};
+
+/** Self-healing fix proposal (Phase 2) — runless, no approve/reject buttons. */
+export const SlackFixProposal: Story = {
+  render: () => <Slack input={FIX_PROPOSAL} />,
+};
+
+export const TeamsFixProposal: Story = {
+  render: () => <Teams input={FIX_PROPOSAL} />,
 };

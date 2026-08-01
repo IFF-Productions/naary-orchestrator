@@ -43,8 +43,17 @@ export interface NotificationInput {
   workflowKey?: string;
   /** For approval_pending: the approval node's title (from the graph). */
   title?: string;
-  /** For run_failed: the terminal status / error type. */
+  /** For run_failed: WHY it failed in the reader's words — the thrown error's message, or the
+   *  terminal status for a run that returned one (rejected / budget_exceeded / …). It used to be
+   *  the literal "failed", which only restated the header (#987); a detail that restates the
+   *  status the header already announces is dropped by `notificationDetail`. */
   detail?: string;
+  /** run_failed only: the failure's machine type — an `ApplicationFailure.type` such as
+   *  `AGENT_TIMEOUT`. Shown next to the workflow name; it is the part an operator recognizes. */
+  errorType?: string;
+  /** run_failed only: the graph node the run failed AT. The single most useful fact in a failure
+   *  alert ("which step?") and the one the old message threw away. */
+  failedNodeId?: string;
   /** approval_pending only: reminder/escalation flavor (absent = the initial pause). */
   flavor?: ApprovalFlavor;
   /** For flavor "reminder": the 1-based reminder number ("Reminder #2"). */
@@ -104,6 +113,50 @@ export function slackEscape(s: string): string {
  *  backticks with a modifier-letter apostrophe (renders near-identically) after escaping. */
 export function codeText(s: string): string {
   return slackEscape(s).replace(/`/g, "ʼ");
+}
+
+/** Longest failure/reason text any surface renders. A thrown error's message is unbounded
+ *  (a provider can return a page of JSON); a chat alert that scrolls for a screen is worse
+ *  than one that stops at the useful part. */
+const DETAIL_MAX = 240;
+
+/** Collapse whitespace (a multi-line stack-ish message becomes one line) and cut to `max`
+ *  on a whole character with an ellipsis, so nothing renders as a wall of text. */
+function oneLine(s: string, max = DETAIL_MAX): string {
+  const flat = s.replace(/\s+/g, " ").trim();
+  return flat.length <= max ? flat : `${flat.slice(0, max - 1).trimEnd()}…`;
+}
+
+/**
+ * Execution ids are 48 machine-shaped characters. As a link LABEL one wraps onto two lines and
+ * is most of what made the old message look broken (#987) — nobody reads a UUID. Show a
+ * recognizable PREFIX in small context text instead; the full id still rides the generic
+ * payload (`workflowId`), the Teams/email facts, and the deep link itself.
+ */
+export function shortId(id: string, max = 24): string {
+  return id.length <= max ? id : `${id.slice(0, max - 4)}…`;
+}
+
+/**
+ * The failure reason to SHOW, or undefined when it adds nothing. ONE rule, consumed by the Slack
+ * blocks, the Teams/email facts and the fallback text — two copies of this rule is exactly the
+ * drift bug #982/#984 fixed.
+ *
+ * Dropped when: the kind carries no reason at all (approvals say what they're awaiting instead);
+ * the detail is blank; or — the `Reason: failed` defect — the detail is only the status the
+ * header already announced. "❌ Run failed" + "Reason: failed" told the reader nothing twice.
+ * Every OTHER terminal status a run can return (rejected / budget_exceeded / circuit_open /
+ * invalid_graph) genuinely adds information, so this is a redundancy test, not a blocklist.
+ */
+export function notificationDetail(
+  input: NotificationInput,
+): string | undefined {
+  if (input.kind === "approval_pending") return undefined;
+  const raw = input.detail?.trim();
+  if (!raw) return undefined;
+  if (input.kind === "run_failed" && raw.toLowerCase() === "failed")
+    return undefined;
+  return oneLine(raw);
 }
 
 /** Short headline for the notification, shared by the Slack header + the Teams card. */
@@ -172,7 +225,10 @@ export function notificationActions(
     // version of a production workflow, and that decision is made against the DIFF, which a chat
     // message cannot show. The one action is to go and look at it.
     if (links.approvalUrl)
-      actions.push({ label: "Review the proposed fix", url: links.approvalUrl });
+      actions.push({
+        label: "Review the proposed fix",
+        url: links.approvalUrl,
+      });
     else if (links.workflowUrl)
       actions.push({ label: "View workflow", url: links.workflowUrl });
     return actions;
@@ -206,8 +262,10 @@ export function notificationText(
   }
   // Slack treats the top-level `text` as mrkdwn too (it's the fallback/notification line some
   // clients show), so escape the interpolated user values — NOT the URLs, which must stay intact.
+  // codeText (escape + backtick neutralization), not bare slackEscape: an odd backtick in a
+  // workflow key opens a code span that swallows the rest of the line, including the link.
   const wf = input.workflowKey
-    ? `"${slackEscape(input.workflowKey)}"`
+    ? `"${codeText(input.workflowKey)}"`
     : "a workflow";
   if (input.kind === "promotion") {
     const envs =
@@ -243,77 +301,131 @@ export function notificationText(
     }
     return `⏳ Approval needed on ${gate}.${decide}`;
   }
-  return `❌ ${wf} run failed${input.detail ? ` (${slackEscape(input.detail)})` : ""} — run ${runId}.${links.runUrl ? ` View: ${links.runUrl}` : ""}`;
+  // The fallback line carries the SAME facts as the blocks (error type, failing step, reason) —
+  // it is what a mobile push preview and every generic hook show. Same suppression + truncation
+  // rule via notificationDetail, so an unbounded error message can't run away here either.
+  const reason = notificationDetail(input);
+  const why = [
+    input.errorType ? codeText(input.errorType) : undefined,
+    input.failedNodeId ? `at step ${codeText(input.failedNodeId)}` : undefined,
+    reason ? codeText(reason) : undefined,
+  ].filter(Boolean);
+  return `❌ ${wf} run failed${why.length > 0 ? ` (${why.join(" · ")})` : ""} — run ${runId}.${links.runUrl ? ` View: ${links.runUrl}` : ""}`;
+}
+
+/** The workflow's NAME as Slack mrkdwn — bold, never a raw id. `codeText` (not plain
+ *  `slackEscape`) because a backtick in a key would otherwise open a code span that swallows
+ *  the rest of the line. */
+function workflowName(input: NotificationInput): string {
+  return input.workflowKey
+    ? `*${codeText(input.workflowKey)}*`
+    : "_an unnamed workflow_";
 }
 
 /**
- * Slack Block Kit blocks: a header + a fields section (where the run is an actual inline
- * `<url|…>` link, not a bare id reference) + an `actions` row of link-buttons — the
- * "multiple entries" a recipient can act on (Approve/Reject, View run). Slack renders
- * `blocks` when present; generic/Teams hooks fall back to top-level `text` + the flat
- * fields. Buttons carry absolute `url`s, so no Slack interactivity wiring is needed.
+ * The HEADLINE under the Slack header: one or two lines of prose a human reads left-to-right.
+ *
+ * This replaces the `*Label*\nvalue` FIELDS GRID (#987). Slack lays a section's `fields` array
+ * out as a two-column table, so a message built from fields renders as a FORM — and a 48-char
+ * run id in a half-width column wraps onto two lines, which is most of what made the old
+ * message look broken. Nothing here is a grid: the facts are said in a sentence, and the
+ * machine-shaped ones move to the small grey context line below.
+ */
+export function notificationHeadline(input: NotificationInput): string {
+  if (input.kind === "budget_threshold") {
+    const cap =
+      input.capUsd !== undefined ? `*${usd(input.capUsd)}*` : undefined;
+    const spend =
+      input.spendUsd !== undefined ? `*${usd(input.spendUsd)}*` : undefined;
+    const line =
+      spend && cap
+        ? `Workspace spend is ${spend} of the ${cap} monthly cap.`
+        : spend
+          ? `Workspace spend is ${spend} this month.`
+          : cap
+            ? `Workspace spend crossed the alert threshold on the ${cap} monthly cap.`
+            : "Workspace spend crossed the alert threshold.";
+    // Say what does NOT happen. An alert that reads as "your runs just stopped" costs a
+    // support ticket; runs continue until the cap itself.
+    return `${line}\nRuns keep running until the cap is reached.`;
+  }
+  if (input.kind === "promotion") {
+    const name = workflowName(input);
+    const ver = input.version !== undefined ? `*v${input.version}*` : undefined;
+    const to = input.toEnv ? `*${codeText(input.toEnv)}*` : undefined;
+    if (ver && to) return `${name} is now ${ver} in ${to}.`;
+    if (to) return `${name} is now live in ${to}.`;
+    if (ver) return `${name} is now ${ver}.`;
+    return `${name} was promoted.`;
+  }
+  if (input.kind === "fix_proposal") {
+    const why = input.title ? ` — ${codeText(input.title)}` : "";
+    // The guarantee lives in the message body, not only in the fallback text: someone reading
+    // this on their phone must not have to open the app to learn whether prod already changed.
+    return `${workflowName(input)}${why}\nNothing is applied until you approve it.`;
+  }
+  if (input.kind === "approval_pending") {
+    let line = workflowName(input);
+    if (input.title) line += ` — ${codeText(input.title)}`;
+    // Escalation flavor: name the target on its own line — it is WHO must act, not a label/value.
+    if (input.flavor === "escalation" && input.escalateTo)
+      line += `\nEscalated to *${codeText(input.escalateTo)}*`;
+    return line;
+  }
+  // run_failed — the whole point of the alert: WHAT failed, of WHICH type, at WHICH step.
+  const detail = notificationDetail(input);
+  let line = workflowName(input);
+  if (input.errorType) line += ` — \`${codeText(input.errorType)}\``;
+  if (input.failedNodeId)
+    line += ` at step \`${codeText(input.failedNodeId)}\``;
+  if (!detail) return line;
+  // A short reason with no error type reads better inline ("… — budget_exceeded"); a real
+  // error message gets its own line rather than a run-on headline.
+  if (!input.errorType && detail.length <= 60)
+    return `${line} — ${codeText(detail)}`;
+  return `${line}\n${codeText(detail)}`;
+}
+
+/**
+ * The small grey `context` line: the machine facts a reader wants AVAILABLE but should not have
+ * to read FIRST — the run id (truncated, see `shortId`), the source environment. Undefined when
+ * a kind has nothing of the sort: `fix_proposal` and `promotion` carry the workflow KEY in
+ * `workflowId` and have no run at all, so a "Run …" line there would be a lie.
+ */
+export function notificationContext(
+  input: NotificationInput,
+): string | undefined {
+  if (input.kind === "run_failed" || input.kind === "approval_pending")
+    return `Run \`${codeText(shortId(input.workflowId))}\``;
+  if (input.kind === "promotion")
+    return input.fromEnv
+      ? `Promoted from *${codeText(input.fromEnv)}*`
+      : undefined;
+  if (input.kind === "budget_threshold") {
+    const parts: string[] = [];
+    if (input.thresholdPct !== undefined)
+      parts.push(`Alert threshold ${input.thresholdPct}%`);
+    if (input.spendUsd !== undefined) parts.push("spend includes reserved");
+    return parts.length > 0 ? parts.join(" · ") : undefined;
+  }
+  return undefined;
+}
+
+/**
+ * Slack Block Kit blocks: a header + a prose headline `section` + a small grey `context` line +
+ * an `actions` row of link-buttons (Approve/Reject, View run). Slack renders `blocks` when
+ * present; generic/Teams hooks fall back to the top-level `text` + the flat fields. Buttons
+ * carry absolute `url`s, so no Slack interactivity wiring is needed.
+ *
+ * Deliberately NO `fields` array anywhere and no id-as-link-label (#987): `fields` is what
+ * Slack renders as a two-column form, and the only place a run id appears is the context line,
+ * truncated. The button reads "View run" — a label, not a UUID.
  */
 export function notificationBlocks(
   input: NotificationInput,
   links: NotificationLinks,
 ): { blocks: unknown[]; actions: NotificationAction[] } {
-  const isApproval = input.kind === "approval_pending";
-
   const actions = notificationActions(input, links);
-
-  // The run as an ACTUAL clickable link when we have a URL, not a bare id reference. The
-  // label is escaped so a workflowId with & < > can't break the `<url|label>` markup (the
-  // URL itself is already encodeURIComponent'd by runUrl, so it needs no escaping).
-  // Link label: slackEscape (protects the `<url|label>` markup). Bare fallback: codeText, since
-  // it sits in a backtick code span where a stray backtick would break the span.
-  const runField = links.runUrl
-    ? `<${links.runUrl}|run ${slackEscape(input.workflowId)}>`
-    : `\`${codeText(input.workflowId)}\``;
-  // Only the SHORT key-values go in the 2-column `fields` grid — a workflow key and the run link
-  // are half-width-friendly. The free-text Awaiting/Reason (which can be a full sentence) gets its
-  // own full-width `section` below instead of being crammed into a half-width grid column (which
-  // also left the grid lopsided at an odd field count — the "looks odd" report).
-  // budget_threshold is TENANT-scoped: the grid shows cap + spend, not a workflow/run pair
-  // (the crossing reservation's run is incidental; the alert is about the monthly budget).
-  // promotion is WORKFLOW-scoped: workflow/version + from/to env — there is no run at all.
-  const fields: { type: "mrkdwn"; text: string }[] =
-    input.kind === "budget_threshold"
-      ? [
-          {
-            type: "mrkdwn",
-            text: `*Monthly cap*\n${input.capUsd !== undefined ? usd(input.capUsd) : "—"}`,
-          },
-          {
-            type: "mrkdwn",
-            text: `*Spend (incl. reserved)*\n${input.spendUsd !== undefined ? usd(input.spendUsd) : "—"}`,
-          },
-        ]
-      : input.kind === "promotion"
-        ? [
-            {
-              type: "mrkdwn",
-              text: `*Workflow*\n${input.workflowKey ? `\`${codeText(input.workflowKey)}\`` : "_unnamed_"}`,
-            },
-            {
-              type: "mrkdwn",
-              text: `*Version*\n${input.version !== undefined ? `v${input.version}` : "—"}`,
-            },
-            {
-              type: "mrkdwn",
-              text: `*From*\n${input.fromEnv ? slackEscape(input.fromEnv) : "—"}`,
-            },
-            {
-              type: "mrkdwn",
-              text: `*To*\n${input.toEnv ? slackEscape(input.toEnv) : "—"}`,
-            },
-          ]
-        : [
-            {
-              type: "mrkdwn",
-              text: `*Workflow*\n${input.workflowKey ? `\`${codeText(input.workflowKey)}\`` : "_unnamed_"}`,
-            },
-            { type: "mrkdwn", text: `*Run*\n${runField}` },
-          ];
 
   const blocks: unknown[] = [
     {
@@ -325,30 +437,16 @@ export function notificationBlocks(
         emoji: true,
       },
     },
-    { type: "section", fields },
+    {
+      type: "section",
+      text: { type: "mrkdwn", text: notificationHeadline(input) },
+    },
   ];
-  if (isApproval && input.title)
+  const context = notificationContext(input);
+  if (context)
     blocks.push({
-      type: "section",
-      text: { type: "mrkdwn", text: `*Awaiting*\n${slackEscape(input.title)}` },
-    });
-  // Escalation flavor: name the target as its own full-width line (the comp's
-  // "escalates → @ops-oncall"). Free text, so not crammed into the fields grid.
-  if (isApproval && input.flavor === "escalation" && input.escalateTo)
-    blocks.push({
-      type: "section",
-      text: {
-        type: "mrkdwn",
-        text: `*Escalated to*\n${slackEscape(input.escalateTo)}`,
-      },
-    });
-  if (!isApproval && input.detail)
-    blocks.push({
-      type: "section",
-      text: {
-        type: "mrkdwn",
-        text: `*Reason*\n\`${codeText(input.detail)}\``,
-      },
+      type: "context",
+      elements: [{ type: "mrkdwn", text: context }],
     });
   if (actions.length)
     blocks.push({
@@ -410,10 +508,28 @@ export function notificationFacts(
               ? [{ title: "Version", value: `v${input.version}` }]
               : []),
           ]
-        : [
-            { title: "Workflow", value: input.workflowKey ?? "(unnamed)" },
-            { title: "Run", value: input.workflowId },
-          ];
+        : input.kind === "fix_proposal"
+          ? [
+              // No Run fact: `workflowId` is the KEY here (there is no run), so the old
+              // "Run: pagerduty-triage" was a lie — and the failure it proposes a fix for,
+              // which the reader actually needs, never made it into the card at all.
+              { title: "Workflow", value: input.workflowKey ?? "(unnamed)" },
+              ...(input.title
+                ? [{ title: "Proposed fix for", value: input.title }]
+                : []),
+            ]
+          : [
+              { title: "Workflow", value: input.workflowKey ?? "(unnamed)" },
+              // Teams/email render facts as a table, not a chat line — the FULL id is useful
+              // there (copy/paste into a support thread) and costs no layout.
+              { title: "Run", value: input.workflowId },
+              ...(input.kind === "run_failed" && input.failedNodeId
+                ? [{ title: "Failed step", value: input.failedNodeId }]
+                : []),
+              ...(input.kind === "run_failed" && input.errorType
+                ? [{ title: "Error", value: input.errorType }]
+                : []),
+            ];
   if (isApproval && input.title)
     facts.push({ title: "Awaiting", value: input.title });
   // Flavor facts (plain strings — neither medium wants mrkdwn here).
@@ -421,8 +537,10 @@ export function notificationFacts(
     facts.push({ title: "Reminder", value: `#${input.reminderIndex}` });
   if (isApproval && input.flavor === "escalation" && input.escalateTo)
     facts.push({ title: "Escalated to", value: input.escalateTo });
-  if (!isApproval && input.detail)
-    facts.push({ title: "Reason", value: input.detail });
+  // ONE reason rule for every surface (#987) — a `Reason: failed` that only restates the header
+  // is suppressed here too, so Teams and email can't drift back to it.
+  const reason = notificationDetail(input);
+  if (reason) facts.push({ title: "Reason", value: reason });
   return facts;
 }
 
@@ -494,6 +612,17 @@ export function notificationPayload(
     title: input.title,
     runUrl: links.runUrl,
     actions,
+    // Failure facts for generic hooks (a PagerDuty/Opsgenie bridge routes on these): the same
+    // suppressed-and-truncated reason the humans see, plus the raw type/step.
+    ...(input.kind === "run_failed"
+      ? {
+          ...(notificationDetail(input)
+            ? { detail: notificationDetail(input) }
+            : {}),
+          ...(input.errorType ? { errorType: input.errorType } : {}),
+          ...(input.failedNodeId ? { failedNodeId: input.failedNodeId } : {}),
+        }
+      : {}),
     ...(input.kind === "approval_pending"
       ? {
           approvalUrl: links.approvalUrl,

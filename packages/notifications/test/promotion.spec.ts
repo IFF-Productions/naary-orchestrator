@@ -50,17 +50,46 @@ describe("promotion formatter", () => {
     expect(notificationActions(INPUT, {})).toEqual([]);
   });
 
-  it("Slack blocks: workflow/version/from/to fields grid — no Run field", () => {
+  it("Slack blocks: a prose headline + a context line — never a fields grid (#987)", () => {
     const { blocks } = notificationBlocks(INPUT, LINKS);
-    const fieldsBlock = blocks.find(
-      (b) => (b as { type: string; fields?: unknown }).type === "section",
-    ) as { fields: { text: string }[] };
-    const joined = fieldsBlock.fields.map((f) => f.text).join("\n");
-    expect(joined).toContain("*Workflow*");
-    expect(joined).toContain("*Version*\nv7");
-    expect(joined).toContain("*From*\nsandbox");
-    expect(joined).toContain("*To*\nprod");
-    expect(joined).not.toContain("*Run*");
+    // No block anywhere carries a `fields` array: that is what Slack renders as the
+    // two-column form the redesign removed.
+    expect(
+      blocks.some((b) => (b as { fields?: unknown }).fields !== undefined),
+    ).toBe(false);
+    const section = blocks.find(
+      (b) => (b as { type: string }).type === "section",
+    ) as { text: { text: string } };
+    // The promotion said as a sentence, not as four label/value cells.
+    expect(section.text.text).toBe("*poller* is now *v7* in *prod*.");
+    const context = blocks.find(
+      (b) => (b as { type: string }).type === "context",
+    ) as { elements: { text: string }[] };
+    expect(context.elements[0].text).toBe("Promoted from *sandbox*");
+    // A promotion has NO run — `workflowId` carries the key, so nothing may claim otherwise.
+    expect(JSON.stringify(blocks)).not.toContain("Run ");
+  });
+
+  it("degrades cleanly when version / envs are missing", () => {
+    const only = (input: NotificationInput) =>
+      (
+        notificationBlocks(input, LINKS).blocks.find(
+          (b) => (b as { type: string }).type === "section",
+        ) as { text: { text: string } }
+      ).text.text;
+    expect(only({ ...INPUT, version: undefined })).toBe(
+      "*poller* is now live in *prod*.",
+    );
+    expect(only({ ...INPUT, toEnv: undefined })).toBe("*poller* is now *v7*.");
+    expect(only({ ...INPUT, toEnv: undefined, version: undefined })).toBe(
+      "*poller* was promoted.",
+    );
+    // No source env → no context line rather than an empty grey line.
+    expect(
+      notificationBlocks({ ...INPUT, fromEnv: undefined }, LINKS).blocks.some(
+        (b) => (b as { type: string }).type === "context",
+      ),
+    ).toBe(false);
   });
 
   it("Teams card: From/To/Version facts + a View-workflow OpenUrl action", () => {
@@ -98,6 +127,17 @@ describe("promotion formatter", () => {
     expect(body.toEnv).toBe("prod");
     expect(body.version).toBe(7);
     expect(body.workflowUrl).toBe(LINKS.workflowUrl);
+  });
+
+  it("neutralizes a backtick in the workflow key in the FALLBACK text too", () => {
+    // The top-level `text` is mrkdwn as well (it is the line mobile push and generic hooks
+    // show). An odd backtick there opens a code span that swallows the rest of the line —
+    // including the link — so the key is codeText'd, not merely escaped. Asserted on a
+    // non-run_failed kind because the shared `wf` interpolation serves EVERY kind.
+    const text = notificationText({ ...INPUT, workflowKey: "poll`er" }, LINKS);
+    expect(text).not.toContain("poll`er");
+    expect(text).toContain('"pollʼer"');
+    expect(text).toContain(LINKS.workflowUrl as string);
   });
 
   it("escapes env names in Slack mrkdwn (a hostile env name can't inject markup)", () => {
