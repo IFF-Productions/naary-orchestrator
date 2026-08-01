@@ -25,7 +25,8 @@ export class ConnectionResponse {
   @ApiProperty({
     example: "https://api.github.com",
     description:
-      "https URL for MCP/HTTP connections, or a non-secret display host for DB connections.",
+      "An https URL when this server calls the connection over HTTP (MCP/app servers), otherwise a " +
+      "non-secret display label — the real endpoint and its credential ride in `token`.",
   })
   serverUrl!: string;
   @ApiProperty({
