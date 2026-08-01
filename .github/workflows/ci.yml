@@ -67,6 +67,13 @@ jobs:
       - name: Check for raw control bytes in source
         run: pnpm check:control-bytes
 
+      # Every .mjs here is manual tooling, and CI checks each script's committed OUTPUT rather
+      # than the script — so extract-openapi-fixtures.mjs stayed a SyntaxError for over a day and
+      # across a release (#950/#984) with nothing reporting it. Parsing costs ~1s. See #985 and
+      # scripts/check-mjs-syntax.mjs, which explains why this is not `node --check $(git ls-files)`.
+      - name: Check .mjs scripts parse
+        run: pnpm check:mjs-syntax
+
       # Regenerate the OpenAPI spec from the API's controllers/DTOs and fail if the
       # committed apps/api/openapi.json drifts. The web's typed client
       # (apps/web/src/lib/api/schema.d.ts) is a deterministic function of that spec
