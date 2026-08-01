@@ -38,5 +38,19 @@ These tests skip the Firebase browser login. `global-setup.ts`:
 - `navigation` — sidebar → Workflows/Runs/Schedules (+ real data through the proxy).
 - `canvas` — add a node, open the config modal, delete it.
 - `runs` — start a run → paused at approval → approve → completed (the durable loop).
+- `fix-with-ai` — "Fix with AI" on a failed run → the canvas at `?fix=<runId>` with the failure
+  written into the AI panel (#995).
+
+## Stubbed specs (`fix-with-ai`)
+
+Most specs here drive REAL data through the stack. `fix-with-ai` deliberately does not: it stubs
+every response it reads with `page.route`, because what it guards is the SPA's behaviour **while
+it waits** — a panel that must open on arrival, a box that must be read-only mid-wait, a stage
+that must terminate. An instantly-fulfilled route gives no observable window, so those assertions
+would be vacuous. The stubs sleep before fulfilling, which makes the intermediate states real.
+
+If you add assertions there, keep two rules: the delays are lower bounds (a slow machine only
+widens the window, never narrows it), and every new assertion must be shown to FAIL — break the
+app or the stub, watch it go red, revert.
 
 CI wiring (start the stack, then run this) is a follow-up.
