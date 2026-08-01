@@ -8,7 +8,9 @@ How to exercise SAML single sign-on end to end against a real identity provider.
 
 **LDAP is not implemented.** It appears in `docs/ROADMAP-ENTERPRISE.md` as a planned XL item ("SSO SAML
 & LDAP") and in the n8n catalog as `status: 'planned'`, and nowhere in the code. There is nothing to
-test yet — see [What LDAP would take](#what-ldap-would-take) at the end.
+test yet, and [design/LDAP-DIRECTORY.md](./design/LDAP-DIRECTORY.md) argues we should build SCIM over
+this SAML path instead of a directory sync — see [What LDAP would take](#what-ldap-would-take) at the
+end for the short version.
 
 ---
 
@@ -160,7 +162,9 @@ The two worth doing carefully, because they're the ones a subtle bug would hide 
 
 ## What LDAP would take
 
-Not implemented, so there's nothing to test. For scoping (it's an XL roadmap item):
+Not implemented, so there's nothing to test. **The full argument now lives in
+[design/LDAP-DIRECTORY.md](./design/LDAP-DIRECTORY.md)**, which recommends *not* building a directory
+sync; the sketch below is the shape it would take if the decisions there land the other way:
 
 - A directory **sync** rather than a login redirect — LDAP/AD is a queried directory, so it means a
   scheduled or on-demand sync of users and groups, not an assertion arriving at an ACS.
