@@ -47,10 +47,28 @@ test("export downloads a graph JSON, and import loads it back", async ({
   );
 
   // --- Import: write a renamed copy, load it, assert the name field updates ---
+  //
+  // The imported graph is deliberately DIFFERENT from what is on the canvas — one extra,
+  // deliberately disconnected node. Re-importing the identical graph would make "3 nodes before"
+  // and "3 nodes expected after" the same number, so a NO-OP import would satisfy the count: and
+  // a no-op is precisely the regression in reach here, since `setName` (`useWorkflowActions.ts`)
+  // runs downstream of the `setNodes`/`setEdges` try/catch and would survive it doing nothing.
+  // A node the canvas did not previously have cannot appear unless the import really applied.
+  const PROBE = "e2e-import-probe";
   const file = join(mkdtempSync(join(tmpdir(), "naary-e2e-")), "flow.json");
   writeFileSync(
     file,
-    JSON.stringify({ ...exported, name: "E2E Imported Flow" }),
+    JSON.stringify({
+      ...exported,
+      name: "E2E Imported Flow",
+      graph: {
+        ...exported.graph,
+        nodes: [
+          ...exported.graph.nodes,
+          { id: PROBE, type: "set", config: { fields: {} } },
+        ],
+      },
+    }),
   );
   await page.locator('input[type="file"]').setInputFiles(file);
 
@@ -61,6 +79,10 @@ test("export downloads a graph JSON, and import loads it back", async ({
   // The name field and the toast are set AFTER `setNodes`/`setEdges` succeed, so they do prove
   // `decompileGraph` did not throw — but they say nothing about what is ON SCREEN. `toFlowNodes`
   // returning nothing leaves the user staring at a blank canvas with a correct title, which is
-  // exactly the state the empty-graph measurement above produced. Assert the graph came BACK.
-  await expect(page.locator(".react-flow__node")).toHaveCount(onCanvas);
+  // exactly the state the empty-graph measurement above produced. Assert the graph came BACK,
+  // and that it is the IMPORTED one.
+  await expect(
+    page.locator(`.react-flow__node[data-id="${PROBE}"]`),
+  ).toBeVisible();
+  await expect(page.locator(".react-flow__node")).toHaveCount(onCanvas + 1);
 });
