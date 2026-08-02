@@ -2,7 +2,6 @@ import { randomBytes, randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { All, BadRequestException, Controller, Req, Res } from "@nestjs/common";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
-import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { ApiExcludeController } from "@nestjs/swagger";
 import type { GraphDef } from "@naary/dsl";
 import { ApiTokenService } from "../auth/api-token.service";
@@ -52,10 +51,49 @@ function rpcError(
   code: number,
   message: string,
   res: ServerResponse,
+  /** The failing request's `id`, echoed so a client can correlate the error with the call it
+   *  made. JSON-RPC allows null only when the id could not be determined — and an
+   *  uncorrelatable error is part of why #1063 surfaced to the user as an opaque
+   *  "probe failed" with nothing to act on. */
+  id: string | number | null = null,
 ): void {
   res.writeHead(status, { "content-type": "application/json" });
-  res.end(
-    JSON.stringify({ jsonrpc: "2.0", error: { code, message }, id: null }),
+  res.end(JSON.stringify({ jsonrpc: "2.0", error: { code, message }, id }));
+}
+
+/** The `id` of a JSON-RPC request body (or of the first element of a batch), when it has one. */
+function requestId(body: unknown): string | number | null {
+  const first = Array.isArray(body) ? body[0] : body;
+  if (!first || typeof first !== "object") return null;
+  const id = (first as { id?: unknown }).id;
+  return typeof id === "string" || typeof id === "number" ? id : null;
+}
+
+/**
+ * Is this POST body an `initialize` — for ROUTING purposes only (#1063)?
+ *
+ * Deliberately a METHOD check, not the SDK's `isInitializeRequest`. That helper is a strict
+ * full-schema parse (`InitializeRequestSchema.safeParse`) requiring `params.protocolVersion`,
+ * `params.capabilities` AND `params.clientInfo{name,version}`. A version-negotiation probe is
+ * minimal by design, so it failed that parse and we told the client to "send an `initialize`
+ * request first" — advice that cannot be acted on, because it had just sent one. No MCP client
+ * could complete a handshake.
+ *
+ * Validation is not skipped, it is DELEGATED: `StreamableHTTPServerTransport.handleRequest`
+ * validates the initialize itself and answers a malformed one with a spec-compliant JSON-RPC
+ * error naming the offending field — a message the client can actually fix. Routing decides
+ * WHERE the request goes; the transport decides whether it is well-formed.
+ *
+ * Batches count: JSON-RPC batching is legal in protocol 2025-03-26 (dropped in 2025-06-18), and
+ * a batched initialize is still an initialize to a router.
+ */
+function looksLikeInitialize(body: unknown): boolean {
+  const messages = Array.isArray(body) ? body : [body];
+  return messages.some(
+    (m) =>
+      !!m &&
+      typeof m === "object" &&
+      (m as { method?: unknown }).method === "initialize",
   );
 }
 
@@ -163,15 +201,20 @@ export class McpController {
     }
 
     // No session id. Only a POST that is an `initialize` may open one; a bare GET/DELETE (or a
-    // non-initialize POST) has nothing to dispatch to.
-    if (method !== "POST" || !isInitializeRequest(req.body)) {
+    // non-initialize POST) has nothing to dispatch to. The check is on the METHOD only — see
+    // looksLikeInitialize for why the SDK's strict schema helper cannot be the gate (#1063).
+    if (method !== "POST" || !looksLikeInitialize(req.body)) {
       rpcError(
         400,
-        -32000,
+        // Invalid Request — the standard code for a well-formed JSON-RPC message that cannot be
+        // processed in this state, rather than the server-defined -32000 this used to send.
+        -32600,
         method === "POST"
           ? "Missing mcp-session-id — send an `initialize` request first to open a session."
-          : "Missing mcp-session-id header.",
+          : "Missing mcp-session-id header — open a session with an `initialize` POST, then send " +
+              "its `mcp-session-id` on every later request (GET opens the stream for an EXISTING session).",
         res,
+        requestId(req.body),
       );
       return;
     }
@@ -257,6 +300,26 @@ export class McpController {
 
     await server.connect(transport);
     await transport.handleRequest(req, res, req.body);
+
+    // If the SDK REJECTED the initialize (malformed params — the case routing now lets through,
+    // #1063), `onsessioninitialized` never fired, so nothing registered this transport and its
+    // `onclose` teardown would never run either. Close it here or a client retrying a bad
+    // handshake allocates a server per attempt.
+    // try/catch, not `.catch()` — the response has already been written by this point, so a
+    // throw here (including from a close() that doesn't return a promise) would surface as an
+    // unhandled rejection on a request the client already considers answered.
+    if (!transport.sessionId) {
+      try {
+        await transport.close();
+      } catch {
+        /* best-effort teardown */
+      }
+      try {
+        await server.close();
+      } catch {
+        /* best-effort teardown */
+      }
+    }
   }
 
   /** The `mcp-session-id` request header, normalized to a single string (or undefined). */
