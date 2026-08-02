@@ -10,8 +10,10 @@
  * RESOLUTION failure, and a type-only import still needs the declarations.
  *
  * The stories pass real `notificationEmail()` output into this prop and ARE typechecked
- * against the real type (`tsconfig.storybook.json`, which maps `@naary/*` to source), so the
- * two shapes are still checked against each other — at the story boundary, like the siblings.
+ * against the real type (`tsconfig.storybook.json`, which maps `@naary/*` to source), so drift
+ * is still caught at the story boundary, like the siblings. Precisely: that is an assignability
+ * check, so it catches a RENAMED or REMOVED field; a field added to `NotificationEmail` would
+ * not fail here (excess-property checking does not apply to a call result).
  */
 type NotificationEmail = { subject: string; text: string; html: string };
 
