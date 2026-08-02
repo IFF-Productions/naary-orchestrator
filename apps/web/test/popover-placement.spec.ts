@@ -107,14 +107,25 @@ describe("placeFixedPopover", () => {
     expect(p.left).toBe(8);
   });
 
-  it("does not report a negative maxHeight for an anchor already off the bottom", () => {
+  it("keeps the menu whole and on-screen when its anchor is already past the fold", () => {
+    // A row scrolled below the viewport: `top: anchor.bottom + 4` is 948 in an 844px phone.
+    //
+    // This used to assert `maxHeight >= 0` and `top >= 8`, which the implementation's own
+    // `Math.max(0, room)` and `clamp(..., gutter, ...)` GUARANTEE — no input can violate either.
+    // Verified vacuous by forcing `side = "below"` (the pre-#511 bug): the function then returns
+    // `maxHeight: 0`, a menu with no height at all, and both old assertions stayed green. An
+    // invisible menu is the very symptom #511 was about, so assert that it is USABLE.
     const p = placeFixedPopover(
       { top: 900, bottom: 944, left: 331, right: 375 },
       TWO_ITEM_MENU,
       PHONE,
     );
-    expect(p.maxHeight).toBeGreaterThanOrEqual(0);
+    expect(p.side).toBe("above");
+    // Room for BOTH items — "Update value…" and "Delete" — not merely "not negative".
+    expect(p.maxHeight).toBeGreaterThanOrEqual(TWO_ITEM_MENU.height);
+    // ...and the whole box sits inside the gutters, top edge and bottom edge.
     expect(p.top).toBeGreaterThanOrEqual(8);
+    expect(p.top + TWO_ITEM_MENU.height).toBeLessThanOrEqual(PHONE.height - 8);
   });
 });
 

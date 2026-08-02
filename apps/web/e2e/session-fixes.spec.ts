@@ -101,9 +101,15 @@ test("run detail: the 'Run input' panel shows the payload that started the run",
   // Let the run settle so the timeline is stable. The default step selection FOLLOWS
   // the run (state.currentNodeId), which on a completed run is the end node — so we
   // can't rely on catching the sub-second window where the Start node is current.
-  await expect(page.getByText("Completed").first()).toBeVisible({
-    timeout: 15_000,
-  });
+  //
+  // This settle gate used to be `getByText("Completed")`, which did not settle anything: a plain
+  // string is a case-insensitive SUBSTRING, and the Execution log's `"Activity completed"` rows
+  // (`apps/api/src/executions/executions.helpers.ts:177`) satisfy it from the first activity
+  // onward. The gate released MID-RUN and the click below raced the very currentNodeId movement
+  // this comment says it is avoiding — reintroducing the flake, silently.
+  await expect(
+    page.getByText("Run completed", { exact: true }).first(),
+  ).toBeVisible({ timeout: 15_000 });
 
   // Explicitly select the Start (trigger) step. Its panel shows the entry payload as
   // "Trigger input" — the start node PUBLISHES the run input as its own output, like every

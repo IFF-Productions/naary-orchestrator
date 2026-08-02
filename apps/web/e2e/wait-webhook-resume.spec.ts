@@ -37,7 +37,23 @@ test("wait(webhook): a run pauses, then its signed resume URL completes it", asy
   expect(res.status()).toBe(202);
 
   // The interpreter resumes past the wait node and the run finishes.
-  await expect(page.getByText("Completed").first()).toBeVisible({
-    timeout: 20_000,
-  });
+  //
+  // NOT `getByText("Completed")`, which is what this line used to say. Playwright treats a plain
+  // string as a CASE-INSENSITIVE SUBSTRING, and the Execution log renders a `"Activity completed"`
+  // row per activity (`apps/api/src/executions/executions.helpers.ts:177`) — including the
+  // start-up activities that run before the interpreter ever reaches the wait node. So the old
+  // assertion was already satisfied back at line 22, before the POST above had happened.
+  //
+  // Measured: delete the POST entirely — the run then parks in `awaiting_webhook` forever — and
+  // the old assertion still passed, in 3.3s. The signed-resume path could be wholly broken and
+  // this spec, the only guard on the product's stated differentiator, stayed green.
+  //
+  // `"Run completed"` is emitted only by the terminal hero (`run-detail/StatusHero.tsx`) and the
+  // terminal log event, both of which require the run to have actually finished.
+  await expect(
+    page.getByText("Run completed", { exact: true }).first(),
+  ).toBeVisible({ timeout: 20_000 });
+  // ...and the park state was LEFT, not merely joined by a later row. This is the half that says
+  // "resumed" rather than "reached some terminal state".
+  await expect(page.getByText("Waiting for a webhook")).toHaveCount(0);
 });

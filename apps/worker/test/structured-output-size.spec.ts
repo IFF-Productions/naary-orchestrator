@@ -102,22 +102,38 @@ describe("assertStructuredOutputSize", () => {
 describe("the guard runs AFTER the usage is recorded", () => {
   const activityDir = join(__dirname, "../src/temporal/activities");
 
+  // How many `recordUsage({` call sites each file is KNOWN to have. `agent.ts` has two: the
+  // guardrail-blocked branch bills and then fails non-retryably, and the main path bills every
+  // call. Pinned because the ordering check below is only as good as its knowledge of them —
+  // see the comment in the test.
   it.each([
-    ["agent.ts", "runAgent"],
-    ["code-agent.ts", "runCodeAgent"],
-  ])("%s bills before it can reject", (file) => {
+    ["agent.ts", 2],
+    ["code-agent.ts", 1],
+  ])("%s bills before it can reject", (file, ledgerSites) => {
     const src = readFileSync(join(activityDir, file), "utf8");
-    const ledger = src.indexOf("recordUsage({");
+    // `lastIndexOf`, NOT `indexOf`. This used to take the FIRST `recordUsage({` in the file, which
+    // in agent.ts is the rarely-taken guardrail-blocked branch at the top — not the ledger write
+    // that bills every call. Measured: move the main ledger write BELOW the guard, which is the
+    // one regression this whole file exists to catch and which loses the spend on every rejected
+    // oversized output, and the old assertion stayed GREEN because the guardrail branch still sat
+    // above it. The invariant is that the guard follows EVERY ledger write, so compare with the
+    // last one.
+    const ledger = src.lastIndexOf("recordUsage({");
     const guard = src.indexOf("assertStructuredOutputSize(");
 
     expect(ledger, `${file}: no recordUsage call found`).toBeGreaterThan(-1);
+    expect(
+      src.split("recordUsage({").length - 1,
+      `${file}: the number of recordUsage call sites changed — re-read the ordering rule below ` +
+        `and update this count deliberately`,
+    ).toBe(ledgerSites);
     expect(
       guard,
       `${file}: the size guard is missing entirely`,
     ).toBeGreaterThan(-1);
     expect(
       guard,
-      `${file}: the guard must come AFTER recordUsage, or a rejected oversized output loses the spend`,
+      `${file}: the guard must come AFTER every recordUsage, or a rejected oversized output loses the spend`,
     ).toBeGreaterThan(ledger);
   });
 });
