@@ -35,6 +35,12 @@ name: Deploy
 #   OTEL_EXPORTER_OTLP_ENDPOINT / OTEL_EXPORTER_OTLP_HEADERS / OTEL_EXPORTER_OTLP_PROTOCOL —
 #   backend (api/worker) OTLP metrics export (Datadog/OTLP, #462), same box-.env-override
 #   path as the Sentry env; unset ⇒ OTLP export stays OFF. HEADERS carries the intake auth.
+#   ATLASSIAN_OAUTH_CLIENT_ID / _CLIENT_SECRET / _REDIRECT_URI / _SCOPES — the platform
+#   Atlassian 3LO app (docs/design/APP-AUTH.md §3b), same box-.env-override path. CLIENT_ID
+#   and CLIENT_SECRET are BOTH required for the connection type to appear; REDIRECT_URI must
+#   match the callback registered on the Atlassian app EXACTLY, and carries the `/api` prefix
+#   the SPA's nginx strips before proxying — e.g. https://<host>/api/atlassian/oauth/callback.
+#   Setting REDIRECT_URI alone does nothing: with no client id the flow stays off.
 #
 # Deploys via a GITHUB-HOSTED runner (unlike ci.yml/e2e.yml): it only needs SSH egress,
 # and keeping prod credentials off the shared self-hosted runner is the safer split.
@@ -238,6 +244,18 @@ jobs:
           OTEL_EXPORTER_OTLP_ENDPOINT: ${{ secrets.OTEL_EXPORTER_OTLP_ENDPOINT }}
           OTEL_EXPORTER_OTLP_HEADERS: ${{ secrets.OTEL_EXPORTER_OTLP_HEADERS }}
           OTEL_EXPORTER_OTLP_PROTOCOL: ${{ secrets.OTEL_EXPORTER_OTLP_PROTOCOL }}
+          # Atlassian 3LO (docs/design/APP-AUTH.md §3b) — the platform app's credentials, ONE per
+          # deployment. docker-compose.yml already declares all four; until now the ONLY way to
+          # supply them was to hand-edit /opt/naary/.env on the box, so a repo secret with any of
+          # these names was silently inert. That is the same failure the SENTRY_* block above was
+          # created to fix, and it is worth stating plainly: declaring a variable in compose does
+          # not make it settable — this list is what makes it settable.
+          # REDIRECT_URI is a public URL rather than a secret, but rides here because this is the
+          # channel that reaches the box's compose without being written to a file on it.
+          ATLASSIAN_OAUTH_CLIENT_ID: ${{ secrets.ATLASSIAN_OAUTH_CLIENT_ID }}
+          ATLASSIAN_OAUTH_CLIENT_SECRET: ${{ secrets.ATLASSIAN_OAUTH_CLIENT_SECRET }}
+          ATLASSIAN_OAUTH_REDIRECT_URI: ${{ secrets.ATLASSIAN_OAUTH_REDIRECT_URI }}
+          ATLASSIAN_OAUTH_SCOPES: ${{ secrets.ATLASSIAN_OAUTH_SCOPES }}
           # codeAgent sandbox images, DIGEST-pinned by the sandbox-images job. These are not
           # secrets — they are here for the same reason the Sentry env is: this is the channel
           # that reaches the box's compose without ever being written to a file on it.
@@ -267,7 +285,7 @@ jobs:
             deploy/sandbox \
             | $SSH "mkdir -p /opt/naary && tar xzf - -C /opt/naary"
 
-          $SSH "DEPLOY_REF='$DEPLOY_REF' IMAGE_BASE='$IMAGE_BASE' GHCR_TOKEN='$GHCR_TOKEN' GHCR_USER='$GHCR_USER' SENTRY_DSN='$SENTRY_DSN' SENTRY_DSN_API='$SENTRY_DSN_API' SENTRY_DSN_WORKER='$SENTRY_DSN_WORKER' SENTRY_TRACES_SAMPLE_RATE='$SENTRY_TRACES_SAMPLE_RATE' SENTRY_PROFILES_SAMPLE_RATE='$SENTRY_PROFILES_SAMPLE_RATE' OTEL_EXPORTER_OTLP_ENDPOINT='$OTEL_EXPORTER_OTLP_ENDPOINT' OTEL_EXPORTER_OTLP_HEADERS='$OTEL_EXPORTER_OTLP_HEADERS' OTEL_EXPORTER_OTLP_PROTOCOL='$OTEL_EXPORTER_OTLP_PROTOCOL' SANDBOX_IMAGE_CLAUDE='$SANDBOX_IMAGE_CLAUDE' SANDBOX_IMAGE_CURSOR='$SANDBOX_IMAGE_CURSOR' SANDBOX_IMAGE_COPILOT='$SANDBOX_IMAGE_COPILOT' SANDBOX_IMAGE_GEMINI='$SANDBOX_IMAGE_GEMINI' DEPLOY_IMAGE_KEEP_RELEASES='$DEPLOY_IMAGE_KEEP_RELEASES' bash -s" <<'REMOTE'
+          $SSH "DEPLOY_REF='$DEPLOY_REF' IMAGE_BASE='$IMAGE_BASE' GHCR_TOKEN='$GHCR_TOKEN' GHCR_USER='$GHCR_USER' SENTRY_DSN='$SENTRY_DSN' SENTRY_DSN_API='$SENTRY_DSN_API' SENTRY_DSN_WORKER='$SENTRY_DSN_WORKER' SENTRY_TRACES_SAMPLE_RATE='$SENTRY_TRACES_SAMPLE_RATE' SENTRY_PROFILES_SAMPLE_RATE='$SENTRY_PROFILES_SAMPLE_RATE' OTEL_EXPORTER_OTLP_ENDPOINT='$OTEL_EXPORTER_OTLP_ENDPOINT' OTEL_EXPORTER_OTLP_HEADERS='$OTEL_EXPORTER_OTLP_HEADERS' OTEL_EXPORTER_OTLP_PROTOCOL='$OTEL_EXPORTER_OTLP_PROTOCOL' ATLASSIAN_OAUTH_CLIENT_ID='$ATLASSIAN_OAUTH_CLIENT_ID' ATLASSIAN_OAUTH_CLIENT_SECRET='$ATLASSIAN_OAUTH_CLIENT_SECRET' ATLASSIAN_OAUTH_REDIRECT_URI='$ATLASSIAN_OAUTH_REDIRECT_URI' ATLASSIAN_OAUTH_SCOPES='$ATLASSIAN_OAUTH_SCOPES' SANDBOX_IMAGE_CLAUDE='$SANDBOX_IMAGE_CLAUDE' SANDBOX_IMAGE_CURSOR='$SANDBOX_IMAGE_CURSOR' SANDBOX_IMAGE_COPILOT='$SANDBOX_IMAGE_COPILOT' SANDBOX_IMAGE_GEMINI='$SANDBOX_IMAGE_GEMINI' DEPLOY_IMAGE_KEEP_RELEASES='$DEPLOY_IMAGE_KEEP_RELEASES' bash -s" <<'REMOTE'
           set -euo pipefail
           cd /opt/naary
           # Ensure swap exists BEFORE the rolling replace. docker-rollout scales a service
@@ -328,6 +346,15 @@ jobs:
           [ -n "${OTEL_EXPORTER_OTLP_ENDPOINT:-}" ] || unset OTEL_EXPORTER_OTLP_ENDPOINT
           [ -n "${OTEL_EXPORTER_OTLP_HEADERS:-}" ] || unset OTEL_EXPORTER_OTLP_HEADERS
           [ -n "${OTEL_EXPORTER_OTLP_PROTOCOL:-}" ] || unset OTEL_EXPORTER_OTLP_PROTOCOL
+          # Atlassian 3LO — same rule, and it matters MORE here than for Sentry. compose reads
+          # `${ATLASSIAN_OAUTH_CLIENT_ID:-}`, so a set-but-EMPTY shell var wins over the box .env
+          # and blanks it; the API then treats a blank client id as "Atlassian not configured" and
+          # every consent attempt 404s, with a box .env that plainly contains the credential. Only
+          # the secrets you actually set may override.
+          [ -n "${ATLASSIAN_OAUTH_CLIENT_ID:-}" ] || unset ATLASSIAN_OAUTH_CLIENT_ID
+          [ -n "${ATLASSIAN_OAUTH_CLIENT_SECRET:-}" ] || unset ATLASSIAN_OAUTH_CLIENT_SECRET
+          [ -n "${ATLASSIAN_OAUTH_REDIRECT_URI:-}" ] || unset ATLASSIAN_OAUTH_REDIRECT_URI
+          [ -n "${ATLASSIAN_OAUTH_SCOPES:-}" ] || unset ATLASSIAN_OAUTH_SCOPES
           export SENTRY_RELEASE="${SENTRY_RELEASE:-$DEPLOY_REF}"
 
           # ── codeAgent sandbox images ──────────────────────────────────────────────────────────
