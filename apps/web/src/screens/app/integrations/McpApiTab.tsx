@@ -170,9 +170,11 @@ export function McpApiTab({
           }}
         >
           Point an MCP client (Claude Desktop, Cursor, an SDK agent) at this
-          endpoint with an API token. Every saved workflow in{" "}
-          <EnvChip slug={env} /> is exposed as its own <code>run_*</code> tool,
-          alongside the base tools.
+          endpoint with an API token. The base tools are always available. A
+          workflow in <EnvChip slug={env} /> also gets its own{" "}
+          <code>run_*</code> tool when it OPTS IN — its start node must be an{" "}
+          <b>MCP Server Trigger</b>. Add or remove that node and reconnect the
+          client to pick the change up.
         </div>
         <div
           className="mono"
