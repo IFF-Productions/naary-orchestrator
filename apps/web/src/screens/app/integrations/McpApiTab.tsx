@@ -174,7 +174,7 @@ export function McpApiTab({
           workflow in <EnvChip slug={env} /> also gets its own{" "}
           <code>run_*</code> tool when it OPTS IN — its start node must be an{" "}
           <b>MCP Server Trigger</b>. Add or remove that node and reconnect the
-          client to pick the change up.
+          client to pick up the change.
         </div>
         <div
           className="mono"

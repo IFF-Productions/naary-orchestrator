@@ -61,11 +61,19 @@ function rpcError(
   res.end(JSON.stringify({ jsonrpc: "2.0", error: { code, message }, id }));
 }
 
-/** The `id` of a JSON-RPC request body (or of the first element of a batch), when it has one. */
+/**
+ * The `id` to echo on a pre-transport error — that of a SINGLE request, or `null`.
+ *
+ * A JSON-RPC batch deliberately yields null: this path emits ONE error object, but a batch
+ * carries N messages with N ids, so echoing the first would tell the client that message #1
+ * failed when the rejection was about the batch as a whole. A mis-correlated id is worse than
+ * an absent one — null is exactly what the spec reserves for "the id could not be determined".
+ * (If this path ever answers batches per-message, that array of errors can carry real ids.)
+ */
 function requestId(body: unknown): string | number | null {
-  const first = Array.isArray(body) ? body[0] : body;
-  if (!first || typeof first !== "object") return null;
-  const id = (first as { id?: unknown }).id;
+  if (Array.isArray(body)) return null;
+  if (!body || typeof body !== "object") return null;
+  const id = (body as { id?: unknown }).id;
   return typeof id === "string" || typeof id === "number" ? id : null;
 }
 

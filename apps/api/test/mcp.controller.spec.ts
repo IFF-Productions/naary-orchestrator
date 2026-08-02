@@ -350,6 +350,23 @@ describe("McpController — Streamable HTTP session lifecycle (#469)", () => {
     expect(server.close).toHaveBeenCalled();
   });
 
+  it("a rejected BATCH echoes no id — one error cannot speak for N messages", async () => {
+    // Echoing the first element's id would report "message #1 failed" when the rejection is
+    // about the batch as a whole. null is what JSON-RPC reserves for an undeterminable id.
+    const res = new FakeRes();
+    await controller.handle(
+      req("POST", {
+        body: [
+          { jsonrpc: "2.0", id: 11, method: "tools/list" },
+          { jsonrpc: "2.0", id: 12, method: "tools/call" },
+        ],
+      }) as never,
+      res as unknown as ServerResponse,
+    );
+    const body = JSON.parse(res.body) as { id: unknown };
+    expect(body.id).toBeNull();
+  });
+
   it("the session-less non-initialize error is spec-shaped: echoes the id, Invalid Request", async () => {
     // `id: null` is uncorrelatable, and -32000 is a server-defined code for what is squarely
     // JSON-RPC Invalid Request. Both are why the client could only report an opaque failure.
