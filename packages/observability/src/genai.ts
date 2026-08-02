@@ -10,7 +10,7 @@
  *   - `gen_ai.system` is already DEPRECATED in favor of `gen_ai.provider.name`. We emit BOTH,
  *     because backends that ingested the 1.36-era conventions still key dashboards on the old
  *     name. Drop `gen_ai.system` once our backends read `gen_ai.provider.name`.
- *   - `gen_ai.operation.name` well-known values used here: `chat`, `execute_tool`.
+ *   - `gen_ai.operation.name` well-known values used here: `chat`, `embeddings`, `execute_tool`.
  *   - `gen_ai.tool.type` well-known values are `function` / `extension` / `datastore`. An MCP tool
  *     is exposed to the model as a callable function, so it is `function` — we deliberately do NOT
  *     invent a value (e.g. "mcp") inside the reserved `gen_ai.` namespace.
@@ -39,8 +39,10 @@ import { setSpanAttributes, withSpan, type SpanAttrs } from "./spans";
 /** The semantic-conventions release whose `gen_ai` namespace this mapping targets (see header). */
 export const GEN_AI_SEMCONV_VERSION = "1.41.0";
 
-/** `gen_ai.operation.name` values we emit. `chat` = an LLM call; `execute_tool` = a tool call. */
-export type GenAiOperation = "chat" | "execute_tool";
+/** `gen_ai.operation.name` values we emit. `chat` = an LLM call; `embeddings` = an embedding call
+ *  (input-only: it reports input tokens and no output tokens); `execute_tool` = a tool call. All
+ *  three are well-known convention values — we never invent one inside the `gen_ai.` namespace. */
+export type GenAiOperation = "chat" | "embeddings" | "execute_tool";
 
 /**
  * Map OUR provider id to the convention's `gen_ai.provider.name` well-known value. Only `google`

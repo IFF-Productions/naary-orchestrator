@@ -2,10 +2,17 @@
 import { randomUUID } from "node:crypto";
 import { ApplicationFailure } from "@temporalio/activity";
 import { getDefaultEnvironmentId, getPrisma } from "@naary/db";
+import { withGenAiSpan } from "@naary/observability";
 import { getObjectStore, resolveClaimChecks } from "@naary/storage";
 import { computeCost } from "@naary/usage";
 import { activityRuns } from "../../metrics";
-import { type AgentMeta, aiSdk, getCredentials, openaiSdk } from "./shared";
+import {
+  type AgentMeta,
+  aiSdk,
+  estimateTokens,
+  getCredentials,
+  openaiSdk,
+} from "./shared";
 import { __agentDeps } from "./agent";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -26,10 +33,14 @@ export const __ragDeps = {
       environmentId ?? (await getDefaultEnvironmentId(tenantId)),
       "openai",
     ),
+  // NOTE (#1058): these report `tokens: undefined` when the provider omits `usage` — they do NOT
+  // coerce it to 0. A 0 here would flow straight into the ledger as a silently-free call, the exact
+  // failure CLAUDE.md Tier-1 rule 6 exists to prevent. The callers turn "nothing reported" into the
+  // fail-safe ESTIMATE (see resolveEmbedTokens).
   embedOne: async (
     apiKey: string,
     value: string,
-  ): Promise<{ embedding: number[]; tokens: number }> => {
+  ): Promise<{ embedding: number[]; tokens: number | undefined }> => {
     const [{ createOpenAI }, { embed }] = await Promise.all([
       openaiSdk(),
       aiSdk(),
@@ -38,12 +49,12 @@ export const __ragDeps = {
       model: createOpenAI({ apiKey }).embedding(EMBED_MODEL),
       value,
     });
-    return { embedding: r.embedding, tokens: r.usage?.tokens ?? 0 };
+    return { embedding: r.embedding, tokens: r.usage?.tokens };
   },
   embedManyTexts: async (
     apiKey: string,
     values: string[],
-  ): Promise<{ embeddings: number[][]; tokens: number }> => {
+  ): Promise<{ embeddings: number[][]; tokens: number | undefined }> => {
     const [{ createOpenAI }, { embedMany }] = await Promise.all([
       openaiSdk(),
       aiSdk(),
@@ -52,9 +63,56 @@ export const __ragDeps = {
       model: createOpenAI({ apiKey }).embedding(EMBED_MODEL),
       values,
     });
-    return { embeddings: r.embeddings, tokens: r.usage?.tokens ?? 0 };
+    return { embeddings: r.embeddings, tokens: r.usage?.tokens };
   },
 };
+
+/**
+ * BILLING FAIL-SAFE (CLAUDE.md Tier-1 rule 6, #1058) — the embedding twin of the agent path's
+ * `estimated ? estimateTokens(…) : real` in agent.ts. The provider (or the AI-SDK v6
+ * usage-undefined bug) may report no usage for a call that really happened; recording 0 tokens
+ * would bill the tenant nothing and under-report the ledger, with nothing anywhere to signal it.
+ *
+ * Falls back to the SAME `estimateTokens` char/4 helper the agent + codeAgent paths use — one
+ * mechanism for one rule. Embeddings are input-only, so only its `inputTokens` half is taken (its
+ * `outputTokens` floors at 1, which would be wrong here — `recordEmbedUsage` books 0 output).
+ *
+ * `!reported` deliberately treats a reported literal 0 as "nothing measured", the same shape as
+ * agent.ts's `!(real.inputTokens || real.outputTokens)`: a provider that embedded real text and
+ * answered "0 tokens" has not measured it either. Do not "fix" this to `reported === undefined`.
+ *
+ * ZERO IS UNREACHABLE HERE, by construction: both callers early-return before any ledger write when
+ * there is nothing to embed (no non-blank chunk / a blank query), and `estimateTokens` floors at 1
+ * token. So no path ledgers an embedding at zero — "even an estimate is impossible" cannot arise,
+ * and a silent 0 is the fallback nowhere.
+ *
+ * PRIVACY: `texts` is measured and discarded. Only the resulting COUNT leaves this function — the
+ * chunk text never reaches the ledger, a span, or a log line.
+ */
+function resolveEmbedTokens(
+  reported: number | undefined,
+  texts: string[],
+): { tokens: number; estimated: boolean } {
+  if (reported) return { tokens: reported, estimated: false };
+  return { tokens: estimateTokens("", texts, "").inputTokens, estimated: true };
+}
+
+/** Token cost of an embedding call. Guarded: an embedding model with no pricing row yields cost 0
+ *  (a PRICING gap — the tokens are still ledgered), which is a different thing from zero tokens (a
+ *  MEASUREMENT lie, what the fail-safe above prevents). Never throws — pricing must not fail a call
+ *  the provider already charged for. */
+function embedCostUsd(tokens: number): number {
+  try {
+    return computeCost({
+      provider: "openai",
+      model: EMBED_MODEL,
+      inputTokens: tokens,
+      outputTokens: 0,
+    });
+  } catch {
+    return 0; // embedding model not in the pricing table → tokens ledgered, cost 0
+  }
+}
 
 /** pgvector wants a `'[1,2,3]'::vector` literal — the interpreter never sees this string. */
 function toVectorLiteral(v: number[]): string {
@@ -81,16 +139,41 @@ async function recordEmbedUsage(
     model: EMBED_MODEL,
     usage: { inputTokens: tokens, outputTokens: 0 },
   });
-  try {
-    return computeCost({
-      provider: "openai",
-      model: EMBED_MODEL,
-      inputTokens: tokens,
-      outputTokens: 0,
-    });
-  } catch {
-    return 0; // embedding model not in the pricing table → tokens ledgered, cost 0
-  }
+  return embedCostUsd(tokens);
+}
+
+/**
+ * Embed with the fail-safe token accounting attached: runs the provider call inside the GenAI
+ * convention span (operation `embeddings`) and resolves the billed count there, so the count the
+ * ledger books is the count the span reports.
+ *
+ * `estimated` rides the SAME mechanism the agent path uses — `naary.gen_ai.usage.estimated` as a
+ * span attribute AND as a stable dimension on the `gen_ai.client.token.usage` metric — so a
+ * dashboard cannot mistake a rule-6 estimate for a metered count. (It is NOT persisted on the
+ * UsageEvent row — no recording site does, and a column only one site populated would be worse
+ * than none; #1060 adds it across all four sites at once.)
+ *
+ * Wraps only the provider call plus the pure usage derivation, never the credential fetch or the
+ * pgvector writes, so the span's duration keeps meaning "embedding latency".
+ */
+function embedWithUsage<T>(
+  texts: string[],
+  call: () => Promise<{ value: T; tokens: number | undefined }>,
+): Promise<{ value: T; tokens: number; estimated: boolean }> {
+  return withGenAiSpan(
+    { operation: "embeddings", provider: "openai", model: EMBED_MODEL },
+    async (record) => {
+      const r = await call();
+      const { tokens, estimated } = resolveEmbedTokens(r.tokens, texts);
+      record({
+        inputTokens: tokens,
+        outputTokens: 0, // an embedding call produces no output tokens
+        costUsd: embedCostUsd(tokens),
+        estimated,
+      });
+      return { value: r.value, tokens, estimated };
+    },
+  );
 }
 
 export interface VectorUpsertResult {
@@ -125,7 +208,13 @@ export async function callVectorUpsert(
       { tenantId: meta.tenantId },
     );
   }
-  const { embeddings, tokens } = await __ragDeps.embedManyTexts(apiKey, chunks);
+  const { value: embeddings, tokens } = await embedWithUsage(
+    chunks,
+    async () => {
+      const r = await __ragDeps.embedManyTexts(apiKey, chunks);
+      return { value: r.embeddings, tokens: r.tokens };
+    },
+  );
   for (let i = 0; i < chunks.length; i++) {
     await getPrisma().$executeRaw`
       INSERT INTO "VectorChunk" ("id", "tenantId", "collection", "chunkText", "embedding")
@@ -173,7 +262,14 @@ export async function callVectorQuery(
       { tenantId: meta.tenantId },
     );
   }
-  const { embedding, tokens } = await __ragDeps.embedOne(apiKey, query);
+  // The estimate is over what was actually embedded — the query text — mirroring the upsert path.
+  const { value: embedding, tokens } = await embedWithUsage(
+    [query],
+    async () => {
+      const r = await __ragDeps.embedOne(apiKey, query);
+      return { value: r.embedding, tokens: r.tokens };
+    },
+  );
   const topK = Math.min(Math.max(1, Math.floor(cfg.topK ?? 4)), 50);
   const vec = toVectorLiteral(embedding);
   const rows = await getPrisma().$queryRaw<
