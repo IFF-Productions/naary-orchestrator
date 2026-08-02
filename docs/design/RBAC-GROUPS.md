@@ -99,13 +99,23 @@ model PermissionGroup {
   @@index([tenantId])
 }
 
+// "must hold a Membership in the group's tenant" was a COMMENT here until #1041, and nothing
+// enforced it: removing a member deleted the Membership and left these rows, so a re-invited
+// user silently regained every group they had been in. It is now a real composite FK —
+// `tenantId` is denormalized (a FK cannot reach through the group to find the tenant, and
+// Membership's only unique key is (userId, tenantId)) and CASCADES, so every membership-delete
+// path present and future is clean. NULLABLE for now: the expand half of an expand/contract —
+// see the migration, and MembersService.removeMember for the transactional bridge.
 model GroupMember {
-  groupId   String
-  group     PermissionGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  userId    String          // Firebase uid; must hold a Membership in the group's tenant
-  createdAt DateTime @default(now())
+  groupId    String
+  group      PermissionGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  userId     String          // Firebase uid
+  tenantId   String?         // the group's tenant; nullable only for the expand window
+  membership Membership?     @relation(fields: [userId, tenantId], references: [userId, tenantId], onDelete: Cascade)
+  createdAt  DateTime @default(now())
   @@id([groupId, userId])
   @@index([userId])
+  @@index([userId, tenantId])
 }
 
 // API tokens as grant subjects (§4a). A SEPARATE join (not a polymorphic subject column on

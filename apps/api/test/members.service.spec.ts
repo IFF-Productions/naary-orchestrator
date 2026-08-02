@@ -22,20 +22,32 @@ const invitation = {
   deleteMany: vi.fn(),
 };
 const tenantSettings = { findUnique: vi.fn() };
+const groupMember = { deleteMany: vi.fn() };
+/** Resolves what it is handed — a bare vi.fn() would silently swallow the batched deletes. */
+const $transaction = vi.fn(async (ops: Promise<unknown>[]) => Promise.all(ops));
 vi.mock("@naary/db", () => ({
-  getPrisma: () => ({ membership, invitation, tenantSettings }),
+  getPrisma: () => ({
+    membership,
+    invitation,
+    tenantSettings,
+    groupMember,
+    $transaction,
+  }),
 }));
 
 import type { Principal } from "../src/auth/tenant.decorator";
 import type { MailerService } from "../src/mail/mailer.service";
 import type { MembershipService } from "../src/membership/membership.service";
 import { MembersService } from "../src/members/members.service";
+import type { PermissionsService } from "../src/permissions/permissions.service";
 
 const invalidate = vi.fn();
 const sendInvitation = vi.fn();
+const invalidateTenant = vi.fn();
 const svc = new MembersService(
   { invalidate } as unknown as MembershipService,
   { sendInvitation } as unknown as MailerService,
+  { invalidateTenant } as unknown as PermissionsService,
 );
 
 /** The invite email is fire-and-forget (void) — flush microtasks so the async IIFE settles. */
@@ -55,11 +67,14 @@ beforeEach(() => {
     ...Object.values(membership),
     ...Object.values(invitation),
     tenantSettings.findUnique,
+    groupMember.deleteMany,
     invalidate,
+    invalidateTenant,
     sendInvitation,
   ]) {
     m.mockReset();
   }
+  groupMember.deleteMany.mockResolvedValue({ count: 0 });
   membership.findMany.mockResolvedValue([]);
   membership.findFirst.mockResolvedValue(null);
   membership.findUnique.mockResolvedValue(null);

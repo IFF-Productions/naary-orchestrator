@@ -9,6 +9,7 @@ import type { Principal } from "../auth/tenant.decorator";
 import { appBaseUrl } from "../connections/connect-return";
 import { MailerService } from "../mail/mailer.service";
 import { MembershipService } from "../membership/membership.service";
+import { PermissionsService } from "../permissions/permissions.service";
 
 /** `active` = a real Membership (uid-keyed authority); `invited` = a pending Invitation
  *  awaiting accept-on-login (RBAC-GROUPS.md §5). */
@@ -67,6 +68,7 @@ export class MembersService {
   constructor(
     private readonly memberships: MembershipService,
     private readonly mailer: MailerService,
+    private readonly permissions: PermissionsService,
   ) {}
 
   /**
@@ -208,6 +210,11 @@ export class MembersService {
     // Invalidate so the demoted/promoted user's next request sees the new role at once
     // (revocation must be immediate — same posture as every membership write).
     this.memberships.invalidate(userId);
+    // …and the PERMISSIONS cache too (#1041). A role change crosses the RBAC-GROUPS §4
+    // bypass line in BOTH directions — member→admin makes the subject bypass grants,
+    // admin→member makes it gated — and the permissions cache keys per subject, so a
+    // stale entry outlives the role change either way.
+    this.permissions.invalidateTenant(tenantId);
     return activeView(row);
   }
 
@@ -215,6 +222,23 @@ export class MembersService {
    * Remove an active member (by Firebase uid). Owner|admin; removing an admin/owner is
    * owner-only; the last owner cannot be removed (409). Unknown uid → no-op (204), never
    * a cross-tenant delete.
+   *
+   * Removal takes the user's PERMISSION-GROUP rows with it (#1041). This used to delete the
+   * `Membership` alone, and `GroupMember.userId` was a bare string with no FK — so the group
+   * rows survived, invisible and inert (AuthGuard fails closed without a Membership), until
+   * the user was RE-INVITED, at which point they silently regained every group they had been
+   * in. Nobody granted it and nothing surfaced it.
+   *
+   * The durable fix is the composite FK `GroupMember(userId, tenantId) → Membership` with
+   * ON DELETE CASCADE, so this holds for every path that ever deletes a membership. This
+   * explicit delete is its EXPAND-WINDOW bridge: the FK's `tenantId` column is still nullable
+   * (see the migration's expand/contract note), and a NULL-tenantId row — what an old image
+   * writes mid-rollout — is exempt from the FK under MATCH SIMPLE. After the contract
+   * migration this becomes redundant defense in depth, which is where it should stay.
+   *
+   * TENANT-SCOPED through the group relation: `{ userId }` alone would wipe the user's groups
+   * in EVERY workspace. One transaction, so a membership can never be deleted without its
+   * group rows going too.
    */
   async removeMember(
     tenantId: string,
@@ -231,8 +255,19 @@ export class MembersService {
     if (target.role === "owner") {
       await this.assertNotLastOwner(tenantId, "removed");
     }
-    await prisma.membership.deleteMany({ where: { tenantId, userId } });
+    await prisma.$transaction([
+      prisma.groupMember.deleteMany({
+        where: { userId, group: { tenantId } },
+      }),
+      prisma.membership.deleteMany({ where: { tenantId, userId } }),
+    ]);
     this.memberships.invalidate(userId); // revocation is immediate
+    // The removed user's cached EffectiveGrant[] must not outlive them (#1041): the
+    // permissions cache is per-subject with a 30s TTL and, per permissions-cache.ts, is
+    // slated to become a SHARED (Redis) cache — so the TTL tail is a real multi-instance
+    // window, not a single-process nicety. Tenant-wide because a removal also changes what
+    // the group's REMAINING subjects resolve to.
+    this.permissions.invalidateTenant(tenantId);
   }
 
   /**
