@@ -5,9 +5,21 @@ import { mergeConfig } from "vite";
 const config: StorybookConfig = {
   stories: ["../src/**/*.stories.@(ts|tsx)"],
   framework: { name: "@storybook/react-vite", options: {} },
-  // Serve public/ so MSW's generated service worker (mockServiceWorker.js) is reachable —
-  // it's what lets API-driven components/screens render against mock `/api` responses.
-  staticDirs: ["../public"],
+  // TWO static roots, both served at `/`:
+  //   ../public          → apps/web/public, the app's own production assets (embed.js, the logos).
+  //   ./public           → apps/web/.storybook/public, which holds ONLY MSW's generated service
+  //                        worker. It is what lets API-driven components/screens render against
+  //                        mock `/api` responses, and `worker.start()` fetches it from the server
+  //                        ROOT (`/mockServiceWorker.js`) — which a staticDir gives it.
+  //
+  // WHY THE WORKER IS NOT IN ../public (#1049). Vite copies `public/` VERBATIM into `dist/`, which
+  // is the production image (apps/web/Dockerfile COPYs dist straight into nginx). That published a
+  // request-interception service worker on the authenticated origin: inert until something calls
+  // `navigator.serviceWorker.register()`, but a registered worker is scoped to the ORIGIN and
+  // outlives the tab and the build that registered it. Storybook is the only consumer, so the file
+  // lives beside the config that serves it. `apps/web/test/public-assets.drift.spec.ts` builds the
+  // app for real and fails if anything dev-only reappears in `dist/`.
+  staticDirs: ["../public", "./public"],
   // Match the app's Vite resolution: our workspace packages ship CommonJS `dist`, which leaks
   // `exports is not defined` into the browser bundle. Both are pure/platform-agnostic, so bundle
   // them from TS SOURCE as ESM — the same trick vite.config.ts uses (keep the two in sync).

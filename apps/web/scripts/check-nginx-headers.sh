@@ -111,7 +111,7 @@ done
 # --- unhashed files at stable urls: must revalidate, never be pinned ------------------
 # /embed.js above all — tenants paste it into their own sites, so a long TTL would freeze
 # the loader on pages we do not control.
-for p in /embed.js /naary-mark.svg /naary-flame.svg /mockServiceWorker.js; do
+for p in /embed.js /naary-mark.svg /naary-flame.svg; do
   has "$(headers "$p")" "cache-control: no-cache" "$p (unhashed, stable url) → no-cache"
 done
 
