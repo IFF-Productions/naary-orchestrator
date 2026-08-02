@@ -2,9 +2,17 @@
  * "Where do I get this token, and what does the pasted value look like?" — resolved for one
  * provider, for the Connect dialog to render (#1063).
  *
- * CATALOG-FREE ON PURPOSE. It takes a provider OBJECT, never a key, so it imports nothing but a
- * type and can be reached from anywhere without dragging the ~161KB of `./catalog` along (the
- * same rule that moved `resolveIntegrationFields` out to `../integration-fields`).
+ * CATALOG-FREE ON PURPOSE. It takes a provider OBJECT, never a key, so it imports one type and
+ * nothing else — importing THIS FILE by path costs you no part of the ~161KB `./catalog`.
+ *
+ * That is a fact about the file, NOT a licence to import it from anywhere. `@naary/dsl` is CJS
+ * with no `exports` map, so `../integrations` and the package root `__exportStar` everything: one
+ * symbol taken from either executes the catalog too. Workflow code under
+ * `apps/worker/src/temporal/workflow/**` therefore still may not reach this, and
+ * `apps/worker/test/workflow-bundle.spec.ts` fails the build if it does (#910). Nothing on the
+ * deterministic path wants setup help anyway — this exists for the connect form and the config
+ * panel, which is why it stays under ./integrations/ instead of being hoisted to a top-level leaf
+ * module the way `../integration-fields` was for the interpreter.
  *
  * The interesting half is the DERIVED `tokenFormat`. Every provider already declares
  * `authScheme`, and that declaration IS the paste format — it is exactly what a user gets wrong:

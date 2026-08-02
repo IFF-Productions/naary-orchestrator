@@ -55,7 +55,19 @@ export type {
   IntegrationProvider,
   CredentialSetup,
 } from "./integrations/types";
-// Credential setup help (#1063) — catalog-free, so it is safe from anywhere.
+/**
+ * Credential setup help (#1063).
+ *
+ * The MODULE is catalog-free — `./integrations/credential-setup` imports a type and nothing else,
+ * so it costs a consumer nothing on its own. Reaching it THROUGH THIS BARREL is a different
+ * matter and the distinction is the whole of #910: this package is CJS with no `exports` map, so
+ * `export *` becomes `__exportStar` and importing one symbol from here (or from `@naary/dsl`)
+ * executes every module below, catalog included. So the rule for this export is the rule for the
+ * whole file — `apps/worker/src/temporal/workflow/**` must not import it, from here or from the
+ * package root. It is for the config panel, the connect form and the docs; nothing on the
+ * deterministic path needs it, which is why it stays here rather than being hoisted to a
+ * top-level leaf module the way `../integration-fields` was for the interpreter.
+ */
 export {
   resolveCredentialSetup,
   deriveTokenFormat,

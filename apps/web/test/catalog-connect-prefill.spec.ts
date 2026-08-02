@@ -98,18 +98,33 @@ describe("credential setup reaches the connect form", () => {
     expect(setup?.steps?.[0]).toMatch(/api\.slack\.com\/apps/);
   });
 
-  it("still answers the paste format for an UNauthored provider", () => {
-    // Front authors no credentialSetup; the bearer hint is derived from its auth scheme, so the
-    // token field is never left with nothing to say.
-    const front = INTEGRATION_PROVIDERS.find((p) => p.key === "front");
-    expect(front?.credentialSetup).toBeUndefined();
+  /**
+   * PICKED, not named. The point of #1063 is that the remaining providers get authored over time
+   * (#754), so hard-coding "front is blank" would be a trap set for whoever authors it — a red
+   * suite for a reason unrelated to what this asserts. When the last one is authored the
+   * behaviour has nothing left to describe, so the test steps aside rather than failing; the
+   * every-provider loop below still holds the invariant that matters.
+   */
+  const unauthoredBearer = INTEGRATION_PROVIDERS.find(
+    (p) =>
+      !p.credentialSetup &&
+      (p.authScheme === undefined || p.authScheme === "bearer"),
+  );
 
-    const setup = catalogConnectPrefill("front")?.credentialSetup;
-    expect(setup?.tokenFormat).toMatch(/Bearer/);
-    // …and nothing is invented: no link, no scopes.
-    expect(setup?.tokenUrl).toBeUndefined();
-    expect(setup?.scopes).toBeUndefined();
-  });
+  it.skipIf(!unauthoredBearer)(
+    "still answers the paste format for an UNauthored provider",
+    () => {
+      const setup = catalogConnectPrefill(
+        unauthoredBearer!.key,
+      )?.credentialSetup;
+
+      // Derived from the auth scheme, so the token field is never left with nothing to say…
+      expect(setup?.tokenFormat, unauthoredBearer!.key).toMatch(/Bearer/);
+      // …and nothing is invented: no link, no scopes.
+      expect(setup?.tokenUrl).toBeUndefined();
+      expect(setup?.scopes).toBeUndefined();
+    },
+  );
 
   it("prefers a provider's authored format over the derived one", () => {
     expect(
