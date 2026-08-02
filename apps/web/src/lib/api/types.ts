@@ -593,6 +593,12 @@ export interface InsightsBucket {
   costUsd: number;
   totalTokens: number;
   calls: number;
+  /** How many of `calls` booked ESTIMATED token counts — the Tier-1 rule-6 fallback the worker
+   *  writes when a provider reports no usage (#1060). Optional so an OLDER API, which never sends
+   *  the field, still types: the screens append the caveat only when it is `> 0`, so an undefined
+   *  reads as "this API can't tell me", which renders the same as "nothing estimated" and is the
+   *  safer of the two wrong answers to guess. */
+  estimatedCalls?: number;
 }
 
 /** Usage rolled up by day, environment, workflow, and model (GET /tenants/:id/usage/insights).

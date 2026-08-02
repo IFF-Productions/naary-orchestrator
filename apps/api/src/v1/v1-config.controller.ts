@@ -182,12 +182,18 @@ export class V1ConfigController {
     return {
       totalCostUsd: s.totalCostUsd,
       totalTokens: s.totalTokens,
+      // #1060: `estimatedCalls`/`estimated` are re-listed in every one of these explicit maps
+      // rather than spread. The v1 DTO seam is deliberately hand-written so a field cannot leak
+      // into the public API by accident — the cost of that is that a new field must be added here
+      // on purpose, which is the trade this seam exists to make.
+      estimatedCalls: s.estimatedCalls,
       byModel: s.byModel.map((m) => ({
         provider: m.provider,
         model: m.model,
         calls: m.calls,
         totalTokens: m.totalTokens,
         costUsd: m.costUsd,
+        estimatedCalls: m.estimatedCalls,
       })),
       events: s.events.map((e) => ({
         id: e.id,
@@ -201,6 +207,7 @@ export class V1ConfigController {
         costUsd: e.costUsd,
         createdAt:
           e.createdAt instanceof Date ? e.createdAt.toISOString() : e.createdAt,
+        estimated: e.estimated,
       })),
     };
   }
@@ -239,18 +246,21 @@ export class V1ConfigController {
         costUsd: d.costUsd,
         totalTokens: d.totalTokens,
         calls: d.calls,
+        estimatedCalls: d.estimatedCalls,
       })),
       byEnvironment: r.byEnvironment.map((e) => ({
         environmentId: e.environmentId,
         costUsd: e.costUsd,
         totalTokens: e.totalTokens,
         calls: e.calls,
+        estimatedCalls: e.estimatedCalls,
       })),
       byWorkflow: r.byWorkflow.map((w) => ({
         workflowKey: w.workflowKey,
         costUsd: w.costUsd,
         totalTokens: w.totalTokens,
         calls: w.calls,
+        estimatedCalls: w.estimatedCalls,
       })),
       byModel: r.byModel.map((m) => ({
         provider: m.provider,
@@ -258,6 +268,7 @@ export class V1ConfigController {
         calls: m.calls,
         totalTokens: m.totalTokens,
         costUsd: m.costUsd,
+        estimatedCalls: m.estimatedCalls,
       })),
     };
   }

@@ -24,17 +24,24 @@ export interface UsageLineItem {
   totalTokens: number;
   costUsd: number;
   createdAt: Date;
+  /** Tier-1 rule-6 fallback ESTIMATE rather than a provider-measured count (#1060). Per line item,
+   *  because "which call was estimated" is the question an audit actually asks. */
+  estimated: boolean;
 }
 
 export interface UsageSummary {
   totalCostUsd: number;
   totalTokens: number;
+  /** Of all the calls in this window, how many booked ESTIMATED tokens (#1060). Zero means the
+   *  whole figure above is metered; anything else is the caveat that belongs next to it. */
+  estimatedCalls: number;
   byModel: Array<{
     provider: string;
     model: string;
     calls: number;
     totalTokens: number;
     costUsd: number;
+    estimatedCalls: number;
   }>;
   events: UsageLineItem[];
 }
@@ -86,6 +93,7 @@ export class UsageService {
 
     let totalCostUsd = 0;
     let totalTokens = 0;
+    let estimatedCalls = 0;
     const byModel = new Map<
       string,
       {
@@ -94,6 +102,7 @@ export class UsageService {
         calls: number;
         totalTokens: number;
         costUsd: number;
+        estimatedCalls: number;
       }
     >();
 
@@ -101,6 +110,7 @@ export class UsageService {
       const cost = Number(r.costUsd);
       totalCostUsd += cost;
       totalTokens += r.totalTokens;
+      if (r.estimated) estimatedCalls += 1;
       const key = `${r.provider}/${r.model}`;
       const agg = byModel.get(key) ?? {
         provider: r.provider,
@@ -108,16 +118,19 @@ export class UsageService {
         calls: 0,
         totalTokens: 0,
         costUsd: 0,
+        estimatedCalls: 0,
       };
       agg.calls += 1;
       agg.totalTokens += r.totalTokens;
       agg.costUsd += cost;
+      if (r.estimated) agg.estimatedCalls += 1;
       byModel.set(key, agg);
     }
 
     return {
       totalCostUsd: round6(totalCostUsd),
       totalTokens,
+      estimatedCalls,
       byModel: [...byModel.values()].map((m) => ({
         ...m,
         costUsd: round6(m.costUsd),
@@ -133,6 +146,7 @@ export class UsageService {
         totalTokens: r.totalTokens,
         costUsd: Number(r.costUsd),
         createdAt: r.createdAt,
+        estimated: r.estimated, // #1060
       })),
     };
   }
@@ -215,6 +229,7 @@ export class UsageService {
           createdAt: r.createdAt,
           nodeType: r.nodeType,
           durationMs: r.durationMs,
+          estimated: r.estimated, // #1060 — carried into every insights bucket
         })),
         workflowKeyByExec,
         { from: from ?? null, to: to ?? null },

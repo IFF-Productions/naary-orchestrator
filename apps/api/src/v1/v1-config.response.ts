@@ -54,6 +54,12 @@ export class UsageByModelResponse {
   totalTokens!: number;
   @ApiProperty({ example: 0.4213, description: "USD cost for this model." })
   costUsd!: number;
+  @ApiProperty({
+    example: 1,
+    description:
+      "How many of `calls` booked ESTIMATED token counts — the fail-safe used when a provider reports no usage, so a real call is never billed as free. 0 means every call here was metered.",
+  })
+  estimatedCalls!: number;
 }
 
 export class UsageEventResponse {
@@ -77,6 +83,12 @@ export class UsageEventResponse {
   costUsd!: number;
   @ApiProperty({ format: "date-time", example: "2026-07-04T12:00:00.000Z" })
   createdAt!: string;
+  @ApiProperty({
+    example: false,
+    description:
+      "Whether this row's TOKEN counts are an estimate rather than a provider measurement. Scoped to tokens: a metered row can still carry a fallback PRICE (an unpriced model bills at 0).",
+  })
+  estimated!: boolean;
 }
 
 /**
@@ -91,6 +103,12 @@ export class UsageResponse {
     description: "Total tokens across the window.",
   })
   totalTokens!: number;
+  @ApiProperty({
+    example: 2,
+    description:
+      "How many calls in this window booked ESTIMATED token counts. 0 means the totals above are entirely metered.",
+  })
+  estimatedCalls!: number;
   @ApiProperty({
     type: [UsageByModelResponse],
     description: "Per-model rollup.",
@@ -113,6 +131,12 @@ export class InsightsBucketResponse {
   totalTokens!: number;
   @ApiProperty({ example: 12, description: "Number of metered calls." })
   calls!: number;
+  @ApiProperty({
+    example: 1,
+    description:
+      "How many of `calls` booked ESTIMATED token counts rather than provider-measured ones. Lets a dashboard qualify the cost beside it instead of presenting a partly-estimated figure as metered.",
+  })
+  estimatedCalls!: number;
 }
 
 export class InsightsByDayResponse extends InsightsBucketResponse {

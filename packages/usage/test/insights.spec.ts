@@ -7,6 +7,10 @@ import {
 } from "../src/insights";
 
 // Two UTC days, two envs, three runs (x1 twice), two models; x3 has no workflowKey and no env.
+// x3 is ALSO the only rule-6 ESTIMATE (#1060) — deliberately the row that is null on two other
+// dimensions, so a bucket can't accidentally pass by lumping estimated rows in with untagged ones.
+// Every other row omits `estimated` entirely rather than setting it false: that is the shape a
+// pre-feature row deserializes into, so the aggregation is exercised against it.
 const events: InsightsEvent[] = [
   {
     executionId: "x1",
@@ -43,6 +47,7 @@ const events: InsightsEvent[] = [
     totalTokens: 10,
     costUsd: 0.01,
     createdAt: "2026-07-17T09:00:00.000Z",
+    estimated: true,
   },
 ];
 const wfByExec = new Map<string, string | null>([
@@ -59,29 +64,82 @@ describe("aggregateInsights", () => {
 
   it("echoes the range and computes overall totals", () => {
     expect(r.range).toEqual({ from: "2026-07-01", to: "2026-07-31" });
-    expect(r.totals).toEqual({ costUsd: 0.36, totalTokens: 360, calls: 4 });
+    expect(r.totals).toEqual({
+      costUsd: 0.36,
+      totalTokens: 360,
+      calls: 4,
+      estimatedCalls: 1,
+    });
   });
 
   it("byDay buckets by UTC day, ascending", () => {
     expect(r.byDay).toEqual([
-      { date: "2026-07-16", costUsd: 0.15, totalTokens: 150, calls: 2 },
-      { date: "2026-07-17", costUsd: 0.21, totalTokens: 210, calls: 2 },
+      {
+        date: "2026-07-16",
+        costUsd: 0.15,
+        totalTokens: 150,
+        calls: 2,
+        estimatedCalls: 0,
+      },
+      {
+        date: "2026-07-17",
+        costUsd: 0.21,
+        totalTokens: 210,
+        calls: 2,
+        estimatedCalls: 1,
+      },
     ]);
   });
 
   it("byEnvironment is desc by cost and keeps a null bucket (untagged rows)", () => {
     expect(r.byEnvironment).toEqual([
-      { environmentId: "sandbox", costUsd: 0.2, totalTokens: 200, calls: 1 },
-      { environmentId: "prod", costUsd: 0.15, totalTokens: 150, calls: 2 },
-      { environmentId: null, costUsd: 0.01, totalTokens: 10, calls: 1 },
+      {
+        environmentId: "sandbox",
+        costUsd: 0.2,
+        totalTokens: 200,
+        calls: 1,
+        estimatedCalls: 0,
+      },
+      {
+        environmentId: "prod",
+        costUsd: 0.15,
+        totalTokens: 150,
+        calls: 2,
+        estimatedCalls: 0,
+      },
+      {
+        environmentId: null,
+        costUsd: 0.01,
+        totalTokens: 10,
+        calls: 1,
+        estimatedCalls: 1,
+      },
     ]);
   });
 
   it("byWorkflow joins via the exec map, desc by cost, null for unmapped runs", () => {
     expect(r.byWorkflow).toEqual([
-      { workflowKey: "summarize", costUsd: 0.2, totalTokens: 200, calls: 1 },
-      { workflowKey: "triage", costUsd: 0.15, totalTokens: 150, calls: 2 },
-      { workflowKey: null, costUsd: 0.01, totalTokens: 10, calls: 1 },
+      {
+        workflowKey: "summarize",
+        costUsd: 0.2,
+        totalTokens: 200,
+        calls: 1,
+        estimatedCalls: 0,
+      },
+      {
+        workflowKey: "triage",
+        costUsd: 0.15,
+        totalTokens: 150,
+        calls: 2,
+        estimatedCalls: 0,
+      },
+      {
+        workflowKey: null,
+        costUsd: 0.01,
+        totalTokens: 10,
+        calls: 1,
+        estimatedCalls: 1,
+      },
     ]);
   });
 
@@ -93,6 +151,7 @@ describe("aggregateInsights", () => {
         costUsd: 0.2,
         totalTokens: 200,
         calls: 1,
+        estimatedCalls: 0,
       },
       {
         provider: "anthropic",
@@ -100,13 +159,21 @@ describe("aggregateInsights", () => {
         costUsd: 0.16,
         totalTokens: 160,
         calls: 3,
+        // The estimated row is anthropic/sonnet too, so this bucket mixes both — the case the
+        // column exists for: 3 calls billed, 1 of them on a number nobody measured.
+        estimatedCalls: 1,
       },
     ]);
   });
 
   it("empty input → zeroed totals and empty buckets", () => {
     const e = aggregateInsights([], new Map());
-    expect(e.totals).toEqual({ costUsd: 0, totalTokens: 0, calls: 0 });
+    expect(e.totals).toEqual({
+      costUsd: 0,
+      totalTokens: 0,
+      calls: 0,
+      estimatedCalls: 0,
+    });
     expect(e.byDay).toEqual([]);
     expect(e.byEnvironment).toEqual([]);
     expect(e.byWorkflow).toEqual([]);

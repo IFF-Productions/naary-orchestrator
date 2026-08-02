@@ -681,7 +681,10 @@ export async function runAgent(
     // stay outside, so the span's duration keeps meaning "model latency". Attributes are model /
     // tokens / finish reason / cost only; prompt + completion text cannot reach a span attribute by
     // construction (see the privacy note in @naary/observability's genai module).
-    const { result, usage, tokenCostUsd } = await withGenAiSpan(
+    // `estimated` comes back out of the span callback (rather than only into the span) because the
+    // ledger writes below need it too — #1060: a measured 900 and a rule-6 estimated 900 have to be
+    // distinguishable in the durable record, not just on a sampled span.
+    const { result, usage, tokenCostUsd, estimated } = await withGenAiSpan(
       {
         operation: "chat",
         provider,
@@ -787,7 +790,7 @@ export async function runAgent(
           costUsd: tokenCostUsd,
           estimated,
         });
-        return { result, usage, tokenCostUsd };
+        return { result, usage, tokenCostUsd, estimated };
       },
     );
 
@@ -831,6 +834,8 @@ export async function runAgent(
           provider,
           model,
           usage,
+          estimated, // #1060 — the guardrail-blocked path books the same numbers, so it books the
+          // same provenance; a blocked call is exactly when an audit asks what was actually spent.
         });
         throw ApplicationFailure.nonRetryable(
           `Agent output blocked by guardrail content rule(s): ${outLabels.join(", ")}`,
@@ -857,6 +862,9 @@ export async function runAgent(
       provider,
       model, // the model that actually ran (post-downgrade)
       usage,
+      // #1060: true when the provider reported no usable usage and `usage` is the char/4 estimate
+      // above (the documented AI-SDK v6 usage-undefined case).
+      estimated,
     });
 
     // #827: reject an oversized structured output HERE — after recordUsage, deliberately. The

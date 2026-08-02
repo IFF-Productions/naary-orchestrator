@@ -669,7 +669,15 @@ export function InsightsTab({
           value={insights ? usd(insights.totals.costUsd) : "—"}
           sub={
             insights
-              ? `${insights.totals.calls.toLocaleString()} model calls · since ${spendFrom}`
+              ? // #1060: when some of this figure rests on rule-6 ESTIMATES (the provider reported
+                // no usage and we booked a char/4 count rather than zero), say so HERE, next to the
+                // number it qualifies. Only when there are any — a permanent "0 estimated" would
+                // train people to stop reading it.
+                `${insights.totals.calls.toLocaleString()} model calls${
+                  insights.totals.estimatedCalls
+                    ? ` (${insights.totals.estimatedCalls.toLocaleString()} estimated)`
+                    : ""
+                } · since ${spendFrom}`
               : "loading rollups…"
           }
         />

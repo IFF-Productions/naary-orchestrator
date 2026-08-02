@@ -75,9 +75,7 @@ beforeEach(() => {
 
 /** Await a call that MUST fail, returning its ApplicationFailure. Fails the test if it resolves —
  *  so a silently-successful call can never be mistaken for the error case under test. */
-async function expectFailure(
-  p: Promise<unknown>,
-): Promise<ApplicationFailure> {
+async function expectFailure(p: Promise<unknown>): Promise<ApplicationFailure> {
   try {
     await p;
   } catch (e) {
@@ -215,7 +213,9 @@ describe("callTextToSpeech — BYOK credential handling (Tier-1 rule 4)", () => 
     getDecryptedKey.mockRejectedValue(
       new MissingCredentialError("t1", "openai"),
     );
-    const err = await expectFailure(callTextToSpeech({ text: TEXT }, null, META));
+    const err = await expectFailure(
+      callTextToSpeech({ text: TEXT }, null, META),
+    );
     expect(err).toBeInstanceOf(ApplicationFailure);
     expect(err.nonRetryable).toBe(true);
     expect(err.type).toBe("AUTH");
@@ -273,6 +273,10 @@ describe("callTextToSpeech — billing (Tier-1 rule 6: never zero)", () => {
     // USD budget gate would see a free call)…
     expect(recordUsage.mock.calls[0][0].model).toBe("tts-1");
     expect(out.costUsd).toBeGreaterThan(0);
+    // …and the row still reads MEASURED (#1060). This is the case that shows why `estimated` is
+    // scoped to tokens: the PRICE here is a substitute, but the character count is exact. Flipping
+    // this to true would make every unpriced-model row look like an unmeasured one.
+    expect(recordUsage.mock.calls[0][0].estimated).toBe(false);
     // …while the node OUTPUT still reports what was actually requested.
     expect(out.output.model).toBe("some-unreleased-tts");
   });
@@ -291,7 +295,9 @@ describe("callTextToSpeech — billing (Tier-1 rule 6: never zero)", () => {
 describe("callTextToSpeech — error semantics", () => {
   it("maps 401 to a NON-retryable AUTH failure (don't burn retries on a bad key)", async () => {
     fetchMock.mockResolvedValue(errRes(401));
-    const err = await expectFailure(callTextToSpeech({ text: TEXT }, null, META));
+    const err = await expectFailure(
+      callTextToSpeech({ text: TEXT }, null, META),
+    );
     expect(err.nonRetryable).toBe(true);
     expect(err.type).toBe("AUTH");
     expect(err.message).not.toContain(TEXT); // no submitted text in history
@@ -300,21 +306,27 @@ describe("callTextToSpeech — error semantics", () => {
 
   it("maps 403 to a NON-retryable AUTH failure too", async () => {
     fetchMock.mockResolvedValue(errRes(403));
-    const err = await expectFailure(callTextToSpeech({ text: TEXT }, null, META));
+    const err = await expectFailure(
+      callTextToSpeech({ text: TEXT }, null, META),
+    );
     expect(err.nonRetryable).toBe(true);
     expect(err.type).toBe("AUTH");
   });
 
   it("maps 429 to a NON-retryable QUOTA failure", async () => {
     fetchMock.mockResolvedValue(errRes(429));
-    const err = await expectFailure(callTextToSpeech({ text: TEXT }, null, META));
+    const err = await expectFailure(
+      callTextToSpeech({ text: TEXT }, null, META),
+    );
     expect(err.nonRetryable).toBe(true);
     expect(err.type).toBe("QUOTA");
   });
 
   it("keeps a 5xx RETRYABLE (a genuine transient) and a 4xx non-retryable", async () => {
     fetchMock.mockResolvedValue(errRes(503));
-    let err: ApplicationFailure = await expectFailure(callTextToSpeech({ text: TEXT }, null, META));
+    let err: ApplicationFailure = await expectFailure(
+      callTextToSpeech({ text: TEXT }, null, META),
+    );
     expect(err.nonRetryable).toBeFalsy();
     expect(err.type).toBe("TTS_PROVIDER_TRANSIENT");
 
@@ -325,7 +337,9 @@ describe("callTextToSpeech — error semantics", () => {
   });
 
   it("rejects empty text before any provider call or billing", async () => {
-    const err = await expectFailure(callTextToSpeech({ text: "   " }, null, META));
+    const err = await expectFailure(
+      callTextToSpeech({ text: "   " }, null, META),
+    );
     expect(err.nonRetryable).toBe(true);
     expect(err.type).toBe("TTS_NO_TEXT");
     expect(fetchMock).not.toHaveBeenCalled();
@@ -334,7 +348,9 @@ describe("callTextToSpeech — error semantics", () => {
 
   it("rejects over-long text (bounds the bill) without echoing it", async () => {
     const long = "a".repeat(MAX_TTS_INPUT_CHARS + 1);
-    const err = await expectFailure(callTextToSpeech({ text: long }, null, META));
+    const err = await expectFailure(
+      callTextToSpeech({ text: long }, null, META),
+    );
     expect(err.nonRetryable).toBe(true);
     expect(err.type).toBe("TTS_TEXT_TOO_LONG");
     expect(err.message).not.toContain(long);
@@ -345,14 +361,18 @@ describe("callTextToSpeech — error semantics", () => {
     fetchMock.mockResolvedValue(
       audioRes(64, 200, { "content-length": String(200 * 1024 * 1024) }),
     );
-    const err = await expectFailure(callTextToSpeech({ text: TEXT }, null, META));
+    const err = await expectFailure(
+      callTextToSpeech({ text: TEXT }, null, META),
+    );
     expect(err.nonRetryable).toBe(true);
     expect(err.type).toBe("TTS_AUDIO_TOO_LARGE");
   });
 
   it("treats an empty-audio 200 as retryable rather than storing a 0-byte object", async () => {
     fetchMock.mockResolvedValue(audioRes(0));
-    const err = await expectFailure(callTextToSpeech({ text: TEXT }, null, META));
+    const err = await expectFailure(
+      callTextToSpeech({ text: TEXT }, null, META),
+    );
     expect(err.nonRetryable).toBeFalsy();
     expect(err.type).toBe("TTS_EMPTY_AUDIO");
   });
@@ -363,7 +383,9 @@ describe("callTextToSpeech — error semantics", () => {
         `connect ECONNREFUSED https://api.openai.com/v1/audio/speech body=${TEXT} auth=sk-openai-secret-xyz`,
       ),
     );
-    const err = await expectFailure(callTextToSpeech({ text: TEXT }, null, META));
+    const err = await expectFailure(
+      callTextToSpeech({ text: TEXT }, null, META),
+    );
     expect(err.nonRetryable).toBeFalsy();
     expect(err.type).toBe("TTS_TRANSIENT");
     const serialized = JSON.stringify({

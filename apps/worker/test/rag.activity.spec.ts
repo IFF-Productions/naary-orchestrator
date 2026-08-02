@@ -30,6 +30,16 @@ function ledgeredInputTokens(): number {
   return spy.mock.calls[0][0].usage.inputTokens;
 }
 
+/** The provenance flag the LEDGER received (#1060) — distinct from the one on the span. The two
+ *  are asserted separately on purpose: the span already carried this before #1060, so reading the
+ *  span would keep passing if the ledger argument were dropped. */
+function ledgeredEstimated(): boolean | undefined {
+  const spy = __agentDeps.recordUsage as unknown as {
+    mock: { calls: [{ estimated?: boolean }][] };
+  };
+  return spy.mock.calls[0][0].estimated;
+}
+
 /** The rule-6 fail-safe estimate the activity must book when the provider reports no usage:
  *  `estimateTokens`' char/4 over the text actually embedded (input-only — no output half).
  *  Written out rather than imported so the test pins a VALUE, not the implementation. */
@@ -160,6 +170,7 @@ describe("provider reports no usage (Tier-1 rule 6 fail-safe)", () => {
     expect(__agentDeps.recordUsage).toHaveBeenCalledOnce();
     expect(ledgeredInputTokens()).toBeGreaterThan(0); // …so it is NOT billed as free
     expect(ledgeredInputTokens()).toBe(expectedEstimate(chunks));
+    expect(ledgeredEstimated()).toBe(true); // #1060 — and the ROW says the count is an estimate
   });
 
   it("vectorQuery estimates from the query instead of ledgering zero", async () => {
@@ -173,6 +184,7 @@ describe("provider reports no usage (Tier-1 rule 6 fail-safe)", () => {
     expect(__agentDeps.recordUsage).toHaveBeenCalledOnce();
     expect(ledgeredInputTokens()).toBeGreaterThan(0);
     expect(ledgeredInputTokens()).toBe(expectedEstimate([CHUNK_SENTINEL]));
+    expect(ledgeredEstimated()).toBe(true); // #1060
   });
 
   it("a reported ZERO is treated as 'not measured', not as a free call", async () => {
@@ -222,5 +234,6 @@ describe("provider reports no usage (Tier-1 rule 6 fail-safe)", () => {
     expect(attrs["naary.gen_ai.usage.estimated"]).toBe(false);
     expect(attrs["gen_ai.usage.input_tokens"]).toBe(42);
     expect(ledgeredInputTokens()).toBe(42);
+    expect(ledgeredEstimated()).toBe(false); // #1060 — measured on the row, not just on the span
   });
 });

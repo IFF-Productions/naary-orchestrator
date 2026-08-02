@@ -73,7 +73,12 @@ describe("UsageService.getInsights", () => {
       where: { workflowId: { in: ["x1", "x2"] } },
       select: { workflowId: true, workflowKey: true },
     });
-    expect(out.totals).toEqual({ costUsd: 0.3, totalTokens: 150, calls: 2 });
+    expect(out.totals).toEqual({
+      costUsd: 0.3,
+      totalTokens: 150,
+      calls: 2,
+      estimatedCalls: 0, // #1060 — these fixture rows are measured
+    });
     expect(out.byWorkflow.map((w) => w.workflowKey).sort()).toEqual([
       "summarize",
       "triage",
@@ -124,6 +129,44 @@ describe("UsageService.getInsights", () => {
       },
     });
     expect(out.runsByDay).toEqual([]);
+  });
+
+  // #1060 — the ledger's estimated/measured distinction has to survive the read path, not just the
+  // write. Asserted at the SERVICE level (not only on the pure aggregate) because the gap this
+  // closes was a field that existed on the row and never reached the caller.
+  it("carries each row's `estimated` flag into the rollup buckets", async () => {
+    usageEvent.findMany.mockResolvedValue([
+      {
+        executionId: "x1",
+        environmentId: "prod",
+        provider: "anthropic",
+        model: "sonnet",
+        totalTokens: 100,
+        costUsd: 0.1,
+        createdAt: "2026-07-16T10:00:00.000Z",
+        estimated: true, // provider reported nothing → rule-6 fallback
+      },
+      {
+        executionId: "x1",
+        environmentId: "prod",
+        provider: "anthropic",
+        model: "sonnet",
+        totalTokens: 900,
+        costUsd: 0.9,
+        createdAt: "2026-07-16T11:00:00.000Z",
+        estimated: false, // metered
+      },
+    ]);
+    execution.findMany.mockResolvedValue([]);
+
+    const out = await svc.getInsights("t-1", {});
+
+    // Two calls in the same bucket, only one of them estimated — the case a dashboard must be able
+    // to caveat. Before #1060 both rows read identically here.
+    expect(out.totals.calls).toBe(2);
+    expect(out.totals.estimatedCalls).toBe(1);
+    expect(out.byModel[0].estimatedCalls).toBe(1);
+    expect(out.byEnvironment[0].estimatedCalls).toBe(1);
   });
 });
 

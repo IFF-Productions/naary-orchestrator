@@ -160,6 +160,63 @@ describe("recordUsage", () => {
     expect(String(data.costUsd)).toBe("0.000000"); // unpriced → auditable zero cost
   });
 
+  // ---- #1060: the ledger row remembers whether its TOKENS were measured or estimated ----
+
+  it("persists estimated=true when the caller says the tokens are a rule-6 estimate", async () => {
+    await recordUsage({
+      tenantId: "t1",
+      executionId: "exec-1",
+      nodeId: "agent",
+      provider: "anthropic",
+      model: "claude-opus-4-8",
+      usage: { inputTokens: 1000, outputTokens: 500 },
+      estimated: true,
+    });
+    const data = upsert.mock.calls[0][0].create;
+    expect(data.estimated).toBe(true);
+    // …and the numbers are ledgered exactly as given. The flag QUALIFIES the tokens, it never
+    // discounts them: an estimate still bills, which is the whole point of rule 6.
+    expect(data.inputTokens).toBe(1000);
+    expect(data.outputTokens).toBe(500);
+  });
+
+  it("persists estimated=false for a measured call — and for a caller that omits the field", async () => {
+    for (const estimated of [false, undefined]) {
+      upsert.mockReset();
+      upsert.mockResolvedValue({ id: "evt_1" });
+      await recordUsage({
+        tenantId: "t1",
+        executionId: "exec-1",
+        nodeId: "agent",
+        provider: "anthropic",
+        model: "claude-opus-4-8",
+        usage: { inputTokens: 10, outputTokens: 5 },
+        ...(estimated === undefined ? {} : { estimated }),
+      });
+      // NOT NULL column: `false`, never undefined — an undefined would let Prisma fall back to the
+      // DB default and make the write's meaning depend on the schema rather than on this function.
+      expect(upsert.mock.calls[0][0].create.estimated).toBe(false);
+    }
+  });
+
+  it("does NOT infer `estimated` from the numbers — a zero-cost measured call stays measured", async () => {
+    // The tempting shortcut is `estimated = costUsd === 0` or "did the caller pass round numbers".
+    // Both are wrong: an unpriced model bills a REAL call at 0 (the fail-safe above), and an
+    // estimate is numerically indistinguishable from a measurement. Only the caller knows.
+    await recordUsage({
+      tenantId: "t1",
+      executionId: "exec-1",
+      nodeId: "codeAgent",
+      provider: "no-such-provider",
+      model: "mystery-model",
+      usage: { inputTokens: 1000, outputTokens: 500 },
+      estimated: false,
+    });
+    const data = upsert.mock.calls[0][0].create;
+    expect(String(data.costUsd)).toBe("0.000000");
+    expect(data.estimated).toBe(false);
+  });
+
   it("never records zero for a real call (fallback estimate is non-zero)", async () => {
     await recordUsage({
       tenantId: "t1",
