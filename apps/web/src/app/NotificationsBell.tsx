@@ -56,12 +56,21 @@ export function NotificationsBell() {
   const [items, setItems] = useState<NotifItem[] | null>(null);
   /** Dismissed items that this poll saw are still live — cleared, but not resolved. */
   const [hiddenCount, setHiddenCount] = useState(0);
+  /** BOTH queries failed, so an empty list means "we couldn't look", not "nothing is happening". */
+  const [unreachable, setUnreachable] = useState(false);
   /** The last poll's FULL fetched list (pre-cap), so Clear all and its immediate re-render work
    *  from everything the server sent, not just the eight rows on screen. */
   const candidatesRef = useRef<NotifItem[]>([]);
   const rootRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
+    // Pinned BEFORE the fetch, and re-checked after it. Switching workspace mid-poll would
+    // otherwise reconcile the NEW workspace's dismissed set against the OLD workspace's items —
+    // and with both queries answered, every id not coincidentally present in the other
+    // workspace's data would be pruned as stale, silently un-clearing them. The provider's
+    // remount does not prevent this: `setActiveWorkspace` flips the module state at once, and
+    // this write goes to localStorage, not to the unmounted component's state.
+    const workspaceId = getActiveWorkspace();
     try {
       // `null` (not `[]`) on failure: an errored query means "no data", which must never be read
       // as "these items are gone" — that would prune dismissals and resurrect cleared items.
@@ -69,6 +78,9 @@ export function NotificationsBell() {
         api.listAwaitingApprovals().catch(() => null),
         api.listRuns().catch(() => null),
       ]);
+      // This data describes a workspace we are no longer in — drop it; the remounted bell is
+      // already fetching the right one.
+      if (getActiveWorkspace() !== workspaceId) return;
       const approvalItems: NotifItem[] = (approvals ?? []).map((a) => ({
         kind: "approval",
         key: approvalKey(a.workflowId, a.nodeId),
@@ -91,9 +103,8 @@ export function NotificationsBell() {
         a.at < b.at ? 1 : -1,
       );
       candidatesRef.current = candidates;
-      // Read storage fresh each poll rather than trusting React state: another tab may have
-      // cleared, and the workspace may have changed since mount.
-      const workspaceId = getActiveWorkspace();
+      // Read storage fresh each poll rather than trusting React state — another tab may have
+      // cleared since the last one.
       const stored = readDismissed(STORE, workspaceId);
       const { visible, persist, liveHiddenCount } = reconcileDismissed(
         candidates,
@@ -104,8 +115,11 @@ export function NotificationsBell() {
         writeDismissed(STORE, workspaceId, persist);
       setItems(visible.slice(0, MAX_VISIBLE));
       setHiddenCount(liveHiddenCount);
+      setUnreachable(approvals === null && runs === null);
     } catch {
       setItems([]);
+      setHiddenCount(0);
+      setUnreachable(true);
     }
   }, []);
 
@@ -252,11 +266,15 @@ export function NotificationsBell() {
             </div>
           ) : count === 0 ? (
             <div style={{ padding: 18, fontSize: 12.5, color: "var(--ink-2)" }}>
-              {/* Never claim "all caught up" when the count is 0 only because things were
-                  cleared — clearing dismisses the notification, not the work behind it. */}
-              {hiddenCount > 0
-                ? `Nothing new. ${hiddenCount} cleared ${hiddenCount === 1 ? "item is" : "items are"} still open — they stay in Approvals and Activity.`
-                : "You're all caught up — no pending approvals or recent failures."}
+              {/* "All caught up" is a claim about the world, so only say it when we actually
+                  looked and found nothing. An empty list because both queries failed, or because
+                  things were CLEARED (clearing dismisses the notification, not the work behind
+                  it), each gets its own honest sentence. */}
+              {unreachable
+                ? "Couldn't check for approvals or failures — the API didn't answer."
+                : hiddenCount > 0
+                  ? `Nothing new. ${hiddenCount} cleared ${hiddenCount === 1 ? "item is" : "items are"} still open — they stay in Approvals and Activity.`
+                  : "You're all caught up — no pending approvals or recent failures."}
             </div>
           ) : (
             items.map((it) => (
