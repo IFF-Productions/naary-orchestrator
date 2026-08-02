@@ -10,6 +10,17 @@ export const ZENDESK: IntegrationProvider = {
   description:
     "Manage Zendesk Support — read, create, and update tickets; create users.",
   auth: "A Zendesk connection whose Server URL is your account API base (https://your-subdomain.zendesk.com/api/v2) and whose token is `your-email@company.com/token:your-api-token` (sent as HTTP Basic).",
+  credentialSetup: {
+    steps: [
+      "In Admin Center → Apps and integrations → APIs → API configuration, tick Allow API token access and save. You must be an administrator, and it is off by default.",
+      "Then open APIs → API tokens → Add API token and copy the token.",
+    ],
+    // The literal `/token` between email and secret is the usual cause of a 401 here, and no
+    // generated sentence could know it.
+    tokenFormat:
+      "Paste `your-email@company.com/token:your-api-token` — the literal `/token` between your email and the token is what makes this token auth rather than password auth. Naary sends it as HTTP Basic.",
+  },
+
   actions: [
     {
       key: "get_ticket",

@@ -9,6 +9,15 @@ export const GITLAB: IntegrationProvider = {
   authScheme: "bearer",
   description: "Act on GitLab issues — read, list, create, and comment.",
   auth: "A custom connection whose token is a GitLab personal access token (api scope).",
+  // No `tokenUrl`: GitLab has moved this page more than once and it differs on self-managed
+  // instances, so the area-level step is the honest form.
+  credentialSetup: {
+    scopes: ["api"],
+    steps: [
+      "In GitLab open Edit profile → Access → Personal access tokens and create a token.",
+      "Give it the api scope — the narrower read_api cannot create issues or comment.",
+    ],
+  },
   actions: [
     {
       key: "get_issue",

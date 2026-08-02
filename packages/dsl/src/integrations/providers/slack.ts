@@ -8,6 +8,18 @@ export const SLACK: IntegrationProvider = {
   baseUrl: "https://slack.com/api",
   description: "Post to Slack — send a message, reply in a thread, or react.",
   auth: "A custom connection whose token is a Slack bot token (`xoxb-…`) with the needed scopes (e.g. chat:write, reactions:write). The Server URL is unused (base is slack.com).",
+  credentialSetup: {
+    tokenUrl: "https://api.slack.com/apps",
+    scopes: ["chat:write", "reactions:write"],
+    steps: [
+      "Create an app for your workspace at api.slack.com/apps.",
+      "Under OAuth & Permissions add the bot token scopes above, then install the app to the workspace.",
+      "Copy the Bot User OAuth Token (`xoxb-…`) — not the User token, and not the Signing Secret.",
+      "Invite the bot into every channel it posts in (`/invite @your-app`); installing does not join channels.",
+    ],
+    tokenFormat:
+      "Paste the bot token (`xoxb-…`) on its own — `Bearer ` is added for you. A `xoxp-…` user token or the app's Signing Secret will not work.",
+  },
   unprobeableReason:
     "Slack can't be checked from here, and not because it lacks an endpoint: `auth.test` needs no " +
     'arguments, but the Slack Web API answers HTTP 200 with `{"ok": false}` for a dead token. ' +

@@ -127,6 +127,44 @@ export interface IntegrationAction {
   description: string;
 }
 
+/**
+ * WHERE THE CREDENTIAL COMES FROM, structured enough for a form to render (#1063).
+ *
+ * `auth` above is one sentence of prose, and `docs/integrations/<key>.md` has the long form — but
+ * neither reaches the person staring at an empty **Token** box in the Connect dialog, which is the
+ * one moment the answer is needed. This is that answer, in the smallest shape a dialog can render:
+ * a link, a scope list, a few imperatives, and what the pasted value should look like.
+ *
+ * ALL FOUR FIELDS ARE OPTIONAL, and an absent one is a deliberate answer, not an oversight. Only
+ * `tokenFormat` is ever present for every provider, because it is DERIVED from `authScheme` when
+ * unauthored (see `./credential-setup`). Everything else is authored or nothing:
+ *
+ *   **Never guess a console URL or a scope.** A wrong scope list is worse than none — it sends
+ *   someone to mint a token that cannot do the job, and the failure arrives later, as a 403 on a
+ *   run. Author `tokenUrl` only where the provider's own documentation gives that exact page, and
+ *   `scopes` only where the strings are the literal identifiers their console shows. If you are
+ *   working from memory, leave both off: the generated `tokenFormat` still helps, and
+ *   `docs/integrations/<key>.md` still has the prose.
+ *
+ * This does NOT replace `INTEGRATION_PROSE` (`../docs/integration-prose`), which stays the source
+ * for the generated setup guides and holds the gotchas, the token lifetimes and the area-level
+ * console paths. The two overlap by design while this is a first slice; `credential-setup.drift`
+ * asserts what is authored here agrees with what is written there.
+ */
+export interface CredentialSetup {
+  /** Deep link to the EXACT page that mints the credential, e.g.
+   *  `https://api.slack.com/apps`. `https` only. */
+  tokenUrl?: string;
+  /** The exact permissions to tick, as the provider's own console spells them
+   *  (`chat:write`, not "chat write"). */
+  scopes?: string[];
+  /** 2–5 imperative steps. Plain text — this is rendered in a dialog, not markdown. */
+  steps?: string[];
+  /** What we expect PASTED, e.g. "`email:api_token` — the pair, not the token alone".
+   *  Generated from `authScheme` when unauthored; an authored value always wins. */
+  tokenFormat?: string;
+}
+
 /** One renamed-or-removed field key, and the sentence the save gate hands the author. */
 export interface RetiredField {
   /** The old key, exactly as it appears in an existing node's `fields`/`fieldBindings`. */
@@ -163,6 +201,12 @@ export interface IntegrationProvider {
   description: string;
   /** How a user authenticates (shown in docs). */
   auth: string;
+  /**
+   * Where to GET that credential — the structured form the Connect dialog renders (#1063).
+   * Optional per provider; read it through `resolveCredentialSetup`, never raw, so the
+   * derived `tokenFormat` is applied.
+   */
+  credentialSetup?: CredentialSetup;
   /**
    * Why this provider has NO credential probe — shown verbatim instead of the generated
    * "no zero-argument read" reason when `pickConnectionTestAction` finds nothing (#835).

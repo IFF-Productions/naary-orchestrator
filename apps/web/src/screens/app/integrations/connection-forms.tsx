@@ -7,7 +7,9 @@ import { ConnectionTestControl } from "./ConnectionTestControl";
 import {
   catalogConnectPrefill,
   connectableProviders,
+  splitInlineCode,
 } from "./catalog-connect-prefill";
+import type { ResolvedCredentialSetup } from "@naary/dsl";
 import { fieldLabel, fieldStyle, introStyle } from "./shared";
 
 /**
@@ -501,6 +503,80 @@ export function GithubAppForm({ tenant }: { tenant: string }) {
   );
 }
 
+/** Catalog prose marks literals with backticks; render those as code rather than showing them. */
+function Hint({ text }: { text: string }) {
+  return (
+    <>
+      {splitInlineCode(text).map((part, i) =>
+        part.code ? (
+          <code key={i} className="mono">
+            {part.text}
+          </code>
+        ) : (
+          <span key={i}>{part.text}</span>
+        ),
+      )}
+    </>
+  );
+}
+
+/**
+ * WHERE TO GET THE TOKEN, in the dialog that asks for it (#1063).
+ *
+ * The catalog has known this per provider for a while, but only `docs/integrations/<key>.md` ever
+ * showed it — a page you have to know exists, leave the screen for, and come back from. Everything
+ * here is authored per provider and rendered only when present, so a provider nobody has written
+ * up yet shows nothing rather than a set of empty headings. (`tokenFormat` is the exception and is
+ * deliberately NOT rendered here — it belongs beside the token input, further down the form.)
+ */
+function CredentialSetupHelp({ setup }: { setup: ResolvedCredentialSetup }) {
+  const { tokenUrl, scopes, steps } = setup;
+  if (!tokenUrl && !scopes?.length && !steps?.length) return null;
+
+  return (
+    <div
+      style={{
+        marginTop: 8,
+        paddingTop: 8,
+        borderTop: "1px solid var(--line-2)",
+        color: "var(--ink-3)",
+      }}
+    >
+      <div style={{ color: "var(--ink-2)", fontWeight: 600 }}>
+        Where to get it
+      </div>
+      {steps && steps.length > 0 && (
+        <ol style={{ margin: "4px 0 0", paddingLeft: 18 }}>
+          {steps.map((s) => (
+            <li key={s} style={{ marginTop: 2 }}>
+              <Hint text={s} />
+            </li>
+          ))}
+        </ol>
+      )}
+      {scopes && scopes.length > 0 && (
+        <div style={{ marginTop: 6 }}>
+          Scopes to tick:{" "}
+          {scopes.map((s, i) => (
+            <span key={s}>
+              {i > 0 && ", "}
+              <code className="mono">{s}</code>
+            </span>
+          ))}
+        </div>
+      )}
+      {tokenUrl && (
+        // `noreferrer` as well as `noopener`: this leaves the app for a third-party console.
+        <div style={{ marginTop: 6 }}>
+          <a href={tokenUrl} target="_blank" rel="noopener noreferrer">
+            Open the token page ↗
+          </a>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Values the MCP registry browser (#578) can pre-fill. Used only as the initial state — the form
  *  is mounted inside a Dialog and unmounted on close, so a remount resets it (no effect-sync). */
 export interface ConnectFormPrefill {
@@ -658,6 +734,7 @@ export function ConnectForm({
           <div style={{ marginTop: 4, color: "var(--ink-3)" }}>
             {picked.authNote}
           </div>
+          <CredentialSetupHelp setup={picked.credentialSetup} />
         </div>
       )}
 
@@ -739,13 +816,31 @@ export function ConnectForm({
             onChange={(e) => setToken(e.target.value)}
             placeholder="ghp_… / api token"
           />
+          {/* What the pasted value should LOOK like (#1063). The panel above states the header
+              and the endpoint; neither tells you what to paste, which is what the person with a
+              provider console open in the next tab actually needs. Authored where the trap is
+              provider-specific (Stripe's `pk_…`, Zendesk's literal `/token`), derived from the
+              auth scheme otherwise — so this line is never empty. */}
+          {picked && (
+            <div
+              style={{
+                marginTop: 5,
+                fontSize: "var(--text-xs)",
+                color: "var(--ink-3)",
+                lineHeight: 1.5,
+              }}
+            >
+              <Hint text={picked.credentialSetup.tokenFormat} />
+            </div>
+          )}
           {/* #815 — two traps that produce a runtime 401 with no form error. Both are facts about
               how the code behaves, stated where the mistake is made rather than discovered on a
               run: the auth scheme's prefix is applied by `buildIntegrationRequest`, and a catalog
               provider ignores this Server URL in favour of the catalog's own baseUrl. */}
           {/* Only when NO service was picked. With one picked, the precise header + endpoint are
-              already stated above, and repeating the generic "for per-tenant hosts (Mattermost,
-              DeepL, …)" list here just makes the reader work out which clause applies to them. */}
+              already stated above (and the paste format directly above this), so repeating the
+              generic "for per-tenant hosts (Mattermost, DeepL, …)" list here just makes the
+              reader work out which clause applies to them. */}
           {type === "custom" && !picked && (
             <div
               style={{

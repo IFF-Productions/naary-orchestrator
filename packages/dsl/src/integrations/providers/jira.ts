@@ -10,6 +10,17 @@ export const JIRA: IntegrationProvider = {
   authScheme: "basic",
   description: "Manage Jira tickets — read, create, comment, and transition.",
   auth: "A Jira connection whose Server URL is your Atlassian site (https://you.atlassian.net) and whose token is `your-email@company.com:your-api-token` (sent as HTTP Basic).",
+  // No `tokenUrl`: Atlassian's API-token page is not verified against a live console here, and a
+  // confidently-wrong deep link costs the reader more than the area-level step below.
+  credentialSetup: {
+    steps: [
+      "In your Atlassian account settings, open Security → API tokens and create a token.",
+      "Join it to the account email as `email:token` — that pair is the credential, not the token alone.",
+      "Or connect via Atlassian OAuth (3LO) from the Integrations screen and handle no token at all.",
+    ],
+    tokenFormat:
+      "Paste `your-email@company.com:your-api-token` — the pair, colon-separated. Naary base64-encodes it as HTTP Basic; the token on its own returns 401.",
+  },
   actions: [
     {
       key: "get_issue",

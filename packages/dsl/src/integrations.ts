@@ -53,7 +53,14 @@ export type {
   IntegrationAction,
   RetiredField,
   IntegrationProvider,
+  CredentialSetup,
 } from "./integrations/types";
+// Credential setup help (#1063) — catalog-free, so it is safe from anywhere.
+export {
+  resolveCredentialSetup,
+  deriveTokenFormat,
+  type ResolvedCredentialSetup,
+} from "./integrations/credential-setup";
 export {
   INTEGRATION_CATALOG,
   INTEGRATION_PROVIDERS,

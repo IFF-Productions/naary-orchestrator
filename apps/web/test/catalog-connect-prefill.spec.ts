@@ -3,6 +3,7 @@ import { INTEGRATION_PROVIDERS } from "@naary/dsl";
 import {
   catalogConnectPrefill,
   connectableProviders,
+  splitInlineCode,
 } from "../src/screens/app/integrations/catalog-connect-prefill";
 
 /**
@@ -84,6 +85,58 @@ describe("catalogConnectPrefill", () => {
   });
 });
 
+/**
+ * "Where do I get this token?" answered in the dialog that asks for it (#1063). The prefill is
+ * where the Connect form gets every fact it shows, so this is where the new one has to arrive.
+ */
+describe("credential setup reaches the connect form", () => {
+  it("carries the authored link, scopes and steps for a provider that has them", () => {
+    const setup = catalogConnectPrefill("slack")?.credentialSetup;
+
+    expect(setup?.tokenUrl).toBe("https://api.slack.com/apps");
+    expect(setup?.scopes).toContain("chat:write");
+    expect(setup?.steps?.[0]).toMatch(/api\.slack\.com\/apps/);
+  });
+
+  it("still answers the paste format for an UNauthored provider", () => {
+    // Front authors no credentialSetup; the bearer hint is derived from its auth scheme, so the
+    // token field is never left with nothing to say.
+    const front = INTEGRATION_PROVIDERS.find((p) => p.key === "front");
+    expect(front?.credentialSetup).toBeUndefined();
+
+    const setup = catalogConnectPrefill("front")?.credentialSetup;
+    expect(setup?.tokenFormat).toMatch(/Bearer/);
+    // …and nothing is invented: no link, no scopes.
+    expect(setup?.tokenUrl).toBeUndefined();
+    expect(setup?.scopes).toBeUndefined();
+  });
+
+  it("prefers a provider's authored format over the derived one", () => {
+    expect(
+      catalogConnectPrefill("stripe")?.credentialSetup.tokenFormat,
+    ).toMatch(/publishable `pk_…` key will not work/);
+  });
+});
+
+describe("splitInlineCode", () => {
+  it("splits `backticked` runs out so the dialog renders code, not backticks", () => {
+    expect(splitInlineCode("Paste `sk_test_…` on its own.")).toEqual([
+      { text: "Paste ", code: false },
+      { text: "sk_test_…", code: true },
+      { text: " on its own.", code: false },
+    ]);
+  });
+
+  it("leaves plain text and an unpaired backtick alone", () => {
+    expect(splitInlineCode("no code here")).toEqual([
+      { text: "no code here", code: false },
+    ]);
+    expect(splitInlineCode("a ` dangling one")).toEqual([
+      { text: "a ` dangling one", code: false },
+    ]);
+  });
+});
+
 describe("every provider is offerable and describable", () => {
   it("the picker lists all 38 and each one prefills", () => {
     const list = connectableProviders();
@@ -94,6 +147,11 @@ describe("every provider is offerable and describable", () => {
     for (const { key } of list) {
       const p = catalogConnectPrefill(key);
       expect(p, `${key} did not prefill`).toBeDefined();
+      // Every provider says SOMETHING about the value being pasted — authored or derived.
+      expect(
+        p?.credentialSetup.tokenFormat?.length ?? 0,
+        `${key} token format`,
+      ).toBeGreaterThan(20);
       // The minimum useful answer names a HEADER and where the token goes. (Not "ends with the
       // placeholder" — my first version asserted that and Basic legitimately ends with its
       // explanation instead, so the assertion was wrong rather than the code.)
