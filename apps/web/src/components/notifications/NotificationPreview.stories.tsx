@@ -3,8 +3,10 @@ import {
   type NotificationInput,
   type NotificationLinks,
   notificationBlocks,
+  notificationEmail,
   notificationTeamsCard,
 } from "@naary/notifications";
+import { EmailMessage } from "./EmailMessage";
 import { SlackMessage } from "./SlackMessage";
 import { TeamsCard } from "./TeamsCard";
 
@@ -124,6 +126,21 @@ function Teams({ input }: { input: NotificationInput }) {
   );
 }
 
+/** Subject + HTML body + text/plain body, straight from `notificationEmail` (#1059). */
+function Email({
+  input,
+  links = LINKS,
+}: {
+  input: NotificationInput;
+  links?: NotificationLinks;
+}) {
+  return (
+    <div style={{ padding: 24, background: "#f0f2f5", minHeight: "100vh" }}>
+      <EmailMessage mail={notificationEmail(input, links)} />
+    </div>
+  );
+}
+
 const meta: Meta = {
   title: "Notifications/Preview",
   parameters: { layout: "fullscreen" },
@@ -207,4 +224,64 @@ export const SlackFixProposal: Story = {
 
 export const TeamsFixProposal: Story = {
   render: () => <Teams input={FIX_PROPOSAL} />,
+};
+
+/* ---------------- Email (#1059) ----------------
+ * Email had no story at all until now, which is most of how it kept the pre-#992 shape: the
+ * channel nobody could see is the channel nobody fixed. Each story shows the SUBJECT (the only
+ * part a crowded inbox renders), the HTML body and the text/plain body — a headline that exists
+ * in only one of the two bodies is half a fix. Coverage mirrors the Slack stories kind for kind.
+ */
+
+/** The kind a tenant sees most: the prose headline says what failed, of which type, at which
+ *  step; the subject now says it too instead of stopping at "❌ Run failed". */
+export const EmailRunFailed: Story = {
+  render: () => <Email input={FAILED} />,
+};
+
+/** A returned terminal status — a short reason rides the headline's first line, so it reaches
+ *  the subject as well. */
+export const EmailRunFailedStatus: Story = {
+  render: () => <Email input={FAILED_STATUS} />,
+};
+
+/** Nothing known but the workflow: the redundant "Reason: failed" is dropped here too. */
+export const EmailRunFailedBare: Story = {
+  render: () => <Email input={FAILED_BARE} />,
+};
+
+export const EmailApprovalPending: Story = {
+  render: () => <Email input={APPROVAL} />,
+};
+
+/** The subject keeps the flavor marker in front of the specifics. */
+export const EmailApprovalReminder: Story = {
+  render: () => <Email input={REMINDER} />,
+};
+
+/** Escalation — the target is the headline's SECOND line, so it stays out of the subject. */
+export const EmailApprovalEscalation: Story = {
+  render: () => <Email input={ESCALATION} />,
+};
+
+/** No APP_BASE_URL / signing key → no buttons and no links in either body. */
+export const EmailNoLinks: Story = {
+  render: () => <Email input={APPROVAL} links={{}} />,
+};
+
+/** Tenant-scoped: the headline says the spend AND what does not stop; the subject is unchanged
+ *  because the header already carries the threshold. */
+export const EmailBudgetThreshold: Story = {
+  render: () => <Email input={BUDGET_THRESHOLD} />,
+};
+
+/** Runless — the subject is unchanged here too: the header already names the target env. */
+export const EmailPromotion: Story = {
+  render: () => <Email input={PROMOTION} />,
+};
+
+/** The headline states the guarantee ("Nothing is applied until you approve it") in the body,
+ *  not only in the Slack fallback text. */
+export const EmailFixProposal: Story = {
+  render: () => <Email input={FIX_PROPOSAL} />,
 };
