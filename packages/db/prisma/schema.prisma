@@ -757,6 +757,11 @@ model Membership {
   // never an authz input.
   lastActiveAt DateTime?
 
+  // Permission-group rows this membership carries (#1041). The FK lives on GroupMember and
+  // CASCADES: losing your membership in a workspace loses your groups in that workspace, by
+  // construction rather than by a comment. See GroupMember for the expand/contract state.
+  groupMembers GroupMember[]
+
   @@unique([userId, tenantId])
   @@index([userId])
   @@index([tenantId])
@@ -800,14 +805,35 @@ model PermissionGroup {
   @@index([tenantId])
 }
 
+// "A group member must hold a Membership in the group's tenant" used to be a COMMENT here, and
+// nothing enforced it: removing a member deleted the Membership and left these rows behind, so a
+// re-invited user silently regained every group they had been in (#1041). It is now a real FK.
+//
+// `tenantId` is DENORMALIZED (same reason as WorkflowGrant.tenantId) because a FK cannot reach
+// through a join: the tenant lives on PermissionGroup, and Membership's only unique key is
+// (userId, tenantId) — so the reference needs both columns on this row. It is kept honest by the
+// group FK plus the writers, which always copy it from the group they are writing to.
+//
+// EXPAND/CONTRACT — this is the EXPAND half, and the column is NULLABLE on purpose. Deploys run
+// migrations to completion and THEN roll the images, so the OLD API image still inserts
+// (groupId, userId) with no tenantId; a NOT NULL column would 500 those writes. Under Postgres
+// MATCH SIMPLE a row with a NULL tenantId is EXEMPT from the composite FK, which is exactly what
+// makes the nullable phase safe — and also means the constraint has a hole until the CONTRACT
+// migration backfills the stragglers and SET NOT NULLs. MembersService.removeMember therefore
+// ALSO deletes these rows transactionally: that is the bridge across the expand window, and it
+// stays as defense in depth afterwards.
 model GroupMember {
-  groupId   String
-  group     PermissionGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  userId    String // Firebase uid; must hold a Membership in the group's tenant
-  createdAt DateTime @default(now())
+  groupId    String
+  group      PermissionGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  userId     String // Firebase uid
+  // The group's tenant. Nullable ONLY for the expand window above — every writer sets it.
+  tenantId   String?
+  membership Membership?     @relation(fields: [userId, tenantId], references: [userId, tenantId], onDelete: Cascade)
+  createdAt  DateTime        @default(now())
 
   @@id([groupId, userId])
   @@index([userId])
+  @@index([userId, tenantId])
 }
 
 // API tokens as grant subjects (§4a). A SEPARATE join (not a polymorphic subject column on

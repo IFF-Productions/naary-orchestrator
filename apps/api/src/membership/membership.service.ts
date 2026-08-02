@@ -172,7 +172,13 @@ export class MembershipService {
           });
           if (owned.length > 0) {
             await prisma.groupMember.createMany({
-              data: owned.map((g) => ({ groupId: g.id, userId })),
+              // `tenantId` completes the composite FK to the Membership upserted just above
+              // (#1041) — these groups were filtered to inv.tenantId, so it is theirs.
+              data: owned.map((g) => ({
+                groupId: g.id,
+                userId,
+                tenantId: inv.tenantId,
+              })),
               skipDuplicates: true,
             });
           }

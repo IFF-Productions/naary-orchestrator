@@ -190,10 +190,13 @@ describe("GroupsService member + token attachment", () => {
   it("adds a real member idempotently and INVALIDATES the tenant's permissions cache", async () => {
     membership.findUnique.mockResolvedValue({ userId: "u-2" });
     await svc.addMember("t-1", asOwner, "grp-1", "u-2");
+    // `tenantId` is the denormalized half of the composite FK to Membership (#1041); the
+    // `update` sets it too, so a NULL-tenantId row written by an old image mid-rollout
+    // (FK-exempt under MATCH SIMPLE) is healed on the next re-add.
     expect(groupMember.upsert).toHaveBeenCalledWith({
       where: { groupId_userId: { groupId: "grp-1", userId: "u-2" } },
-      create: { groupId: "grp-1", userId: "u-2" },
-      update: {},
+      create: { groupId: "grp-1", userId: "u-2", tenantId: "t-1" },
+      update: { tenantId: "t-1" },
     });
     expect(invalidateTenant).toHaveBeenCalledWith("t-1");
   });

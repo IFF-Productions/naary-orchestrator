@@ -197,8 +197,12 @@ export class GroupsService {
     }
     await getPrisma().groupMember.upsert({
       where: { groupId_userId: { groupId, userId } },
-      create: { groupId, userId },
-      update: {},
+      // `tenantId` is the denormalized half of the composite FK to Membership (#1041) — it is
+      // the group's tenant, which getOwned() has just proved is the caller's. `update` also
+      // sets it so a row an OLD image wrote mid-rollout (tenantId NULL, FK-exempt) is healed
+      // the next time anyone re-adds that member.
+      create: { groupId, userId, tenantId },
+      update: { tenantId },
     });
     this.permissions.invalidateTenant(tenantId);
   }
