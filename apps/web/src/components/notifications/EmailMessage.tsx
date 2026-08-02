@@ -1,4 +1,19 @@
-import type { NotificationEmail } from "@naary/notifications";
+/**
+ * The three parts of a rendered notification email. Declared LOCALLY, exactly as
+ * `SlackMessage` and `TeamsCard` declare their own block/card shapes, rather than importing
+ * `NotificationEmail` from `@naary/notifications`.
+ *
+ * That is not a style choice. `apps/web/tsconfig.json` excludes `*.stories.tsx` precisely
+ * because stories import that package and the web Docker image only prebuilds `@naary/dsl` —
+ * so a non-story file under `src/` that imports it fails `tsc --noEmit` in the image with
+ * TS2307, and takes the whole stack build with it. `import type` does not help: TS2307 is a
+ * RESOLUTION failure, and a type-only import still needs the declarations.
+ *
+ * The stories pass real `notificationEmail()` output into this prop and ARE typechecked
+ * against the real type (`tsconfig.storybook.json`, which maps `@naary/*` to source), so the
+ * two shapes are still checked against each other — at the story boundary, like the siblings.
+ */
+type NotificationEmail = { subject: string; text: string; html: string };
 
 /**
  * Preview of the email the worker/API actually sends, built by `@naary/notifications`
