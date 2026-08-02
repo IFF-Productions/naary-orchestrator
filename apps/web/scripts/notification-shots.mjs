@@ -46,6 +46,31 @@ const STORIES = [
   ["notifications-preview--slack-light-theme", "light theme"],
 ];
 
+/** The email stories (#1059). Separate list because an email capture is TALLER than a chat
+ *  message — it shows the subject, the HTML body and the text/plain body at once. */
+const EMAIL_STORIES = [
+  ["notifications-preview--email-run-failed", "run_failed"],
+  ["notifications-preview--email-run-failed-status", "run_failed (status)"],
+  [
+    "notifications-preview--email-run-failed-bare",
+    "run_failed (nothing known)",
+  ],
+  ["notifications-preview--email-approval-pending", "approval_pending"],
+  ["notifications-preview--email-approval-reminder", "approval — reminder"],
+  ["notifications-preview--email-approval-escalation", "approval — escalation"],
+  ["notifications-preview--email-budget-threshold", "budget_threshold"],
+  ["notifications-preview--email-promotion", "promotion"],
+  ["notifications-preview--email-fix-proposal", "fix_proposal"],
+  ["notifications-preview--email-no-links", "no links (no APP_BASE_URL)"],
+];
+
+/** Which set to capture / stitch: `--channel email` for the email previews (#1059), the Slack
+ *  set otherwise. BOTH halves of the script read this, so a sheet can never stitch one
+ *  channel's labels onto another channel's shots. */
+const SET = args.channel === "email" ? EMAIL_STORIES : STORIES;
+const CHANNEL = args.channel === "email" ? "Email" : "Slack";
+const ISSUE = args.channel === "email" ? "#1059" : "#987";
+
 async function capture() {
   const SB = args.sb ?? "/tmp/sb";
   const OUT = args.out ?? "/tmp/shots";
@@ -81,11 +106,14 @@ async function capture() {
 
   const browser = await chromium.launch();
   const page = await browser.newPage({
-    viewport: { width: 760, height: 700 },
+    // An email story is much taller than a chat message (subject chrome + HTML body +
+    // text/plain body). Playwright stitches an element taller than the viewport, but the
+    // seam lands on unpainted page and comes back black — so give the tall set the room.
+    viewport: { width: 760, height: args.channel === "email" ? 1600 : 700 },
     deviceScaleFactor: 2,
   });
   const captured = [];
-  for (const [id, label] of STORIES) {
+  for (const [id, label] of SET) {
     await page.goto(
       `http://localhost:${PORT}/iframe.html?id=${id}&viewMode=story`,
       { waitUntil: "networkidle" },
@@ -123,7 +151,7 @@ async function capture() {
   }
   await browser.close();
   server.close();
-  console.log(`captured ${captured.length}/${STORIES.length} → ${OUT}`);
+  console.log(`captured ${captured.length}/${SET.length} → ${OUT}`);
 }
 
 /** Stitch before/after PNGs into one contact sheet (a rendered HTML page, screenshotted). */
@@ -137,7 +165,7 @@ async function sheet() {
       ? `data:image/png;base64,${readFileSync(f).toString("base64")}`
       : null;
   };
-  const rows = STORIES.map(([id, label]) => {
+  const rows = SET.map(([id, label]) => {
     const b = BEFORE ? dataUri(BEFORE, id) : null;
     const a = AFTER ? dataUri(AFTER, id) : null;
     const cell = (src, missing) =>
@@ -160,7 +188,7 @@ async function sheet() {
     figcaption{color:#8b949e;font-size:12px;margin-bottom:6px;text-transform:uppercase;letter-spacing:.06em}
     .missing{border:1px dashed #30363d;border-radius:8px;padding:28px;color:#6e7681;text-align:center}
   </style>
-  <h1>Slack notifications — before / after (#987)</h1>
+  <h1>${CHANNEL} notifications — before / after (${ISSUE})</h1>
   <p class="sub">Rendered from the real @naary/notifications formatter output via Storybook.</p>
   ${rows}`;
   const browser = await chromium.launch();

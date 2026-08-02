@@ -939,7 +939,8 @@ describe("sendNotification — email channel (Slice 4)", () => {
     expect(fetch).toHaveBeenCalledOnce();
     expect(sendMail).toHaveBeenCalledOnce();
     const mail = sendMail.mock.calls[0][0];
-    expect(mail.subject).toBe('❌ Run failed — "poller"');
+    // #1059: the subject carries the specific failure, not just the event category.
+    expect(mail.subject).toBe("❌ Run failed: poller — boom");
     expect(mail.html).toContain("boom");
   });
 });

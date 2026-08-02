@@ -313,13 +313,112 @@ export function notificationText(
   return `❌ ${wf} run failed${why.length > 0 ? ` (${why.join(" · ")})` : ""} — run ${runId}.${links.runUrl ? ` View: ${links.runUrl}` : ""}`;
 }
 
-/** The workflow's NAME as Slack mrkdwn — bold, never a raw id. `codeText` (not plain
- *  `slackEscape`) because a backtick in a key would otherwise open a code span that swallows
- *  the rest of the line. */
-function workflowName(input: NotificationInput): string {
-  return input.workflowKey
-    ? `*${codeText(input.workflowKey)}*`
-    : "_an unnamed workflow_";
+/** One styled run of text inside a headline. The style is SEMANTIC, not a markup fragment:
+ *  `strong` = the thing the sentence is about, `code` = a machine token (an error type, a node
+ *  id), `em` = the "unnamed workflow" fallback. Each medium decides how to draw it. */
+export interface HeadlineSpan {
+  text: string;
+  style?: "strong" | "em" | "code";
+}
+
+/** A headline as LINES of spans — medium-independent. See `notificationHeadlineModel`. */
+export type HeadlineLine = HeadlineSpan[];
+
+const plain = (text: string): HeadlineSpan => ({ text });
+const strong = (text: string): HeadlineSpan => ({ text, style: "strong" });
+const em = (text: string): HeadlineSpan => ({ text, style: "em" });
+const code = (text: string): HeadlineSpan => ({ text, style: "code" });
+
+/** What we call a workflow we have no key for. One constant so the subject line can tell
+ *  "the headline named the workflow" from "the headline had nothing to name". */
+const UNNAMED_WORKFLOW = "an unnamed workflow";
+
+/**
+ * The HEADLINE as DATA: the sentence a human reads, with nothing medium-specific in it.
+ *
+ * There is exactly ONE of these, and three renderers over it — Slack mrkdwn, plain text and
+ * HTML (#1059). The alternative, converting one rendering into another, cannot work: the Slack
+ * rendering is lossy and pre-escaped for the wrong medium (a backtick becomes `ʼ`, `&` becomes
+ * `&amp;`), so an email built from it would show the reader OUR escaping instead of their data.
+ * And the other alternative — a second sentence written for email — is the drift bug this repo
+ * keeps paying for (#982, #984, #1005, #1050).
+ */
+export function notificationHeadlineModel(
+  input: NotificationInput,
+): HeadlineLine[] {
+  const name = input.workflowKey
+    ? strong(input.workflowKey)
+    : em(UNNAMED_WORKFLOW);
+
+  if (input.kind === "budget_threshold") {
+    const cap = input.capUsd !== undefined ? strong(usd(input.capUsd)) : null;
+    const spend =
+      input.spendUsd !== undefined ? strong(usd(input.spendUsd)) : null;
+    const line: HeadlineLine =
+      spend && cap
+        ? [
+            plain("Workspace spend is "),
+            spend,
+            plain(" of the "),
+            cap,
+            plain(" monthly cap."),
+          ]
+        : spend
+          ? [plain("Workspace spend is "), spend, plain(" this month.")]
+          : cap
+            ? [
+                plain("Workspace spend crossed the alert threshold on the "),
+                cap,
+                plain(" monthly cap."),
+              ]
+            : [plain("Workspace spend crossed the alert threshold.")];
+    // Say what does NOT happen. An alert that reads as "your runs just stopped" costs a
+    // support ticket; runs continue until the cap itself.
+    return [line, [plain("Runs keep running until the cap is reached.")]];
+  }
+
+  if (input.kind === "promotion") {
+    const ver =
+      input.version !== undefined ? strong(`v${input.version}`) : null;
+    const to = input.toEnv ? strong(input.toEnv) : null;
+    if (ver && to)
+      return [[name, plain(" is now "), ver, plain(" in "), to, plain(".")]];
+    if (to) return [[name, plain(" is now live in "), to, plain(".")]];
+    if (ver) return [[name, plain(" is now "), ver, plain(".")]];
+    return [[name, plain(" was promoted.")]];
+  }
+
+  if (input.kind === "fix_proposal") {
+    const line: HeadlineLine = [name];
+    if (input.title) line.push(plain(" — "), plain(input.title));
+    // The guarantee lives in the message body, not only in the fallback text: someone reading
+    // this on their phone must not have to open the app to learn whether prod already changed.
+    return [line, [plain("Nothing is applied until you approve it.")]];
+  }
+
+  if (input.kind === "approval_pending") {
+    const line: HeadlineLine = [name];
+    if (input.title) line.push(plain(" — "), plain(input.title));
+    // Escalation flavor: name the target on its own line — it is WHO must act, not a label/value.
+    return input.flavor === "escalation" && input.escalateTo
+      ? [line, [plain("Escalated to "), strong(input.escalateTo)]]
+      : [line];
+  }
+
+  // run_failed — the whole point of the alert: WHAT failed, of WHICH type, at WHICH step.
+  const detail = notificationDetail(input);
+  const line: HeadlineLine = [name];
+  if (input.errorType) line.push(plain(" — "), code(input.errorType));
+  if (input.failedNodeId)
+    line.push(plain(" at step "), code(input.failedNodeId));
+  if (!detail) return [line];
+  // A short reason with no error type reads better inline ("… — budget_exceeded"); a real
+  // error message gets its own line rather than a run-on headline.
+  if (!input.errorType && detail.length <= 60) {
+    line.push(plain(" — "), plain(detail));
+    return [line];
+  }
+  return [line, [plain(detail)]];
 }
 
 /**
@@ -330,60 +429,62 @@ function workflowName(input: NotificationInput): string {
  * run id in a half-width column wraps onto two lines, which is most of what made the old
  * message look broken. Nothing here is a grid: the facts are said in a sentence, and the
  * machine-shaped ones move to the small grey context line below.
+ *
+ * `codeText` on EVERY span (not just user values): mrkdwn control chars and backticks are unsafe
+ * wherever they appear, and our own literals contain none, so a blanket escape is both correct
+ * and one less rule to get wrong.
  */
 export function notificationHeadline(input: NotificationInput): string {
-  if (input.kind === "budget_threshold") {
-    const cap =
-      input.capUsd !== undefined ? `*${usd(input.capUsd)}*` : undefined;
-    const spend =
-      input.spendUsd !== undefined ? `*${usd(input.spendUsd)}*` : undefined;
-    const line =
-      spend && cap
-        ? `Workspace spend is ${spend} of the ${cap} monthly cap.`
-        : spend
-          ? `Workspace spend is ${spend} this month.`
-          : cap
-            ? `Workspace spend crossed the alert threshold on the ${cap} monthly cap.`
-            : "Workspace spend crossed the alert threshold.";
-    // Say what does NOT happen. An alert that reads as "your runs just stopped" costs a
-    // support ticket; runs continue until the cap itself.
-    return `${line}\nRuns keep running until the cap is reached.`;
-  }
-  if (input.kind === "promotion") {
-    const name = workflowName(input);
-    const ver = input.version !== undefined ? `*v${input.version}*` : undefined;
-    const to = input.toEnv ? `*${codeText(input.toEnv)}*` : undefined;
-    if (ver && to) return `${name} is now ${ver} in ${to}.`;
-    if (to) return `${name} is now live in ${to}.`;
-    if (ver) return `${name} is now ${ver}.`;
-    return `${name} was promoted.`;
-  }
-  if (input.kind === "fix_proposal") {
-    const why = input.title ? ` — ${codeText(input.title)}` : "";
-    // The guarantee lives in the message body, not only in the fallback text: someone reading
-    // this on their phone must not have to open the app to learn whether prod already changed.
-    return `${workflowName(input)}${why}\nNothing is applied until you approve it.`;
-  }
-  if (input.kind === "approval_pending") {
-    let line = workflowName(input);
-    if (input.title) line += ` — ${codeText(input.title)}`;
-    // Escalation flavor: name the target on its own line — it is WHO must act, not a label/value.
-    if (input.flavor === "escalation" && input.escalateTo)
-      line += `\nEscalated to *${codeText(input.escalateTo)}*`;
-    return line;
-  }
-  // run_failed — the whole point of the alert: WHAT failed, of WHICH type, at WHICH step.
-  const detail = notificationDetail(input);
-  let line = workflowName(input);
-  if (input.errorType) line += ` — \`${codeText(input.errorType)}\``;
-  if (input.failedNodeId)
-    line += ` at step \`${codeText(input.failedNodeId)}\``;
-  if (!detail) return line;
-  // A short reason with no error type reads better inline ("… — budget_exceeded"); a real
-  // error message gets its own line rather than a run-on headline.
-  if (!input.errorType && detail.length <= 60)
-    return `${line} — ${codeText(detail)}`;
-  return `${line}\n${codeText(detail)}`;
+  return notificationHeadlineModel(input)
+    .map((line) =>
+      line
+        .map((s) => {
+          const t = codeText(s.text);
+          if (s.style === "strong") return `*${t}*`;
+          if (s.style === "em") return `_${t}_`;
+          if (s.style === "code") return `\`${t}\``;
+          return t;
+        })
+        .join(""),
+    )
+    .join("\n");
+}
+
+/**
+ * The headline for a text/plain body (#1059): the words, and nothing else. No markers — `*bold*`
+ * in a plaintext mail is just noise — and NO escaping: text/plain is not markup, so a `&` the
+ * user typed must arrive as `&`, not `&amp;`.
+ */
+export function notificationHeadlineText(input: NotificationInput): string {
+  return notificationHeadlineModel(input)
+    .map((line) => line.map((s) => s.text).join(""))
+    .join("\n");
+}
+
+/** Inline `<code>` styling for the HTML mail. Inline because mail clients strip `<style>`. */
+const HTML_CODE_STYLE =
+  "font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;background:#f0f2f4;border-radius:4px;padding:1px 4px;";
+
+/**
+ * The headline for an HTML mail body (#1059): real emphasis elements, `htmlEscape` per SPAN, and
+ * `<br />` BETWEEN lines. Escaping each span separately (rather than escaping a joined string) is
+ * what keeps the line break a break instead of a literal newline the client collapses away.
+ */
+export function notificationHeadlineHtml(input: NotificationInput): string {
+  return notificationHeadlineModel(input)
+    .map((line) =>
+      line
+        .map((s) => {
+          const t = htmlEscape(s.text);
+          if (s.style === "strong") return `<strong>${t}</strong>`;
+          if (s.style === "em") return `<em>${t}</em>`;
+          if (s.style === "code")
+            return `<code style="${HTML_CODE_STYLE}">${t}</code>`;
+          return t;
+        })
+        .join(""),
+    )
+    .join("<br />");
 }
 
 /**
@@ -661,7 +762,10 @@ export function notificationPayload(
 
 /** A rendered email: subject + plain-text body + a simple self-contained HTML body.
  *  The SENDING (SMTP connection, credentials, transport) stays caller-side — this is
- *  pure formatting, same boundary as the Slack/Teams shapes above. */
+ *  pure formatting, same boundary as the Slack/Teams shapes above.
+ *
+ *  Both bodies matter equally: `text` is what a plaintext client, a "show original" view and
+ *  most notification digests render, so a headline that only exists in `html` is half a fix. */
 export interface NotificationEmail {
   subject: string;
   text: string;
@@ -691,6 +795,44 @@ function htmlButton(a: NotificationAction): string {
   return `<a href="${htmlEscape(a.url)}" style="display:inline-block;margin:0 8px 8px 0;padding:8px 14px;border-radius:6px;background:${bg};color:#ffffff;text-decoration:none;font-weight:600;">${htmlEscape(a.label)}</a>`;
 }
 
+/** How much of the headline a subject may carry. A subject is a scan target, not a body: most
+ *  clients show ~70 characters on a desktop and far fewer on a phone, and an unbounded error
+ *  message must not run away here any more than it may in the blocks. */
+const SUBJECT_DETAIL_MAX = 90;
+
+/**
+ * The email subject (#1059).
+ *
+ * The old rule was `${header} — "${workflowKey}"`, which stopped at the EVENT CATEGORY: every
+ * failure of every workflow read the same in an inbox, and the reader had to open the mail to
+ * learn what had actually happened. That is #987's "says nothing" complaint one level up, on the
+ * one surface where there is no body to clarify it.
+ *
+ * So the subject now leads with the header — the scannable, filterable event marker, unchanged
+ * so existing mail rules keep matching — and then says the SPECIFIC thing, taken from the
+ * headline's first line so it cannot drift from the body.
+ *
+ * Two kinds keep the old shape deliberately: `budget_threshold` and `promotion` headers already
+ * interpolate their specific fact (`80% of the monthly cap`, `promoted to prod`), so appending
+ * the headline would only restate it.
+ */
+export function notificationSubject(input: NotificationInput): string {
+  const header = notificationHeader(input);
+  if (input.kind === "budget_threshold") return header;
+  if (input.kind === "promotion")
+    return input.workflowKey ? `${header} — "${input.workflowKey}"` : header;
+  // Nothing to name: the headline would read "❌ Run failed: an unnamed workflow", which is
+  // longer than the header and says less.
+  if (!input.workflowKey) return header;
+  const [first] = notificationHeadlineModel(input);
+  // First line only — an escalation's "Escalated to …" is a second line for a reason, and
+  // `oneLine` guarantees the single line a subject header must be.
+  return `${header}: ${oneLine(
+    first.map((s) => s.text).join(""),
+    SUBJECT_DETAIL_MAX,
+  )}`;
+}
+
 /**
  * Render a notification as an email (subject + text AND html bodies) for every kind and
  * approval flavor. Decide-in-place for email = the SAME signed approve/reject LINKS the
@@ -703,18 +845,17 @@ export function notificationEmail(
   links: NotificationLinks,
 ): NotificationEmail {
   const header = notificationHeader(input);
-  // budget_threshold headers already carry the full story; run/workflow-scoped kinds
-  // append the workflow key so subjects are scannable in a crowded inbox.
-  const subject =
-    input.kind !== "budget_threshold" && input.workflowKey
-      ? `${header} — "${input.workflowKey}"`
-      : header;
+  const subject = notificationSubject(input);
 
   const facts = notificationFacts(input);
   const actions = notificationActions(input, links);
 
+  // The headline leads BOTH bodies (#1059). The facts stay, demoted to what they always were:
+  // secondary reference detail (the full run id you paste into a support thread), below a
+  // sentence that already told the reader what happened.
   const text = [
     header,
+    notificationHeadlineText(input),
     "",
     ...facts.map((f) => `${f.title}: ${f.value}`),
     ...(actions.length
@@ -730,7 +871,10 @@ export function notificationEmail(
     .join("");
   const html = [
     `<div style="font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:14px;line-height:1.5;color:#1f2328;max-width:560px;">`,
-    `<h2 style="font-size:17px;margin:0 0 12px;">${htmlEscape(header)}</h2>`,
+    `<h2 style="font-size:17px;margin:0 0 8px;">${htmlEscape(header)}</h2>`,
+    // Explicit margins, inline: Outlook applies its own <p> spacing otherwise, and every
+    // style here has to survive a client that strips <style> blocks entirely.
+    `<p style="margin:0 0 16px;font-size:15px;line-height:1.5;">${notificationHeadlineHtml(input)}</p>`,
     factRows
       ? `<table style="border-collapse:collapse;margin:0 0 16px;">${factRows}</table>`
       : "",

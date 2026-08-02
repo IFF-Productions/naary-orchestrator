@@ -214,7 +214,11 @@ describe("run_failed — the other surfaces carry the same facts", () => {
 
   it("email subject/body carry the failure, not the word 'failed'", () => {
     const mail = notificationEmail(FAILED, LINKS);
-    expect(mail.subject).toBe('❌ Run failed — "invoice-sync"');
+    // #1059: the subject stopped at the event category, so every failure of every workflow
+    // read the same in an inbox. It now says WHICH workflow and WHAT went wrong.
+    expect(mail.subject).toBe(
+      "❌ Run failed: invoice-sync — AGENT_TIMEOUT at step summarize",
+    );
     expect(mail.text).toContain("Failed step: summarize");
     expect(mail.text).toContain("Error: AGENT_TIMEOUT");
     expect(mail.text).toContain("Reason: Agent call timed out after 60s");
