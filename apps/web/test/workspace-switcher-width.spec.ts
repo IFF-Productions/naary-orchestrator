@@ -98,10 +98,20 @@ function mustIndexOf(
   return i;
 }
 
-/** `<WorkspaceSwitcher />` as JSX rather than as text: prettier may or may not put a space before
- *  the self-closing slash, and may wrap a call that gains props onto several lines. What is being
- *  pinned is "this parent renders the switcher", not one particular run of whitespace. */
-const RENDERS_SWITCHER = /<WorkspaceSwitcher\s*(?:\/>|[^/>][\s\S]{0,200}?\/>)/;
+/**
+ * `<WorkspaceSwitcher />` as JSX rather than as text: prettier may or may not put a space before
+ * the self-closing slash. What is being pinned is "this parent renders the switcher", not one
+ * particular run of whitespace.
+ *
+ * DELIBERATELY does NOT tolerate props. A `[\s\S]{0,200}?\/>` arm for a wrapped, prop-carrying
+ * call would be lazy enough to terminate on the WRONG `/>` — and this regex is the end anchor for
+ * the drawer slice below, where `<VariantSwitcher />` is the very next sibling, so a mismatch
+ * would hand back a silently short slice (the `toBeLessThan` bound only catches a long one).
+ * Neither call site passes props today (`labelOp` has no caller anywhere in the tree), so the arm
+ * bought nothing; if one ever gains one, `mustIndexOf` fails loudly by name, which is the whole
+ * point of this file.
+ */
+const RENDERS_SWITCHER = /<WorkspaceSwitcher\s*\/>/;
 
 /** The label `<span>` — the flex child inside the trigger whose `flex: 1` is the OPPOSITE of the
  *  root's rule and must survive. Whitespace-tolerant for the same reason as above. */
