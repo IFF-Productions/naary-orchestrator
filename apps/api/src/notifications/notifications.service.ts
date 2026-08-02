@@ -349,12 +349,17 @@ export class NotificationsService {
   }
 
   /**
-   * Send a one-off TEST message to ONE channel's webhook so the user can confirm — from their
-   * own Slack/Teams channel — that the URL works and the format renders. Unlike the worker's
-   * fire-and-forget fan-out, this reports the outcome: it egress-guards the URL (SSRF: https +
-   * public only) and surfaces a non-2xx / unreachable webhook as a 400 the UI can show. This is
-   * the real verification path for the Teams integration (a mocked test can't prove Teams
-   * accepts the Adaptive Card).
+   * Send a one-off TEST message to ONE channel so the user can confirm — from their own
+   * Slack/Teams channel or inbox — that the destination works AND that the message renders the
+   * way a real alert will. Unlike the worker's fire-and-forget fan-out, this reports the outcome:
+   * it egress-guards the URL (SSRF: https + public only) and surfaces a non-2xx / unreachable
+   * webhook as a 400 the UI can show. This is the real verification path for the Teams
+   * integration (a mocked test can't prove Teams accepts the Adaptive Card).
+   *
+   * The BODY comes from {@link buildTestNotification} through the same `@naary/notifications`
+   * formatter every real notification uses (#1043) — a hand-rolled test payload could only ever
+   * answer "is the webhook reachable", and drifted from the real shape the moment the real one
+   * was redesigned (#992).
    */
   async sendTest(
     tenantId: string,
@@ -387,7 +392,9 @@ export class NotificationsService {
       throw e;
     }
 
-    const payload = row.type === "teams" ? teamsTestCard() : slackTestPayload();
+    // Same formatter, same dispatch (Teams envelope vs Slack/generic) the fan-out uses.
+    const sample = buildTestNotification();
+    const payload = notificationPayload(sample.input, row.type, sample.links);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 10_000);
     let res: { ok: boolean; status: number };
@@ -649,7 +656,8 @@ export class NotificationsService {
     });
   }
 
-  /** Send-test for an email channel: a real end-to-end SMTP send to the saved recipients.
+  /** Send-test for an email channel: a real end-to-end SMTP send to the saved recipients, of the
+   *  SAME sample rendered by the SAME `notificationEmail` a real alert uses (#1043).
    *  Failures surface as 400s with a GENERIC message — an SMTP error can embed the
    *  credentialed URI, so its text never reaches the client. */
   private async sendTestEmail(
@@ -662,8 +670,13 @@ export class NotificationsService {
         "No SMTP connection or recipients configured for this email channel — save them first.",
       );
     }
+    const sample = buildTestNotification();
     try {
-      await this.sendEmail(tenantId, cfg, emailTestMessage());
+      await this.sendEmail(
+        tenantId,
+        cfg,
+        notificationEmail(sample.input, sample.links),
+      );
     } catch (e) {
       if (e instanceof BadRequestException) throw e;
       throw new BadRequestException(
@@ -697,63 +710,54 @@ function resolveAppBaseUrl(): string | undefined {
   return undefined;
 }
 
-/** Minimal test email — subject + both bodies. Enough to confirm SMTP delivery + rendering. */
-function emailTestMessage(): { subject: string; text: string; html: string } {
-  return {
-    subject: "🔔 Test notification from Naary",
-    text: "Your Naary email channel is configured correctly. Real alerts (approvals, run failures, budget, promotions) will arrive here.",
-    html: `<div style="font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:14px;line-height:1.5;color:#1f2328;max-width:560px;"><h2 style="font-size:17px;margin:0 0 12px;">🔔 Test notification</h2><p style="margin:0;">Your Naary email channel is configured correctly. Real alerts (approvals, run failures, budget, promotions) will arrive here.</p></div>`,
-  };
-}
+/** The obviously-fake run id the sample notification is about. Real ids are
+ *  `exec-<tenantId>-<uuid v4>`, so an all-zero uuid cannot collide with one — the signed
+ *  approval link on a test message therefore authorizes a decision on NOTHING, and the public
+ *  decision page answers "Already decided" for it (the honest outcome for a test's button). */
+const TEST_RUN_ID = "exec-test-00000000-0000-0000-0000-000000000000";
 
-/** Minimal Slack test payload — a header + one line. Enough to confirm delivery + rendering. */
-function slackTestPayload(): unknown {
+/**
+ * The SAMPLE a "send test" renders: realistic INPUT for the shared formatter, never a
+ * hand-built message (#1043).
+ *
+ * "Send test" exists to show a tenant what they will receive, so it must be produced by the
+ * same `@naary/notifications` code path as the real thing — `notificationPayload` for a
+ * webhook, `notificationEmail` for a mailbox. A second, hand-rolled shape can only answer "is
+ * the destination reachable", and is free to drift from the real one forever in the direction
+ * of the one nobody looks at (it did: #992 redesigned every real notification and the test
+ * message still showed the pre-#992 card).
+ *
+ * `approval_pending` is the sample because it exercises the MOST of the payload — header,
+ * prose headline, the grey context line, and an actions row of styled buttons (the Adaptive
+ * Card `Action.OpenUrl` styles are exactly what a Teams Workflows webhook is most likely to
+ * reject) — and because "⏳ Approval needed" is inert in a shared channel in a way that a
+ * sample "❌ Run failed" (which would also become an EMAIL SUBJECT) is not.
+ *
+ * What makes it read as a test lives entirely in the input — a fake workflow key and a title
+ * that says so, both of which the formatter renders prominently — never in a bespoke layout.
+ */
+export function buildTestNotification(): {
+  input: NotificationInput;
+  links: NotificationLinks;
+} {
+  // Same link semantics as every other API-side send (absolute only; signed approval link).
+  const base = resolveAppBaseUrl();
   return {
-    text: "🔔 Test notification from Naary — your webhook is configured correctly.",
-    blocks: [
-      {
-        type: "header",
-        text: { type: "plain_text", text: "🔔 Test notification", emoji: true },
-      },
-      {
-        type: "section",
-        text: {
-          type: "mrkdwn",
-          text: "Your Naary webhook is configured correctly. Real alerts (approvals, run failures) will arrive here.",
-        },
-      },
-    ],
-  };
-}
-
-/** Minimal Teams Adaptive Card test payload in the {type:"message",attachments:[…]} envelope. */
-function teamsTestCard(): unknown {
-  return {
-    type: "message",
-    attachments: [
-      {
-        contentType: "application/vnd.microsoft.card.adaptive",
-        contentUrl: null,
-        content: {
-          $schema: "http://adaptivecards.io/schemas/adaptive-card.json",
-          type: "AdaptiveCard",
-          version: "1.2",
-          body: [
-            {
-              type: "TextBlock",
-              text: "🔔 Test notification",
-              weight: "Bolder",
-              size: "Large",
-              wrap: true,
-            },
-            {
-              type: "TextBlock",
-              text: "Your Naary webhook is configured correctly. Real alerts (approvals, run failures) will arrive here.",
-              wrap: true,
-            },
-          ],
-        },
-      },
-    ],
+    input: {
+      kind: "approval_pending",
+      workflowId: TEST_RUN_ID,
+      workflowKey: "naary-send-test",
+      title:
+        "Test notification: nothing is waiting on you. Real alerts arrive looking exactly like this.",
+    },
+    links: {
+      approvalUrl:
+        base && encryptionKey()
+          ? `${base}${approvalPath(TEST_RUN_ID)}`
+          : undefined,
+      runUrl: base
+        ? `${base}/app/runs/${encodeURIComponent(TEST_RUN_ID)}`
+        : undefined,
+    },
   };
 }

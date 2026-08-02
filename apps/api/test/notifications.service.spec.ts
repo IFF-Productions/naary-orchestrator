@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const findMany = vi.fn();
 const findFirst = vi.fn();
@@ -43,8 +43,19 @@ vi.mock("@naary/connections", () => ({
   pinnedSmtpUri: vi.fn(),
 }));
 
+// `approvalPath` mints a token over a CURRENT-TIME expiry claim. Pin it so the payload this
+// spec DERIVES from the formatter is byte-identical to the one the service sent (the exp
+// second would otherwise be free to tick over between the two calls). File-wide, so the
+// reminder specs below run against the stub too — none of them assert link contents.
+vi.mock("../src/executions/approval-token", () => ({
+  approvalPath: (id: string) =>
+    `/approve/${encodeURIComponent(id)}?token=deadbeef&exp=4102444800`,
+}));
+
+import { notificationEmail, notificationPayload } from "@naary/notifications";
 import {
   __apiNotifyDeps,
+  buildTestNotification,
   MAX_CHANNELS_PER_ENV,
   MAX_EMAIL_RECIPIENTS,
   NotificationsService,
@@ -242,16 +253,35 @@ describe("NotificationsService.sendTest", () => {
     expect(safeFetch).not.toHaveBeenCalled();
   });
 
-  it("POSTs Slack blocks for a slack channel and reports ok on 2xx", async () => {
-    findFirst.mockResolvedValue(row());
-    const out = await svc.sendTest("t-1", "e-1", "ch_1");
-    expect(out).toEqual({ ok: true, status: 200 });
-    expect(assertEgressAllowed).toHaveBeenCalledWith(
-      "https://hooks.slack.com/x",
-    );
-    const body = JSON.parse(safeFetch.mock.calls[0][1].body);
-    expect(body.blocks[0].type).toBe("header"); // Slack shape, not the Teams envelope
-    expect(body.type).toBeUndefined();
+  /** The NO-LINKS branch — an API with no APP_BASE_URL, which is most deployments' default.
+   *  Asserted the same way as the linked case (#1043): the body is COMPUTED from the shared
+   *  formatter, so a hand-rolled "no links" fallback would fail here too. */
+  it("POSTs the shared formatter's Slack body (no APP_BASE_URL) and reports ok on 2xx", async () => {
+    // Both candidates for the public base URL are unset (APP_BASE_URL, then CORS_ORIGINS).
+    const saved = {
+      APP_BASE_URL: process.env.APP_BASE_URL,
+      CORS_ORIGINS: process.env.CORS_ORIGINS,
+    };
+    delete process.env.APP_BASE_URL;
+    delete process.env.CORS_ORIGINS;
+    try {
+      findFirst.mockResolvedValue(row());
+      const out = await svc.sendTest("t-1", "e-1", "ch_1");
+      expect(out).toEqual({ ok: true, status: 200 });
+      expect(assertEgressAllowed).toHaveBeenCalledWith(
+        "https://hooks.slack.com/x",
+      );
+      const { input, links } = buildTestNotification();
+      expect(links).toEqual({ approvalUrl: undefined, runUrl: undefined });
+      const body = JSON.parse(safeFetch.mock.calls[0][1].body);
+      expect(body).toEqual(notificationPayload(input, "slack", links));
+      expect(body.type).toBeUndefined(); // Slack shape, not the Teams envelope
+    } finally {
+      for (const [k, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
   });
 
   it("POSTs a Teams Adaptive Card envelope for a teams channel", async () => {
@@ -287,6 +317,90 @@ describe("NotificationsService.sendTest", () => {
     await expect(svc.sendTest("t-1", "e-1", "ch_1")).rejects.toThrow(
       /responded 404/,
     );
+  });
+});
+
+/**
+ * #1043 — the property under test is the PATH, not the shape.
+ *
+ * "Send test" is the one surface whose purpose is showing a tenant what they will receive, so
+ * every expectation here is COMPUTED by calling `@naary/notifications` with the service's own
+ * sample input — never a transcribed copy of today's blocks. Redesign the formatter and these
+ * stay green; re-introduce a second, hand-rolled test payload (as #992 silently left behind)
+ * and they go red, which is the regression that actually recurred.
+ */
+describe("NotificationsService.sendTest — the test message IS the real message (#1043)", () => {
+  const saved = {
+    APP_BASE_URL: process.env.APP_BASE_URL,
+    ENCRYPTION_KEY: process.env.ENCRYPTION_KEY,
+  };
+  beforeEach(() => {
+    // Links (and therefore the action buttons — the part of the payload a Teams Workflows
+    // webhook is most likely to reject) only exist once the API knows its public base URL.
+    process.env.APP_BASE_URL = "https://app.naary.io";
+    process.env.ENCRYPTION_KEY = "0".repeat(64);
+  });
+  afterEach(() => {
+    process.env.APP_BASE_URL = saved.APP_BASE_URL;
+    process.env.ENCRYPTION_KEY = saved.ENCRYPTION_KEY;
+    if (saved.APP_BASE_URL === undefined) delete process.env.APP_BASE_URL;
+    if (saved.ENCRYPTION_KEY === undefined) delete process.env.ENCRYPTION_KEY;
+  });
+
+  it("POSTs a Slack body byte-identical to the shared formatter's", async () => {
+    findFirst.mockResolvedValue(row());
+    await svc.sendTest("t-1", "e-1", "ch_1");
+    const { input, links } = buildTestNotification();
+    expect(JSON.parse(safeFetch.mock.calls[0][1].body as string)).toEqual(
+      notificationPayload(input, "slack", links),
+    );
+  });
+
+  it("POSTs a Teams card byte-identical to the shared formatter's", async () => {
+    findFirst.mockResolvedValue(
+      row({ type: "teams", webhookUrl: "https://teams.example/x" }),
+    );
+    await svc.sendTest("t-1", "e-1", "ch_1");
+    const { input, links } = buildTestNotification();
+    expect(JSON.parse(safeFetch.mock.calls[0][1].body as string)).toEqual(
+      notificationPayload(input, "teams", links),
+    );
+  });
+
+  it("mails a subject + both bodies byte-identical to the shared formatter's", async () => {
+    findFirst.mockResolvedValue(emailRow());
+    await svc.sendTest("t-1", "e-1", "ch_mail");
+    const { input, links } = buildTestNotification();
+    const mail = sendMail.mock.calls[0][0];
+    expect({
+      subject: mail.subject,
+      text: mail.text,
+      html: mail.html,
+    }).toEqual(notificationEmail(input, links));
+  });
+
+  /** Not a shape pin: these are the STRUCTURAL properties of the post-#992 formatter (prose
+   *  headline + small grey context line, and deliberately no two-column `fields` grid) that
+   *  the hand-rolled test payload provably lacked. Any formatter that still has them passes. */
+  it("carries the redesigned structure — a context line, no fields grid", async () => {
+    findFirst.mockResolvedValue(row());
+    await svc.sendTest("t-1", "e-1", "ch_1");
+    const body = JSON.parse(safeFetch.mock.calls[0][1].body as string);
+    const blocks = body.blocks as { type: string; fields?: unknown }[];
+    expect(blocks.some((b) => b.type === "context")).toBe(true);
+    expect(blocks.every((b) => b.type !== "section" || !b.fields)).toBe(true);
+    // The buttons a real approval carries are exercised too, not just the text blocks.
+    expect(blocks.some((b) => b.type === "actions")).toBe(true);
+  });
+
+  /** The one thing the sample must say in its own right: this is a test. It lives in the
+   *  INPUT (fake key + a title that says so), which is why the formatter can render it. */
+  it("reads as a test — fake workflow key and a title that says so", async () => {
+    findFirst.mockResolvedValue(row());
+    await svc.sendTest("t-1", "e-1", "ch_1");
+    const raw = safeFetch.mock.calls[0][1].body as string;
+    expect(raw).toContain("naary-send-test");
+    expect(raw).toContain("Test notification");
   });
 });
 
@@ -397,7 +511,9 @@ describe("NotificationsService.sendTest — email channel", () => {
     const mail = sendMail.mock.calls[0][0];
     expect(mail.to).toEqual(["ops@acme.io"]);
     expect(mail.from).toBe("ops@acme.io"); // decoded from the URI's user
-    expect(mail.subject).toContain("Test notification");
+    // The sample says it is a test through the formatter's own rendering, not a bespoke
+    // subject line (#1043); the same-code-path pin lives in the describe block below.
+    expect(mail.subject).toContain("naary-send-test");
     // No webhook involved.
     expect(safeFetch).not.toHaveBeenCalled();
   });
