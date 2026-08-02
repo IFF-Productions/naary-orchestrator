@@ -404,7 +404,13 @@ export function InsightsBody({ data }: { data: InsightsReport }) {
     <div style={{ display: "grid", gap: 16 }}>
       <ChartCard
         title="Spend over time"
-        total={`${usd(data.totals.costUsd)} · ${data.totals.calls.toLocaleString()} calls`}
+        // #1060: qualify the total when part of it was booked from rule-6 ESTIMATES rather than
+        // provider-reported counts. Appended only when non-zero (see InsightsTab).
+        total={`${usd(data.totals.costUsd)} · ${data.totals.calls.toLocaleString()} calls${
+          data.totals.estimatedCalls
+            ? ` · ${data.totals.estimatedCalls.toLocaleString()} estimated`
+            : ""
+        }`}
       >
         {bars.length > 0 ? (
           <DayCostBars bars={bars} />

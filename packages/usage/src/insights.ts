@@ -19,12 +19,25 @@ export interface InsightsEvent {
   nodeType?: string | null;
   /** In-activity measured call duration (Slice 2) — null/absent rows contribute no duration. */
   durationMs?: number | null;
+  /** Were this row's TOKENS the Tier-1 rule-6 fallback estimate rather than a provider
+   *  measurement (#1060)? Absent/false on pre-feature rows, which is the honest reading. */
+  estimated?: boolean;
 }
 
 export interface InsightsBucketTotals {
   costUsd: number;
   totalTokens: number;
   calls: number;
+  /**
+   * How many of `calls` booked ESTIMATED token counts (#1060). Reported alongside the totals rather
+   * than as a separate breakdown so a dashboard can qualify the number it is already showing —
+   * "$12.40 (3 of 40 calls estimated)" — instead of presenting a partly-estimated figure as if it
+   * were metered. A bucket with `estimatedCalls: 0` is fully measured; there is no third state.
+   *
+   * A COUNT, not a token sum: the point is how much of the bill rests on estimates, and the tokens
+   * inside an estimated call are exactly the numbers we don't trust to compare.
+   */
+  estimatedCalls: number;
 }
 
 export interface InsightsResult {
@@ -200,10 +213,12 @@ function bump<T>(
     costUsd: 0,
     totalTokens: 0,
     calls: 0,
+    estimatedCalls: 0,
   };
   cur.costUsd += e.costUsd;
   cur.totalTokens += e.totalTokens;
   cur.calls += 1;
+  if (e.estimated) cur.estimatedCalls += 1;
   map.set(key, cur as T & InsightsBucketTotals);
 }
 
@@ -229,6 +244,7 @@ export function aggregateInsights(
 ): InsightsResult {
   let totalCost = 0;
   let totalTokens = 0;
+  let totalEstimated = 0; // #1060 — how much of the total rests on rule-6 estimates
   const day = new Map<string, InsightsBucketTotals & { date: string }>();
   const env = new Map<
     string,
@@ -256,6 +272,7 @@ export function aggregateInsights(
   for (const e of events) {
     totalCost += e.costUsd;
     totalTokens += e.totalTokens;
+    if (e.estimated) totalEstimated += 1;
 
     bump(day, utcDay(e.createdAt), () => ({ date: utcDay(e.createdAt) }), e);
     bump(
@@ -293,6 +310,7 @@ export function aggregateInsights(
       costUsd: round6(totalCost),
       totalTokens,
       calls: events.length,
+      estimatedCalls: totalEstimated,
     },
     // Time-series ascending by date so a chart can render left→right without re-sorting.
     byDay: finalize([...day.values()]).sort((a, b) =>

@@ -202,7 +202,12 @@ describe("UsageService.getInsights RBAC filtering", () => {
     mockExecutionFindMany();
     const out = await makeService(perms(TERMS)).getInsights("t-1", {}, member);
 
-    expect(out.totals).toEqual({ costUsd: 0.3, totalTokens: 450, calls: 3 });
+    expect(out.totals).toEqual({
+      costUsd: 0.3,
+      totalTokens: 450,
+      calls: 3,
+      estimatedCalls: 0, // #1060
+    });
     expect(out.byWorkflow.map((w) => w.workflowKey).sort()).toEqual([
       "wf-a",
       "wf-b",
@@ -213,7 +218,13 @@ describe("UsageService.getInsights RBAC filtering", () => {
     // The hidden null-key bucket never appears for a restricted subject.
     expect(out.byWorkflow.some((w) => w.workflowKey === null)).toBe(false);
     expect(out.byDay).toEqual([
-      { date: "2026-07-16", costUsd: 0.3, totalTokens: 450, calls: 3 },
+      {
+        date: "2026-07-16",
+        costUsd: 0.3,
+        totalTokens: 450,
+        calls: 3,
+        estimatedCalls: 0, // #1060
+      },
     ]);
     expect(out.byEnvironment.map((e) => e.environmentId).sort()).toEqual(
       [null, "env-prod", "env-sbx"].sort(),

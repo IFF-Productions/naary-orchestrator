@@ -89,6 +89,7 @@ describe("runAgent", () => {
     const recorded = recordUsage.mock.calls[0][0];
     expect(recorded.usage.inputTokens).toBe(1000);
     expect(recorded.usage.outputTokens).toBe(500);
+    expect(recorded.estimated).toBe(false); // #1060 — provider-reported, and the row records that
     // the captured tokens price to a real, non-zero cost
     expect(
       computeCost({
@@ -167,6 +168,9 @@ describe("runAgent", () => {
     const recorded = recordUsage.mock.calls[0][0];
     expect(recorded.usage.inputTokens).toBeGreaterThan(0);
     expect(recorded.usage.outputTokens).toBeGreaterThan(0);
+    // #1060: the ai@6 usage-undefined case is THE documented rule-6 estimate, so it is the one
+    // that most needs to be distinguishable in the ledger from a genuine 1500-token call.
+    expect(recorded.estimated).toBe(true);
   });
 
   it("maps 'No output generated' to NON-retryable AGENT_NO_OUTPUT, not a retry storm (#543)", async () => {

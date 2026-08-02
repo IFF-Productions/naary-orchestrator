@@ -675,6 +675,21 @@ model UsageEvent {
   // call (clock reads live in activities, never workflow code). Nullable for pre-feature rows.
   // Still tokens/cost/timing only — never prompt or completion text (ledger privacy).
   durationMs        Int?
+  // Were these TOKEN COUNTS measured by the provider, or are they the Tier-1 rule-6 fallback
+  // ESTIMATE (#1060)? Rule 6 makes us book an estimate rather than zero when a provider reports no
+  // usage — but until this column, a measured 900 and an estimated 900 were indistinguishable in
+  // the one durable record anyone audits or invoices from. The distinction lived on spans and
+  // metrics only, which are sampled and short-retention.
+  //
+  // Non-null with a default, deliberately: `false` on a pre-feature row is not a guess, it is the
+  // honest reading — those rows are "not known to be estimated". Every recording site sets it in
+  // the same change that adds the column, because a column only SOME sites populated would persist
+  // genuine estimates as `false`, which is worse than not having it at all.
+  //
+  // Scope: TOKENS, not cost. A row can be `estimated: false` and still carry a fallback PRICE (an
+  // unpriced model books cost 0; textToSpeech prices an unknown model against the driver default).
+  // Those are pricing gaps — a different failure with a different fix.
+  estimated         Boolean  @default(false)
   createdAt         DateTime @default(now())
 
   @@unique([executionId, nodeId]) // idempotent ledger: a retried activity can't double-write

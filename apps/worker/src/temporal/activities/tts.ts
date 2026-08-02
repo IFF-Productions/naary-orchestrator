@@ -288,6 +288,12 @@ export async function callTextToSpeech(
         outputTokens: 0,
         totalTokens: characters,
       },
+      // #1060: FALSE, and this is the one site where that deserves a sentence. TTS bills per
+      // character and we COUNTED the characters we sent — that is a measurement, not a fallback,
+      // even though no provider "usage" object was involved. The `pricedModel` fallback a few lines
+      // up IS an approximation, but it approximates the PRICE, not the quantity; `estimated` is
+      // scoped to tokens precisely so those two stay separable in an audit.
+      estimated: false,
     });
     const accumulatedCost = costUsd ?? cfg.costUsd ?? 0;
 

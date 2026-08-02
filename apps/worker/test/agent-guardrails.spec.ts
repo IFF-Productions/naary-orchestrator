@@ -217,6 +217,10 @@ describe("content rules", () => {
       inputTokens: 10,
       outputTokens: 5,
     });
+    // #1060: the blocked path is a SECOND recordUsage call site in this file, so it gets its own
+    // assertion — the provenance has to travel with the numbers down both branches, not just the
+    // happy one. Here the provider reported real counts, so the row reads measured.
+    expect(recordUsage.mock.calls[0][0].estimated).toBe(false);
     await flush();
     expect(auditEvents[0]).toMatchObject({
       action: "Blocked agent output by content rule(s) output:leak",

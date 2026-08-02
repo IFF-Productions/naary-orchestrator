@@ -233,6 +233,10 @@ export async function callCodeAgent(
             input,
             envlp.result,
           );
+    // #1060: which branch above ran IS the provenance, and it is unrecoverable from `usage` — an
+    // estimated 900 and a reported 900 are the same integer. Recomputed rather than folded into the
+    // ternary above so the `envlp.usage?.x` test keeps narrowing `envlp.usage` for the true branch.
+    const estimated = !(envlp.usage?.inputTokens || envlp.usage?.outputTokens);
     // Price against a REAL model for THIS driver's provider so the ledger can bill from tokens —
     // a placeholder like "cli" has no pricing row and would throw (after the CLI already ran and
     // cost money). Per-driver, so a gemini run isn't priced against a Claude table.
@@ -247,6 +251,7 @@ export async function callCodeAgent(
       provider: driver.credentialProvider,
       model,
       usage,
+      estimated, // #1060 — true when the CLI envelope carried no counts and the char/4 estimate ran
     });
     // #827: same guard and the same placement as the agent node — AFTER recordUsage, because the
     // CLI has already run and been billed by now. A guard on one node and not the other would just

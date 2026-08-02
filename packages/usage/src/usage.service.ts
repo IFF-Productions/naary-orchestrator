@@ -26,6 +26,18 @@ export interface RecordUsageInput {
   provider: string;
   model: string;
   usage: UsageTokens;
+  /**
+   * Are `usage`'s token counts the Tier-1 rule-6 fallback ESTIMATE (#1060)? The caller is the only
+   * one who can answer — by the time the numbers arrive here, an estimated 900 and a measured 900
+   * are the same two integers.
+   *
+   * TOKENS, not cost. `costUsd` has its own fallbacks (an unpriced model books 0 below; the TTS
+   * path prices an unknown model against the driver default) and this flag says nothing about them.
+   *
+   * Optional in the type, `false` in the row: every CURRENT recording site passes it explicitly, so
+   * the default exists for future call sites and for older serialized inputs — not as a shrug.
+   */
+  estimated?: boolean;
 }
 
 /**
@@ -75,6 +87,10 @@ export async function recordUsage(input: RecordUsageInput) {
     reasoningTokens,
     // Decimal(12,6) — fix to 6 places so we never lose sub-cent precision to float.
     costUsd: new Prisma.Decimal(costUsd.toFixed(6)),
+    // Whether the TOKENS above were measured or estimated (#1060). Note this is deliberately NOT
+    // derived here from `costUsd === 0` or from the numbers themselves: a real call really can
+    // cost 0 (unpriced model), and an estimate is numerically indistinguishable from a measurement.
+    estimated: input.estimated === true,
   };
 
   // Idempotent on (executionId, nodeId): if the activity is retried after the

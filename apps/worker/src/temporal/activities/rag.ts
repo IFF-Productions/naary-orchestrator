@@ -127,6 +127,10 @@ async function recordEmbedUsage(
   /** Node-type tag + measured call duration (Slice 2) — the caller knows which node
    *  kind it serves and measured the embed around the provider call. */
   timing?: { nodeType: string; durationMs: number },
+  /** Did `tokens` come from `resolveEmbedTokens`'s estimate rather than the provider (#1060)?
+   *  REQUIRED at both call sites, not defaulted: an omitted argument here would silently persist
+   *  every embedding estimate as measured — the precise failure #1060 exists to prevent. */
+  estimated?: boolean,
 ): Promise<number> {
   await __agentDeps.recordUsage({
     tenantId: meta.tenantId,
@@ -138,6 +142,7 @@ async function recordEmbedUsage(
     provider: "openai",
     model: EMBED_MODEL,
     usage: { inputTokens: tokens, outputTokens: 0 },
+    estimated,
   });
   return embedCostUsd(tokens);
 }
@@ -149,9 +154,9 @@ async function recordEmbedUsage(
  *
  * `estimated` rides the SAME mechanism the agent path uses — `naary.gen_ai.usage.estimated` as a
  * span attribute AND as a stable dimension on the `gen_ai.client.token.usage` metric — so a
- * dashboard cannot mistake a rule-6 estimate for a metered count. (It is NOT persisted on the
- * UsageEvent row — no recording site does, and a column only one site populated would be worse
- * than none; #1060 adds it across all four sites at once.)
+ * dashboard cannot mistake a rule-6 estimate for a metered count. It is ALSO returned to the
+ * callers, who persist it on the UsageEvent row (#1060): spans and metrics are sampled and
+ * short-retention, and the ledger is what anyone audits or invoices from.
  *
  * Wraps only the provider call plus the pure usage derivation, never the credential fetch or the
  * pgvector writes, so the span's duration keeps meaning "embedding latency".
@@ -208,22 +213,25 @@ export async function callVectorUpsert(
       { tenantId: meta.tenantId },
     );
   }
-  const { value: embeddings, tokens } = await embedWithUsage(
-    chunks,
-    async () => {
-      const r = await __ragDeps.embedManyTexts(apiKey, chunks);
-      return { value: r.embeddings, tokens: r.tokens };
-    },
-  );
+  const {
+    value: embeddings,
+    tokens,
+    estimated,
+  } = await embedWithUsage(chunks, async () => {
+    const r = await __ragDeps.embedManyTexts(apiKey, chunks);
+    return { value: r.embeddings, tokens: r.tokens };
+  });
   for (let i = 0; i < chunks.length; i++) {
     await getPrisma().$executeRaw`
       INSERT INTO "VectorChunk" ("id", "tenantId", "collection", "chunkText", "embedding")
       VALUES (${randomUUID()}, ${meta.tenantId}, ${cfg.collection}, ${chunks[i]}, ${toVectorLiteral(embeddings[i])}::vector)`;
   }
-  const costUsd = await recordEmbedUsage(meta, tokens, {
-    nodeType: "vectorUpsert",
-    durationMs: Date.now() - startedAtMs,
-  });
+  const costUsd = await recordEmbedUsage(
+    meta,
+    tokens,
+    { nodeType: "vectorUpsert", durationMs: Date.now() - startedAtMs },
+    estimated, // #1060 — the same flag the span already carries now reaches the ledger row
+  );
   activityRuns.inc({ activity: "callVectorUpsert", outcome: "ok" });
   return { status: "ok", result: { upserted: chunks.length }, costUsd };
 }
@@ -263,13 +271,14 @@ export async function callVectorQuery(
     );
   }
   // The estimate is over what was actually embedded — the query text — mirroring the upsert path.
-  const { value: embedding, tokens } = await embedWithUsage(
-    [query],
-    async () => {
-      const r = await __ragDeps.embedOne(apiKey, query);
-      return { value: r.embedding, tokens: r.tokens };
-    },
-  );
+  const {
+    value: embedding,
+    tokens,
+    estimated,
+  } = await embedWithUsage([query], async () => {
+    const r = await __ragDeps.embedOne(apiKey, query);
+    return { value: r.embedding, tokens: r.tokens };
+  });
   const topK = Math.min(Math.max(1, Math.floor(cfg.topK ?? 4)), 50);
   const vec = toVectorLiteral(embedding);
   const rows = await getPrisma().$queryRaw<
@@ -284,10 +293,12 @@ export async function callVectorQuery(
     chunkText: r.chunkText,
     score: Number(r.score),
   }));
-  const costUsd = await recordEmbedUsage(meta, tokens, {
-    nodeType: "vectorQuery",
-    durationMs: Date.now() - startedAtMs,
-  });
+  const costUsd = await recordEmbedUsage(
+    meta,
+    tokens,
+    { nodeType: "vectorQuery", durationMs: Date.now() - startedAtMs },
+    estimated, // #1060 — the same flag the span already carries now reaches the ledger row
+  );
   activityRuns.inc({ activity: "callVectorQuery", outcome: "ok" });
   return { status: "ok", result: { matches }, costUsd };
 }

@@ -504,6 +504,7 @@ describe("callCodeAgent activity", () => {
     expect(recordUsage).toHaveBeenCalledOnce();
     const usageArg = recordUsage.mock.calls[0][0];
     expect(usageArg.usage.inputTokens).toBe(1200);
+    expect(usageArg.estimated).toBe(false); // #1060 — the CLI measured these, so the row says so
     expect(out.costUsd).toBe(0.0123);
     expect(out.output.result).toContain("no issues");
     expect(out.output.tool).toBe("claude");
@@ -524,6 +525,9 @@ describe("callCodeAgent activity", () => {
     expect(usageArg.usage.inputTokens).toBeGreaterThanOrEqual(
       Math.floor(bigPrompt.length / 4),
     );
+    // #1060: the row must remember that these numbers were derived, not reported. Without this the
+    // estimate persists as indistinguishable from a metered count, which is the whole gap.
+    expect(usageArg.estimated).toBe(true);
   });
 
   it("a CLI-reported failure carries the reason into the type + message (#551), bills the attempt", async () => {
