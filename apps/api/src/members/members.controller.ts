@@ -12,7 +12,7 @@ import { ApiBearerAuth } from "@nestjs/swagger";
 import { CurrentPrincipal, type Principal } from "../auth/tenant.decorator";
 import { ApiEndpoint } from "../swagger/api-decorators";
 import { AddMemberDto, ChangeRoleDto } from "./member.dto";
-import { MemberResponse } from "./member.response";
+import { MemberResponse, RemoveMemberResponse } from "./member.response";
 import { type MemberView, MembersService } from "./members.service";
 
 /**
@@ -95,16 +95,20 @@ export class MembersController {
   @ApiEndpoint({
     summary: "Remove a member",
     description:
-      "By Firebase uid (204; no-op if unknown). Requires owner/admin; removing an " +
-      "admin/owner is owner-only; the last owner cannot be removed (409).",
+      "By Firebase uid (200; `removed: false` if the uid held no membership here). Requires " +
+      "owner/admin; removing an admin/owner is owner-only; the last owner cannot be removed " +
+      "(409).\n\nThe removal ALWAYS commits before the body is assembled. " +
+      "`strandedApprovals` then reports the paused runs whose frozen approver snapshot named " +
+      "this person (#1053) — the removal is never blocked, delayed into failure, or " +
+      "auto-decided on their behalf.",
+    ok: RemoveMemberResponse,
   })
   @Delete(":userId")
-  @HttpCode(204)
   async remove(
     @Param("id") tenantId: string,
     @CurrentPrincipal() caller: Principal,
     @Param("userId") userId: string,
-  ): Promise<void> {
-    await this.members.removeMember(tenantId, caller, userId);
+  ): Promise<RemoveMemberResponse> {
+    return this.members.removeMember(tenantId, caller, userId);
   }
 }

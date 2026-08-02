@@ -8,6 +8,7 @@ import type {
   AuditEvent,
   DashboardItem,
   Member,
+  MemberRemoval,
   MintedToken,
   Workspace,
 } from "./types";
@@ -114,10 +115,27 @@ export const workspacesApi = {
     );
   },
   // Remove an active member (by Firebase uid). 409 when removing the last owner.
-  removeMember(tenantId: string, userId: string): Promise<void> {
-    return http(
+  // 200, not 204: the body reports the paused approvals the removal stranded (#1053). The
+  // removal itself has already committed — this is never a veto.
+  async removeMember(tenantId: string, userId: string): Promise<MemberRemoval> {
+    const res = await http<MemberRemoval | undefined>(
       `/tenants/${encodeURIComponent(tenantId)}/members/${encodeURIComponent(userId)}`,
       { method: "DELETE" },
+    );
+    // A staged deploy puts this (new) SPA in front of an OLD api for a window, and that api
+    // still answers 204 — `http` returns undefined for an empty body. Without this the caller
+    // would read `.strandedApprovals` off undefined and report "Could not remove member" for a
+    // removal that SUCCEEDED. Nothing known ⇒ nothing claimed, so `partial`.
+    return (
+      res ?? {
+        removed: true,
+        strandedApprovals: {
+          total: 0,
+          needsOwnerOrAdmin: 0,
+          partial: true,
+          runs: [],
+        },
+      }
     );
   },
   // Revoke a pending invitation (by invitation id).

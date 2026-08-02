@@ -22,7 +22,7 @@ const invitation = {
   deleteMany: vi.fn(),
 };
 const tenantSettings = { findUnique: vi.fn() };
-const groupMember = { deleteMany: vi.fn() };
+const groupMember = { deleteMany: vi.fn(), findMany: vi.fn() };
 /** Resolves what it is handed — a bare vi.fn() would silently swallow the batched deletes. */
 const $transaction = vi.fn(async (ops: Promise<unknown>[]) => Promise.all(ops));
 vi.mock("@naary/db", () => ({
@@ -36,6 +36,8 @@ vi.mock("@naary/db", () => ({
 }));
 
 import type { Principal } from "../src/auth/tenant.decorator";
+import type { AuditService } from "../src/audit/audit.service";
+import type { ExecutionsService } from "../src/executions/executions.service";
 import type { MailerService } from "../src/mail/mailer.service";
 import type { MembershipService } from "../src/membership/membership.service";
 import { MembersService } from "../src/members/members.service";
@@ -44,10 +46,21 @@ import type { PermissionsService } from "../src/permissions/permissions.service"
 const invalidate = vi.fn();
 const sendInvitation = vi.fn();
 const invalidateTenant = vi.fn();
+/** #1053 — the post-removal stranded-approval read. Nothing here exercises it (see
+ *  members.stranded-approvals.spec.ts); "no paused runs" is the quiet default. */
+const heldApprovals = vi.fn().mockResolvedValue({
+  total: 0,
+  needsOwnerOrAdmin: 0,
+  partial: false,
+  runs: [],
+});
+const record = vi.fn().mockResolvedValue(undefined);
 const svc = new MembersService(
   { invalidate } as unknown as MembershipService,
   { sendInvitation } as unknown as MailerService,
   { invalidateTenant } as unknown as PermissionsService,
+  { heldApprovals } as unknown as ExecutionsService,
+  { record } as unknown as AuditService,
 );
 
 /** The invite email is fire-and-forget (void) — flush microtasks so the async IIFE settles. */
@@ -68,6 +81,7 @@ beforeEach(() => {
     ...Object.values(invitation),
     tenantSettings.findUnique,
     groupMember.deleteMany,
+    groupMember.findMany,
     invalidate,
     invalidateTenant,
     sendInvitation,
@@ -75,6 +89,7 @@ beforeEach(() => {
     m.mockReset();
   }
   groupMember.deleteMany.mockResolvedValue({ count: 0 });
+  groupMember.findMany.mockResolvedValue([]); // #1053 — approver identity read
   membership.findMany.mockResolvedValue([]);
   membership.findFirst.mockResolvedValue(null);
   membership.findUnique.mockResolvedValue(null);

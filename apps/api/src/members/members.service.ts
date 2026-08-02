@@ -6,7 +6,14 @@ import {
 } from "@nestjs/common";
 import { getPrisma } from "@naary/db";
 import type { Principal } from "../auth/tenant.decorator";
+import { AuditService } from "../audit/audit.service";
 import { appBaseUrl } from "../connections/connect-return";
+import {
+  NO_HELD_APPROVALS,
+  UNKNOWN_HELD_APPROVALS,
+  type HeldApprovals,
+} from "../executions/executions.approval-holds";
+import { ExecutionsService } from "../executions/executions.service";
 import { MailerService } from "../mail/mailer.service";
 import { MembershipService } from "../membership/membership.service";
 import { PermissionsService } from "../permissions/permissions.service";
@@ -69,6 +76,10 @@ export class MembersService {
     private readonly memberships: MembershipService,
     private readonly mailer: MailerService,
     private readonly permissions: PermissionsService,
+    /** #1053 — the only holder of the Temporal client, for the post-removal approval read. */
+    private readonly executions: ExecutionsService,
+    /** #1053 — the path-INDEPENDENT surface (see {@link removeMember}). */
+    private readonly audit: AuditService,
   ) {}
 
   /**
@@ -239,22 +250,59 @@ export class MembersService {
    * TENANT-SCOPED through the group relation: `{ userId }` alone would wipe the user's groups
    * in EVERY workspace. One transaction, so a membership can never be deleted without its
    * group rows going too.
+   *
+   * ---
+   *
+   * STRANDED APPROVALS (#1053). Removing someone does not touch the paused runs that named
+   * them as approver: a `humanApproval` gate froze its approver list into `ctx.__approval` at
+   * pause time. So the removal can silently leave a compliance gate with nobody able to
+   * decide it — and with no `timeoutHours`, parked forever. We report it; we NEVER auto-decide
+   * it. Auto-rejecting on removal would make a run report a decision no human made, on a gate
+   * whose entire purpose is that a human made it.
+   *
+   * REPORT AFTER, never gate. The removal commits FIRST and the report is assembled from what
+   * is left — three properties fall out of that ordering, and all three matter:
+   *  - a removal can never be blocked or slowed into failure by Temporal being unreachable
+   *    (de-provisioning is security-relevant; a member removal that 500s because a workflow
+   *    service is down is a worse bug than the one this fixes);
+   *  - "is anyone left to approve?" is answered against the state the admin is actually in;
+   *  - it is honest on the SCIM/directory-sync path. A pre-flight confirmation only helps a
+   *    human at a keyboard; an automated de-provisioner would either always confirm (making
+   *    the warning dead code) or always fail (breaking de-provisioning). Nothing is lost by
+   *    reporting after, because the resolution — an owner/admin decision, or the HMAC signed
+   *    link — works identically before and after the removal.
+   *
+   * Two surfaces, because the response body alone is not one a directory-sync connector reads:
+   * the returned {@link HeldApprovals} (which the Team screen shows), and an AuditEvent, which
+   * is the workspace-visible record every removal path lands in, human-driven or not.
+   *
+   * The group ids are read BEFORE the delete on purpose — the `GroupMember` rows are gone
+   * afterwards, and a group-routed gate can only be matched by id.
    */
   async removeMember(
     tenantId: string,
     caller: Principal,
     userId: string,
-  ): Promise<void> {
+  ): Promise<{ removed: boolean; strandedApprovals: HeldApprovals }> {
     assertManager(caller);
     const prisma = getPrisma();
     const target = await prisma.membership.findUnique({
       where: { userId_tenantId: { userId, tenantId } },
     });
-    if (!target) return; // unknown/foreign uid — no-op, not a 500
+    // unknown/foreign uid — no-op, not a 500. Nothing was removed, so nothing was stranded.
+    if (!target)
+      return { removed: false, strandedApprovals: NO_HELD_APPROVALS };
     assertOwnerForElevated(caller, target.role);
     if (target.role === "owner") {
       await this.assertNotLastOwner(tenantId, "removed");
     }
+    // Their approver identity, captured while it still exists (see the docstring).
+    const groupIds = (
+      await prisma.groupMember.findMany({
+        where: { userId, group: { tenantId } },
+        select: { groupId: true },
+      })
+    ).map((g) => g.groupId);
     await prisma.$transaction([
       prisma.groupMember.deleteMany({
         where: { userId, group: { tenantId } },
@@ -268,6 +316,53 @@ export class MembersService {
     // window, not a single-process nicety. Tenant-wide because a removal also changes what
     // the group's REMAINING subjects resolve to.
     this.permissions.invalidateTenant(tenantId);
+
+    // Everything past this point is REPORTING. The removal has committed; findHeldApprovals
+    // is documented never to throw, and this catch is the second belt on that promise —
+    // an unreported stranding must never surface as a failed removal.
+    let strandedApprovals: HeldApprovals;
+    try {
+      strandedApprovals = await this.executions.heldApprovals(tenantId, {
+        email: target.email,
+        groupIds,
+      });
+    } catch {
+      strandedApprovals = UNKNOWN_HELD_APPROVALS;
+    }
+    this.recordStranded(tenantId, caller, userId, strandedApprovals);
+    return { removed: true, strandedApprovals };
+  }
+
+  /**
+   * The SCIM/no-human surface: an AuditEvent, so a removal that stranded a gate is visible on
+   * the Activity screen even when the caller was a directory sync that discarded the response
+   * body. The count rides in `action` because AuditEvent has no free-form field and this
+   * change is not adding a column to a table another migration is mid-flight on (#1052).
+   *
+   * `partial` counts are a lower bound, so they are labelled `+` rather than reported as exact.
+   * Fire-and-forget: `AuditService.record` already swallows, and an audit row must never be
+   * the reason a completed removal reports an error.
+   */
+  private recordStranded(
+    tenantId: string,
+    caller: Principal,
+    userId: string,
+    held: HeldApprovals,
+  ): void {
+    if (held.needsOwnerOrAdmin === 0 && !held.partial) return;
+    const n = `${held.needsOwnerOrAdmin}${held.partial ? "+" : ""}`;
+    void this.audit
+      .record({
+        tenantId,
+        actor: caller.subject ?? caller.userId ?? "api-token",
+        action: held.partial
+          ? `Removed a member; paused approvals not fully checked (${n} need an owner or admin)`
+          : `Removed a member holding ${n} paused approval${held.needsOwnerOrAdmin === 1 ? "" : "s"} that now need an owner or admin`,
+        method: "DELETE",
+        path: `/tenants/${tenantId}/members/${userId}`,
+        statusCode: 200,
+      })
+      .catch(() => undefined);
   }
 
   /**

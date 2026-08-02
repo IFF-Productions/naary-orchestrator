@@ -12,7 +12,11 @@
  *    cliff), then deny-by-default outside their groups
  *    (apps/api/src/permissions/permissions.service.ts §4).
  */
-import type { Member, PermissionGroup } from "../../../lib/api";
+import type {
+  Member,
+  PermissionGroup,
+  StrandedApprovals,
+} from "../../../lib/api";
 
 /** Role accents (design: Owner ember / Admin violet / Member blue). The node/state
  *  tokens carry the exact design hues in BOTH themes, so we reuse them. */
@@ -52,6 +56,58 @@ export function initials(email: string): string {
       ? words[words.length - 1].charAt(0)
       : (words[0]?.charAt(1) ?? "");
   return (first + second).toUpperCase();
+}
+
+/** What the Team screen says after a removal that touched paused approvals (#1053). */
+export interface StrandedNotice {
+  /** The banner line. */
+  text: string;
+  /** `warn` = runs need a hand now; `info` = we only have a partial picture. */
+  tone: "warn" | "info";
+}
+
+/**
+ * The post-removal banner copy (#1053), as a pure derivation — no I/O, no JSX.
+ *
+ * Removing someone does not touch the runs paused on a gate that named them: a
+ * `humanApproval` gate freezes its approver list at pause time. The product decision is to
+ * SURFACE that rather than auto-decide it — auto-rejecting on removal would make a run report
+ * a decision no human made — so this is the sentence that tells the admin what to go do.
+ *
+ * WHAT IT LEADS WITH, and why it is not `total`. The frozen snapshot holds emails verbatim but
+ * holds groups as ids only, and group membership is resolved LIVE when someone decides. So a
+ * group-routed gate is unaffected while anyone else is in the group, and a gate with a second
+ * named approver who is still here is likewise fine. `needsOwnerOrAdmin` is the count of gates
+ * with nobody left — the only ones that actually need a hand. Leading with `total` would fire
+ * this banner on nearly every removal in a workspace that routes approvals by group, which is
+ * the cry-wolf failure the warning exists to avoid.
+ *
+ * `partial` counts are a LOWER BOUND, never rounded up into a claim: zero-and-partial says we
+ * could not check, and n-and-partial says "at least n".
+ */
+export function strandedNotice(
+  stranded: StrandedApprovals,
+  who: string,
+): StrandedNotice | null {
+  const n = stranded.needsOwnerOrAdmin;
+  if (n === 0) {
+    // Nothing needs a hand. Only worth saying anything if we could not actually confirm it.
+    return stranded.partial
+      ? {
+          tone: "info",
+          text:
+            `${who} was removed. We couldn't finish checking whether they were the last ` +
+            `approver on any paused run — check Approvals if a run seems stuck.`,
+        }
+      : null;
+  }
+  const runs = `${stranded.partial ? "at least " : ""}${n} paused run${n === 1 ? "" : "s"}`;
+  return {
+    tone: "warn",
+    text:
+      `${who} was the only remaining approver on ${runs}. Those runs stay paused until a ` +
+      `workspace owner or admin decides them — nothing was auto-approved or auto-rejected.`,
+  };
 }
 
 /** Count active members per role (legend chips). */

@@ -85,6 +85,11 @@ import {
   opResumeByToken,
 } from "./executions.approvals-ops";
 import {
+  findHeldApprovals,
+  type ApproverIdentity,
+  type HeldApprovals,
+} from "./executions.approval-holds";
+import {
   accessApprovalPrompt,
   accessAssertApprover,
   accessAssertOwner,
@@ -989,6 +994,21 @@ export class ExecutionsService implements OnModuleInit, OnModuleDestroy {
     actor?: Principal,
   ): Promise<AwaitingApproval[]> {
     return queryAwaiting(this.deps(), tenantId, actor);
+  }
+
+  /**
+   * Paused runs whose FROZEN approver snapshot names a given person (#1053) — read by
+   * `MembersService.removeMember` right after a removal commits, so the admin is told
+   * which compliance gates that removal just left without an approver.
+   *
+   * Bounded and non-throwing by construction; see {@link findHeldApprovals} for the
+   * bounds, the email/group asymmetry it corrects for, and why the snapshot stays frozen.
+   */
+  async heldApprovals(
+    tenantId: string,
+    identity: ApproverIdentity,
+  ): Promise<HeldApprovals> {
+    return findHeldApprovals(this.client, tenantId, identity);
   }
 
   /** Public (token-authed) approval prompt lookup by workflowId — for the signed-link decision page.

@@ -11253,7 +11253,7 @@
         ]
       },
       "delete": {
-        "description": "By Firebase uid (204; no-op if unknown). Requires owner/admin; removing an admin/owner is owner-only; the last owner cannot be removed (409).",
+        "description": "By Firebase uid (200; `removed: false` if the uid held no membership here). Requires owner/admin; removing an admin/owner is owner-only; the last owner cannot be removed (409).\n\nThe removal ALWAYS commits before the body is assembled. `strandedApprovals` then reports the paused runs whose frozen approver snapshot named this person (#1053) — the removal is never blocked, delayed into failure, or auto-decided on their behalf.",
         "operationId": "MembersController_remove",
         "parameters": [
           {
@@ -11274,6 +11274,16 @@
           }
         ],
         "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RemoveMemberResponse"
+                }
+              }
+            }
+          },
           "400": {
             "description": "Validation error / malformed request.",
             "content": {
@@ -22019,6 +22029,85 @@
         },
         "required": [
           "role"
+        ]
+      },
+      "StrandedApprovalRunResponse": {
+        "type": "object",
+        "properties": {
+          "workflowId": {
+            "type": "string",
+            "example": "run_2f9c1a",
+            "description": "Temporal workflowId — the run's id in /app/runs/:id."
+          },
+          "workflowKey": {
+            "type": "string",
+            "nullable": true,
+            "example": "invoice-approval",
+            "description": "The run's workflow key; null for runs predating key tracking."
+          },
+          "nodeId": {
+            "type": "string",
+            "example": "approve-1",
+            "description": "The paused humanApproval node."
+          },
+          "needsOwnerOrAdmin": {
+            "type": "boolean",
+            "description": "No listed approver identity is left on this gate — only a workspace owner/admin (or the signed approval link) can decide it now."
+          }
+        },
+        "required": [
+          "workflowId",
+          "workflowKey",
+          "nodeId",
+          "needsOwnerOrAdmin"
+        ]
+      },
+      "StrandedApprovalsResponse": {
+        "type": "object",
+        "properties": {
+          "total": {
+            "type": "number",
+            "example": 3,
+            "description": "Paused runs whose frozen approver snapshot named the removed member."
+          },
+          "needsOwnerOrAdmin": {
+            "type": "number",
+            "example": 1,
+            "description": "Of those, the ones with NO approver identity left — the number to lead with. A group-routed gate is unaffected while anyone else is in the group."
+          },
+          "partial": {
+            "type": "boolean",
+            "description": "The counts are a LOWER BOUND: the scan was truncated, ran out of its time budget, or failed. true with zero counts means 'could not check', NOT 'none'."
+          },
+          "runs": {
+            "description": "Up to 20 of them, the ones needing an owner/admin first.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StrandedApprovalRunResponse"
+            }
+          }
+        },
+        "required": [
+          "total",
+          "needsOwnerOrAdmin",
+          "partial",
+          "runs"
+        ]
+      },
+      "RemoveMemberResponse": {
+        "type": "object",
+        "properties": {
+          "removed": {
+            "type": "boolean",
+            "description": "false when the uid held no membership here — the delete was a no-op."
+          },
+          "strandedApprovals": {
+            "$ref": "#/components/schemas/StrandedApprovalsResponse"
+          }
+        },
+        "required": [
+          "removed",
+          "strandedApprovals"
         ]
       },
       "WorkspaceViewResponse": {
