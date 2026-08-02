@@ -15,6 +15,42 @@
  */
 import { HttpError, UnauthorizedError } from "../../lib/api";
 import type { RunSummary } from "../../lib/api";
+import { isRejected, isSystemFailure } from "../../lib/run-status";
+import { fmtDurMs } from "./run-detail/run-view-model";
+
+/** Real run duration (worker-stamped finishedAt − createdAt); "—" until recorded —
+ *  in-flight runs and runs predating the stamp have none (Slice 2, never faked). */
+export function durText(ms: number | null): string {
+  return ms === null ? "—" : fmtDurMs(ms);
+}
+
+/** Compact relative time from an ISO timestamp (no date lib). */
+export function ago(iso: string): string {
+  const then = new Date(iso).getTime();
+  const s = Math.max(0, Math.round((Date.now() - then) / 1000));
+  if (s < 60) return `${s}s ago`;
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.round(h / 24)}d ago`;
+}
+
+/** Filter tabs → which statuses they include (All = everything). */
+export const FILTERS: { label: string; match: (s: string) => boolean }[] = [
+  { label: "All", match: () => true },
+  {
+    label: "Waiting",
+    // Both human-in-the-loop pauses: approval AND wait(webhook) (PR #192).
+    match: (s) => s === "awaiting_approval" || s === "awaiting_webhook",
+  },
+  { label: "Running", match: (s) => s === "running" },
+  { label: "Completed", match: (s) => s === "completed" },
+  // "Failed" is what BROKE; "Rejected" is what a human said no to at an approval gate.
+  // Lumping them together made a working approval flow look like an outage.
+  { label: "Failed", match: isSystemFailure },
+  { label: "Rejected", match: isRejected },
+];
 
 /** One page of runs as the Runs screen consumes it: rows plus the cursor for the next page
  *  (null on the last page). */

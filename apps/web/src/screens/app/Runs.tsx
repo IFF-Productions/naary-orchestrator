@@ -8,53 +8,20 @@ import { useNavigate } from "react-router-dom";
 import { Button, HScroll, Icon, Skeleton, StatusPill } from "../../components";
 import { api, type RunSummary, UnauthorizedError } from "../../lib/api";
 import { PHONE_QUERY, useMediaQuery } from "../../lib/useMediaQuery";
-import {
-  isRejected,
-  isSystemFailure,
-  isTerminal,
-  runStatusUi,
-} from "../../lib/run-status";
+import { isTerminal, runStatusUi } from "../../lib/run-status";
 import { useMode } from "../../mode";
 import { RerunMenu, VersionBadge } from "./RerunMenu";
-import { appendRunPage, readRunPage, runsLoadErrorMessage } from "./runs-model";
+import {
+  ago,
+  appendRunPage,
+  durText,
+  FILTERS,
+  readRunPage,
+  runsLoadErrorMessage,
+} from "./runs-model";
 import { RunsPagination } from "./RunsPagination";
-import { fmtDurMs } from "./run-detail/run-view-model";
 
 const COLS = "28px 1.4fr 1fr 0.5fr 0.8fr 0.6fr 0.6fr 0.7fr 0.6fr";
-
-/** Real run duration (worker-stamped finishedAt − createdAt); "—" until recorded —
- *  in-flight runs and runs predating the stamp have none (Slice 2, never faked). */
-function durText(ms: number | null): string {
-  return ms === null ? "—" : fmtDurMs(ms);
-}
-
-/** Compact relative time from an ISO timestamp (no date lib). */
-function ago(iso: string): string {
-  const then = new Date(iso).getTime();
-  const s = Math.max(0, Math.round((Date.now() - then) / 1000));
-  if (s < 60) return `${s}s ago`;
-  const m = Math.round(s / 60);
-  if (m < 60) return `${m}m ago`;
-  const h = Math.round(m / 60);
-  if (h < 24) return `${h}h ago`;
-  return `${Math.round(h / 24)}d ago`;
-}
-
-/** Filter tabs → which statuses they include (All = everything). */
-const FILTERS: { label: string; match: (s: string) => boolean }[] = [
-  { label: "All", match: () => true },
-  {
-    label: "Waiting",
-    // Both human-in-the-loop pauses: approval AND wait(webhook) (PR #192).
-    match: (s) => s === "awaiting_approval" || s === "awaiting_webhook",
-  },
-  { label: "Running", match: (s) => s === "running" },
-  { label: "Completed", match: (s) => s === "completed" },
-  // "Failed" is what BROKE; "Rejected" is what a human said no to at an approval gate.
-  // Lumping them together made a working approval flow look like an outage.
-  { label: "Failed", match: isSystemFailure },
-  { label: "Rejected", match: isRejected },
-];
 
 export function Runs() {
   const navigate = useNavigate();
