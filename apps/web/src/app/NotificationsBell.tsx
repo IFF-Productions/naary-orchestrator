@@ -10,6 +10,7 @@ import {
   dismissAll,
   readDismissed,
   reconcileDismissed,
+  reconcilePoll,
   runKey,
   sameIds,
   writeDismissed,
@@ -61,6 +62,9 @@ export function NotificationsBell() {
   /** The last poll's FULL fetched list (pre-cap), so Clear all and its immediate re-render work
    *  from everything the server sent, not just the eight rows on screen. */
   const candidatesRef = useRef<NotifItem[]>([]);
+  /** Bumped by every Clear all, so a poll can tell whether the user cleared while it was in
+   *  flight — see `reconcilePoll`. */
+  const clearGenRef = useRef(0);
   const rootRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
@@ -71,6 +75,7 @@ export function NotificationsBell() {
     // remount does not prevent this: `setActiveWorkspace` flips the module state at once, and
     // this write goes to localStorage, not to the unmounted component's state.
     const workspaceId = getActiveWorkspace();
+    const clearGen = clearGenRef.current;
     try {
       // `null` (not `[]`) on failure: an errored query means "no data", which must never be read
       // as "these items are gone" — that would prune dismissals and resurrect cleared items.
@@ -103,13 +108,19 @@ export function NotificationsBell() {
         a.at < b.at ? 1 : -1,
       );
       candidatesRef.current = candidates;
-      // Read storage fresh each poll rather than trusting React state — another tab may have
-      // cleared since the last one.
+      // Read storage fresh HERE, after the await — never captured before it — so a Clear all that
+      // landed while this poll was in flight is already in the set we reconcile against, and so a
+      // clear from another tab converges on the next poll.
       const stored = readDismissed(STORE, workspaceId);
-      const { visible, persist, liveHiddenCount } = reconcileDismissed(
+      // …and if the user cleared during this poll, the clear also covers what this poll fetched:
+      // it could only dismiss the ids the app had already seen, but everything here existed at the
+      // moment of the click. Without this, an item that arrived between the previous poll and this
+      // one appears a heartbeat after "Clear all" — which reads as the clear not sticking.
+      const { visible, persist, liveHiddenCount } = reconcilePoll(
         candidates,
         stored,
         { approvals: approvals !== null, runs: runs !== null },
+        clearGenRef.current !== clearGen,
       );
       if (!sameIds(persist, stored))
         writeDismissed(STORE, workspaceId, persist);
@@ -129,6 +140,8 @@ export function NotificationsBell() {
    * Still strictly per-id, so the next new approval or failure comes straight back.
    */
   const clearAll = useCallback(() => {
+    // Tell any in-flight poll that a clear happened after it started fetching.
+    clearGenRef.current += 1;
     const workspaceId = getActiveWorkspace();
     const candidates = candidatesRef.current;
     const next = dismissAll(

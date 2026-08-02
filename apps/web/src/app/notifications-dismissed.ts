@@ -130,7 +130,9 @@ export function writeDismissed(
     if (ids.length === 0) store.removeItem(key);
     else store.setItem(key, JSON.stringify(ids));
   } catch {
-    /* storage unavailable — the dismissal still holds for this session's state */
+    // Storage unavailable — the write is simply skipped. Be clear about the consequence rather
+    // than promising a durability we do not provide: the bell re-derives from `readDismissed` on
+    // every poll, so a dismissal that could not be written comes back on the next one.
   }
 }
 
@@ -198,6 +200,35 @@ export function reconcileDismissed<T extends Dismissable>(
     persist,
     liveHiddenCount: persist.filter((id) => live.has(id)).length,
   };
+}
+
+/**
+ * One poll's worth of reconciliation, INCLUDING the case where the user hit Clear all while that
+ * poll was still in flight.
+ *
+ * Clearing can only dismiss the ids the app has actually seen — the last COMPLETED poll's. A poll
+ * whose fetch was issued before the click but which resolves after it describes the very state the
+ * user was clearing, and it can legitimately contain ids the previous poll did not have (an
+ * approval that arrived in between). Rendering those a moment after the click is indistinguishable
+ * from "Clear all didn't work", so `clearedDuringPoll` folds them into the same clear.
+ *
+ * This is bounded on purpose: only a poll already in flight at the moment of the click is covered.
+ * A poll STARTED afterwards is untouched, so a genuinely new approval or failure still arrives —
+ * the per-id guarantee is not weakened into "mute everything for a while".
+ */
+export function reconcilePoll<T extends Dismissable>(
+  candidates: readonly T[],
+  stored: readonly string[],
+  trust: SourceTrust,
+  clearedDuringPoll: boolean,
+): Reconciled<T> {
+  const effective = clearedDuringPoll
+    ? dismissAll(
+        stored,
+        candidates.map((c) => c.key),
+      )
+    : stored;
+  return reconcileDismissed(candidates, effective, trust);
 }
 
 /** `localStorage` if this environment has a usable one, else null (SSR, sandboxed iframe, a

@@ -23,6 +23,7 @@ import {
   dismissedKey,
   readDismissed,
   reconcileDismissed,
+  reconcilePoll,
   runKey,
   sameIds,
   sourceOf,
@@ -128,6 +129,66 @@ describe("Clear all — what it hides, and what it must not", () => {
     const { visible, persist } = reconcileDismissed(many, dismissed, ALL_READ);
     expect(visible).toEqual([]);
     expect(persist).toHaveLength(30);
+  });
+});
+
+describe("a poll landing AFTER Clear all must not undo it", () => {
+  // Clearing can only dismiss what the app has already seen — the last COMPLETED poll's ids. The
+  // 45s poll (and the refetch on open) means a fetch is often already in flight when the button is
+  // clicked, and that fetch can carry an item the previous poll did not have. Rendering it a
+  // heartbeat after the click is indistinguishable from "Clear all didn't work".
+  it("does not resurrect cleared items, nor surface ones fetched before the click", () => {
+    const seen = [approval("run-1", "gate"), failure("run-2")];
+    // A poll is in flight; it has already fetched a third item the user has never seen.
+    const inFlight = [...seen, approval("run-3", "gate")];
+
+    // The user clicks Clear all — which can only know about `seen`.
+    writeDismissed(
+      store,
+      "ws-a",
+      dismissAll(
+        [],
+        seen.map((i) => i.key),
+      ),
+    );
+
+    // …then the in-flight poll resolves. Everything it fetched existed at the moment of the click.
+    const landed = reconcilePoll(
+      inFlight,
+      readDismissed(store, "ws-a"),
+      ALL_READ,
+      true,
+    );
+    expect(landed.visible).toEqual([]);
+    // …and the widened clear is persisted, so the next poll doesn't show them either.
+    writeDismissed(store, "ws-a", landed.persist);
+    expect(
+      reconcilePoll(inFlight, readDismissed(store, "ws-a"), ALL_READ, false)
+        .visible,
+    ).toEqual([]);
+  });
+
+  it("still shows what arrives after the click — this is not a mute window", () => {
+    // The bound that keeps the widened clear honest: only a poll ALREADY IN FLIGHT at the moment
+    // of the click is covered. The next poll starts afterwards, so its new items get through.
+    const seen = [approval("run-1", "gate")];
+    writeDismissed(
+      store,
+      "ws-a",
+      dismissAll(
+        [],
+        seen.map((i) => i.key),
+      ),
+    );
+    const nextPoll = [...seen, failure("run-99")];
+
+    const { visible } = reconcilePoll(
+      nextPoll,
+      readDismissed(store, "ws-a"),
+      ALL_READ,
+      false,
+    );
+    expect(visible.map((i) => i.key)).toEqual([runKey("run-99")]);
   });
 });
 
