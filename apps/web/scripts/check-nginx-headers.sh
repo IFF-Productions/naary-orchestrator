@@ -80,12 +80,14 @@ else
 fi
 
 # --- hashed build output: content-addressed, so pin it for a year ---------------------
-asset=$(curl -sS "$BASE_URL/" | grep -o '/assets/[A-Za-z0-9_.-]*\.js' | head -1)
+# `|| true` because a no-match grep exits non-zero, and under `set -e` the assignment would
+# kill the script before the guard below could say WHY.
+asset=$(curl -sS "$BASE_URL/" | grep -o '/assets/[A-Za-z0-9_.-]*\.js' | head -1 || true)
 [ -n "$asset" ] || { bad "could not find a hashed asset in index.html"; asset=/assets/none.js; }
 h=$(headers "$asset")
 has "$h" "cache-control: public, max-age=31536000, immutable" "$asset → immutable, 1y"
 
-css=$(curl -sS "$BASE_URL/" | grep -o '/assets/[A-Za-z0-9_.-]*\.css' | head -1)
+css=$(curl -sS "$BASE_URL/" | grep -o '/assets/[A-Za-z0-9_.-]*\.css' | head -1 || true)
 if [ -n "$css" ]; then
   has "$(headers "$css")" "cache-control: public, max-age=31536000, immutable" "$css → immutable, 1y"
 fi
@@ -112,6 +114,15 @@ done
 for p in /embed.js /naary-mark.svg /naary-flame.svg /mockServiceWorker.js; do
   has "$(headers "$p")" "cache-control: no-cache" "$p (unhashed, stable url) → no-cache"
 done
+
+# --- the proxied API keeps its OWN Cache-Control, and only one ------------------------
+# nginx add_header APPENDS. If a Cache-Control is ever added to `location /api/` it will not
+# replace the API's `no-store` (#1042) but sit beside it — two values, undefined winner.
+# Locally there is no api container (502, zero headers); against a live host the API's own
+# `no-store` is the one. Either way: never more than one.
+n=$(curl -sSI "$BASE_URL/api/anything" | tr -d '\r' | grep -ci '^cache-control:' || true)
+[ "$n" -le 1 ] && pass "/api/* → at most one Cache-Control (found $n; nginx adds none)" ||
+  bad "/api/* → $n Cache-Control headers, nginx is appending one to the API's own"
 
 if [ "$fail" = 0 ]; then echo "==> all header assertions passed"; else echo "==> FAILURES"; fi
 exit "$fail"
