@@ -16,6 +16,7 @@ import {
 } from "../../lib/run-status";
 import { useMode } from "../../mode";
 import { RerunMenu, VersionBadge } from "./RerunMenu";
+import { appendRunPage, readRunPage, runsLoadErrorMessage } from "./runs-model";
 import { RunsPagination } from "./RunsPagination";
 import { fmtDurMs } from "./run-detail/run-view-model";
 
@@ -115,10 +116,12 @@ export function Runs() {
     try {
       // First page only — `loadMore` appends the rest. Any (re)load resets pagination, since the
       // cursor from a previous view/search doesn't address this result set.
-      const { items: rows, nextCursor: next } = await api.listRunsPage({
-        archived,
-        q,
-      });
+      // readRunPage, not a raw destructure: a 200 whose body has no `items` used to set the list
+      // to `undefined`, which is neither null (no skeleton) nor empty (no empty state) — a blank
+      // screen with no stated reason (#1044). It now throws into the catch below.
+      const { items: rows, nextCursor: next } = readRunPage(
+        await api.listRunsPage({ archived, q }),
+      );
       if (seq !== loadSeq.current) return; // superseded by a newer load
       setRuns(rows);
       setNextCursor(next);
@@ -132,9 +135,10 @@ export function Runs() {
     } catch (e) {
       if (seq !== loadSeq.current) return;
       setError(
-        e instanceof UnauthorizedError
-          ? "Not authenticated — sign in (or set an API token) to see runs."
-          : "Could not reach the control plane (apps/api on :3000).",
+        runsLoadErrorMessage(
+          e,
+          "Could not reach the control plane (apps/api on :3000).",
+        ),
       );
     }
   }
@@ -154,27 +158,25 @@ export function Runs() {
     const seq = loadSeq.current;
     setLoadingMore(true);
     try {
-      const page = await api.listRunsPage({
+      const raw = await api.listRunsPage({
         archived: showArchived,
         q: debouncedQuery,
         cursor: nextCursor,
       });
       if (seq !== loadSeq.current) return; // view/search changed under us — discard
-      setRuns((prev) => {
-        const seen = new Set((prev ?? []).map((r) => r.workflowId));
-        return [
-          ...(prev ?? []),
-          ...page.items.filter((r) => !seen.has(r.workflowId)),
-        ];
-      });
+      // Validate HERE, inside the try — the dedupe+append used to live in the `setRuns` updater,
+      // which React runs during a LATER render unless it can evaluate it eagerly, i.e. sometimes
+      // outside this try/catch. A malformed page 2 could therefore throw past the inline banner
+      // into the error boundary and blank a screen that was showing perfectly good rows (#1044).
+      // Now a bad page leaves the list alone and always reports itself in the banner.
+      const page = readRunPage(raw);
+      setRuns((prev) => appendRunPage(prev, page));
       setNextCursor(page.nextCursor);
       setError(null);
     } catch (e) {
       if (seq !== loadSeq.current) return;
       setError(
-        e instanceof UnauthorizedError
-          ? "Not authenticated — sign in (or set an API token) to see runs."
-          : "Could not load more runs — please retry.",
+        runsLoadErrorMessage(e, "Could not load more runs — please retry."),
       );
     } finally {
       setLoadingMore(false);
