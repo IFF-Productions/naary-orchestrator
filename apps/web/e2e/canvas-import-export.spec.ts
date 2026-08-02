@@ -26,8 +26,25 @@ test("export downloads a graph JSON, and import loads it back", async ({
   expect(dlPath).toBeTruthy(); // null if downloads are disabled — fail clearly, not on readFileSync
   const exported = JSON.parse(readFileSync(dlPath as string, "utf8"));
   expect(exported.naaryFlow).toBe(1);
-  expect(Array.isArray(exported.graph.nodes)).toBe(true);
   expect(typeof exported.graph.startNodeId).toBe("string");
+  // `Array.isArray(exported.graph.nodes)` is what this used to say, and `Array.isArray([])` is
+  // `true` — so the canonical "I exported my workflow and got an empty file" regression satisfied
+  // it. Measured: with `nodes: []`, EVERY assertion in this file passed, including the whole
+  // import half below, and the canvas ended up rendering 0 nodes under a correct workflow name.
+  // Assert against what was on the canvas instead.
+  const onCanvas = await page.locator(".react-flow__node").count();
+  expect(
+    onCanvas,
+    "nothing on the canvas to export — check global-setup's seed",
+  ).toBeGreaterThan(0);
+  expect(
+    exported.graph.nodes.map((n: { id: string }) => n.id).sort(),
+    "export dropped or invented nodes relative to the canvas",
+  ).toEqual(
+    await page
+      .locator(".react-flow__node")
+      .evaluateAll((els) => els.map((e) => e.getAttribute("data-id")).sort()),
+  );
 
   // --- Import: write a renamed copy, load it, assert the name field updates ---
   const file = join(mkdtempSync(join(tmpdir(), "naary-e2e-")), "flow.json");
@@ -41,4 +58,9 @@ test("export downloads a graph JSON, and import loads it back", async ({
     page.getByRole("textbox", { name: "Workflow name" }),
   ).toHaveValue("E2E Imported Flow");
   await expect(page.getByText(/Imported "E2E Imported Flow"/)).toBeVisible();
+  // The name field and the toast are set AFTER `setNodes`/`setEdges` succeed, so they do prove
+  // `decompileGraph` did not throw — but they say nothing about what is ON SCREEN. `toFlowNodes`
+  // returning nothing leaves the user staring at a blank canvas with a correct title, which is
+  // exactly the state the empty-graph measurement above produced. Assert the graph came BACK.
+  await expect(page.locator(".react-flow__node")).toHaveCount(onCanvas);
 });

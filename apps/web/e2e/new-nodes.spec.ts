@@ -81,9 +81,17 @@ test("run-through: a graph using set → merge → wait completes end-to-end", a
 
   // Lands on the run-detail view and completes (the wait is ~1s).
   await expect(page).toHaveURL(/\/app\/runs\/.+/);
-  await expect(page.getByText("Completed").first()).toBeVisible({
-    timeout: 20_000,
-  });
+  // NOT `getByText("Completed")`. A plain string is a case-insensitive SUBSTRING in Playwright,
+  // and the Execution log renders one `"Activity completed"` row per activity
+  // (`apps/api/src/executions/executions.helpers.ts:177`) — from the run's very first start-up
+  // activity onwards, whatever the run then goes on to do. Measured against a graph built to
+  // fail: the old locator was visible and matched the literal text "Activity completed" while
+  // the hero read "Run failed". This is the ONLY e2e cover for set/merge/dateTime/renameKeys/wait
+  // in the real interpreter, and it could not tell "completed" from "failed at step 3".
+  await expect(
+    page.getByText("Run completed", { exact: true }).first(),
+  ).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText("Run failed")).toHaveCount(0);
 });
 
 test("category rail + catalog search filter the node list", async ({

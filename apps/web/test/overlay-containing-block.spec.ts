@@ -36,25 +36,89 @@ async function walk(dir: string): Promise<string[]> {
   return out;
 }
 
+/**
+ * The innermost `{ … }` block containing `index` — a React style object, or a CSS rule body.
+ *
+ * Line-based matching is not enough here: see the test below for the reformatting that defeated
+ * it. A declaration's fill-mode can sit several lines away from the animation name and still apply
+ * to the same element, so the unit of inspection has to be the block, not the line.
+ */
+function enclosingBlock(text: string, index: number): string {
+  let depth = 0;
+  let start = -1;
+  for (let i = index; i >= 0; i--) {
+    if (text[i] === "}") depth++;
+    else if (text[i] === "{") {
+      if (depth === 0) {
+        start = i;
+        break;
+      }
+      depth--;
+    }
+  }
+  if (start === -1) return "";
+  depth = 0;
+  for (let i = start; i < text.length; i++) {
+    if (text[i] === "{") depth++;
+    else if (text[i] === "}" && --depth === 0) return text.slice(start, i + 1);
+  }
+  return text.slice(start);
+}
+
+/** Every `naaryFadeUp` occurrence in src that is an actual usage, not prose in a comment. */
+async function fadeUpUsages(): Promise<{ file: string; block: string }[]> {
+  const out: { file: string; block: string }[] = [];
+  for (const file of await walk(SRC)) {
+    const text = readFileSync(file, "utf8");
+    for (const m of text.matchAll(/naaryFadeUp/g)) {
+      const block = enclosingBlock(text, m.index);
+      // `animation:`/`animation-name:` in the same block ⇒ this is a usage, not the long
+      // explanatory comment in AppShell (which names naaryFadeUp four times).
+      if (/animation(?:-name)?\s*:/.test(block)) {
+        out.push({ file: path.relative(SRC, file), block });
+      }
+    }
+  }
+  return out;
+}
+
 describe("issue #694: nothing may retain a transform around the fixed .overlay scrim", () => {
+  it("the scan actually sees the naaryFadeUp call sites, including AppShell's", async () => {
+    // The positive control this file was missing. Every assertion below is "no usage looks
+    // wrong", which a scan that finds NO usages satisfies perfectly — so renaming the keyframe,
+    // moving the sources, or a walk() that quietly stops matching would all leave this file
+    // green forever. (#816's design-token guard asserts it found its stylesheets for exactly
+    // this reason.) Pin both the volume and the ONE call site the bug was actually about.
+    const usages = await fadeUpUsages();
+    expect(usages.length).toBeGreaterThan(10);
+    expect(
+      usages.map((u) => u.file),
+      "AppShell's routed-content wrapper IS the element that re-parented the scrim — if it no " +
+        "longer animates naaryFadeUp, this whole file is guarding nothing",
+    ).toContain("app/AppShell.tsx");
+  });
+
   it("no naaryFadeUp usage carries a `both`/`forwards` fill-mode", async () => {
+    // WHY THE BLOCK AND NOT THE LINE. This used to require `naaryFadeUp` and the fill-mode
+    // keyword on the SAME LINE, and 20 of the 21 call sites are React inline styles — where the
+    // natural way to add one is a SEPARATE property:
+    //
+    //     style={{ animation: "naaryFadeUp .28s ease", animationFillMode: "forwards" }}
+    //
+    // Verified: adding exactly that to AppShell.tsx — the one element whose retained transform
+    // caused #694 — left this file GREEN. The guard was defeated by the very edit it exists to
+    // catch. So match the enclosing declaration block, and both spellings of the property.
     const offenders: string[] = [];
-    for (const file of await walk(SRC)) {
-      const text = readFileSync(file, "utf8");
-      text.split("\n").forEach((line, i) => {
-        // Only the shorthand `animation:` form is used in this codebase; a fill-mode
-        // keyword after the name is what makes the transform stick.
-        if (
-          /naaryFadeUp/.test(line) &&
-          /\b(both|forwards)\b/.test(line) &&
-          !line.trimStart().startsWith("//") &&
-          !line.trimStart().startsWith("*")
-        ) {
-          offenders.push(
-            `${path.relative(SRC, file)}:${i + 1} — ${line.trim()}`,
-          );
-        }
-      });
+    for (const { file, block } of await fadeUpUsages()) {
+      const shorthand = /naaryFadeUp[^;"'`}\n]*\b(?:both|forwards)\b/.test(
+        block,
+      );
+      const property =
+        /animation-fill-mode\s*:\s*["']?\s*(?:both|forwards)/.test(block) ||
+        /animationFillMode\s*:\s*["'](?:both|forwards)/.test(block);
+      if (shorthand || property) {
+        offenders.push(`${file} — ${block.replace(/\s+/g, " ").slice(0, 120)}`);
+      }
     }
     expect(
       offenders,

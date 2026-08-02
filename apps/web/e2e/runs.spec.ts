@@ -54,9 +54,15 @@ test("re-run a completed run inline from the Runs list", async ({ page }) => {
   await page.goto("/app/workflows/e2e-nodes");
   await page.getByRole("button", { name: "Run now" }).click();
   await expect(page).toHaveURL(/\/app\/runs\/.+/);
-  await expect(page.getByText("Completed").first()).toBeVisible({
-    timeout: 20_000,
-  });
+  // "Deterministically" is the claim, so the gate has to be the terminal state and not a
+  // substring of it: `getByText("Completed")` matches the log's `"Activity completed"` rows and
+  // releases as soon as the FIRST activity finishes — long before the run is terminal, and just
+  // as happily if it ends up failing. (Line 47 above already does this correctly, scoped to the
+  // log.) Without a genuinely completed run the Re-run affordance below may not be rendered yet,
+  // so this is the precondition doing real work.
+  await expect(
+    page.getByText("Run completed", { exact: true }).first(),
+  ).toBeVisible({ timeout: 20_000 });
   const originalUrl = page.url();
 
   // On the Runs list, a completed row exposes an inline Re-run action.

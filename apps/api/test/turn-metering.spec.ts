@@ -15,6 +15,22 @@ const graph = {
   edges: [],
 } as unknown as GraphDef;
 
+/**
+ * `NOMINAL_TURN_COST_USD` from `src/builder/turn-metering.ts` — the "we could not price this at
+ * all" floor. Pinned by value here, and by the third test below, because it is the number the
+ * other two must be DISTINGUISHED from.
+ *
+ * WHY THAT MATTERS. These three tests claim three different behaviours — priced from real usage,
+ * estimated from graph size, floored — and all three used to assert the identical
+ * `expect(cost).toBeGreaterThan(0)`. Every branch of `estimateTurnCostUsd` returns a positive
+ * number (`cost > 0 ? cost : NOMINAL` inside a `try`/`catch { return NOMINAL }`), so `> 0` cannot
+ * tell them apart. Measured: make `computeCost` yield 0 — which is what a pricing table that
+ * loses `claude-opus-4-8` does — and the first two tests stayed GREEN while every builder turn
+ * silently billed the 0.0001 floor instead of its real cost, roughly a 500x under-charge. A test
+ * named "prices real reported usage" must fail when nothing was priced.
+ */
+const NOMINAL_FLOOR = 0.0001;
+
 describe("estimateTurnCostUsd — Tier-1 §6 fail-safe (never zero for a real call)", () => {
   it("prices real reported usage via the shared ledger pricing", () => {
     const meter: GenMeter = {
@@ -23,8 +39,9 @@ describe("estimateTurnCostUsd — Tier-1 §6 fail-safe (never zero for a real ca
       tokens: { inputTokens: 1000, outputTokens: 2000, cachedInputTokens: 0 },
     };
     const cost = estimateTurnCostUsd(meter, graph);
-    // A concrete positive number (opus is priced); exact value tracked in pricing.ts.
-    expect(cost).toBeGreaterThan(0);
+    // Priced, not floored. Exact value tracked in pricing.ts; the claim here is that the real
+    // pricing path ran, which only a number ABOVE the unpriced floor can show.
+    expect(cost).toBeGreaterThan(NOMINAL_FLOOR);
   });
 
   it("ESTIMATES a non-zero cost when the provider reported no usage (claude-code / v6 bug)", () => {
@@ -34,7 +51,9 @@ describe("estimateTurnCostUsd — Tier-1 §6 fail-safe (never zero for a real ca
       tokens: null, // subprocess / undefined-usage path
     };
     const cost = estimateTurnCostUsd(meter, graph);
-    expect(cost).toBeGreaterThan(0); // estimated from graph size, never silently free
+    // Estimated from graph size and then PRICED — so it too must clear the floor. Landing exactly
+    // on the floor would mean the estimate never happened, which is the silently-free call.
+    expect(cost).toBeGreaterThan(NOMINAL_FLOOR);
   });
 
   it("falls back to a nominal non-zero floor for an unpriced model", () => {
@@ -44,7 +63,9 @@ describe("estimateTurnCostUsd — Tier-1 §6 fail-safe (never zero for a real ca
       tokens: { inputTokens: 100, outputTokens: 100, cachedInputTokens: 0 },
     } as unknown as GenMeter;
     const cost = estimateTurnCostUsd(meter, graph);
-    expect(cost).toBeGreaterThan(0);
+    // The floor EXACTLY — this is the one test whose subject is the floor, so it pins the value
+    // the two above are measured against.
+    expect(cost).toBe(NOMINAL_FLOOR);
   });
 });
 
