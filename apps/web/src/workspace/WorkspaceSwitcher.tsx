@@ -41,7 +41,15 @@ export function WorkspaceSwitcher({ labelOp = 1 }: { labelOp?: number }) {
   const active = workspaces.find((w) => w.tenantId === activeId);
 
   return (
-    <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
+    // Sizes to its LABEL, and still yields on a narrow bar. `flex: 1` is `1 1 0%`: it grew to
+    // absorb every spare pixel of the ContextBar row (553px of switcher around a 72px name at
+    // 1440), and — because a 0 basis is also what it shrinks FROM — collapsed to 0 the moment
+    // the row ran a deficit, so the workspace name vanished entirely at 760. `0 1 auto` is the
+    // content basis on both sides of that: no grow, and shrink measured from the name's own
+    // width. `minWidth: 0` stays, so the shrink is spent on the label's ellipsis rather than
+    // overflowing the bar. (`0 1 auto` is the flex INITIAL value — spelled out because "sized
+    // to content, still shrinkable" is a decision here, not an omission.)
+    <div style={{ flex: "0 1 auto", minWidth: 0, position: "relative" }}>
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
