@@ -42,6 +42,15 @@
  * change gives width back, it never pushes a control off the bar. 760 is a stress case, not a real
  * viewport — the bar renders this component only while `!compact` (> 1024px) — but it is the width
  * that exposed the collapse-to-zero, so it is measured.
+ *
+ * THE OTHER RENDER SITE. `ContextBar` is not the only caller: below 1024 the bar drops the switcher
+ * and `AppShell.tsx`'s `drawer-context` box renders it at the top of the nav drawer instead. That
+ * box is a flex COLUMN, so `flex` governs its children's HEIGHT and their width comes from
+ * `align-items: stretch` — and the box is `flex: "none"` with a content-determined height, so there
+ * is no free space on its main axis either. Measured (real switcher DOM re-parented into a replica
+ * of that container, 288px drawer): 260.0 × 31.7 with a 58.7 box under BOTH `1 1 0%` and
+ * `0 1 auto`, no ellipsis in either. The change is inert there, which is why the fix belongs on the
+ * component root rather than on the ContextBar call site.
  */
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -83,6 +92,20 @@ describe("workspace switcher sizes to its label, not to the app bar", () => {
     );
     expect(bar).toContain("<WorkspaceSwitcher />");
     expect(bar).toMatch(/display: "flex",[\s\S]{0,600}?flexWrap: "nowrap"/);
+    // The only OTHER caller is the nav drawer's context box, and the reason a root-level fix is
+    // safe there is that it lays out as a COLUMN (see the header). If that ever becomes a row,
+    // `0 1 auto` would unpin the chevron from the drawer's right edge and the fix has to move out
+    // to the ContextBar call site as a wrapper — the shape EnvironmentSwitcher already uses.
+    const shell = readFileSync(
+      path.resolve(__dirname, "../src/app/AppShell.tsx"),
+      "utf8",
+    );
+    const drawer = shell.slice(
+      shell.indexOf('className="drawer-context"'),
+      shell.indexOf("<WorkspaceSwitcher />"),
+    );
+    expect(drawer, "the drawer context box moved").toContain("flex");
+    expect(drawer).toContain('flexDirection: "column"');
   });
 
   it("the root does not GROW — no `flex: 1` / no grow factor above 0", () => {
