@@ -20675,6 +20675,11 @@
           "costUsd": {
             "type": "number",
             "example": 0.18432
+          },
+          "estimatedCalls": {
+            "type": "number",
+            "example": 1,
+            "description": "How many of `calls` booked ESTIMATED token counts — the fail-safe used when a provider reports no usage, so a real call is never billed as free. 0 means every call here was metered."
           }
         },
         "required": [
@@ -20682,7 +20687,8 @@
           "model",
           "calls",
           "totalTokens",
-          "costUsd"
+          "costUsd",
+          "estimatedCalls"
         ]
       },
       "UsageLineItemResponse": {
@@ -20724,6 +20730,11 @@
           "createdAt": {
             "type": "string",
             "format": "date-time"
+          },
+          "estimated": {
+            "type": "boolean",
+            "example": false,
+            "description": "Whether this row's TOKEN counts are an estimate rather than a provider measurement. Scoped to tokens: a metered row can still carry a fallback PRICE (an unpriced model bills at 0)."
           }
         },
         "required": [
@@ -20736,7 +20747,8 @@
           "outputTokens",
           "totalTokens",
           "costUsd",
-          "createdAt"
+          "createdAt",
+          "estimated"
         ]
       },
       "UsageSummaryResponse": {
@@ -20749,6 +20761,11 @@
           "totalTokens": {
             "type": "number",
             "example": 84210
+          },
+          "estimatedCalls": {
+            "type": "number",
+            "example": 2,
+            "description": "How many calls in this window booked ESTIMATED token counts. 0 means the totals above are entirely metered."
           },
           "byModel": {
             "type": "array",
@@ -20766,6 +20783,7 @@
         "required": [
           "totalCostUsd",
           "totalTokens",
+          "estimatedCalls",
           "byModel",
           "events"
         ]
@@ -20806,12 +20824,18 @@
             "type": "number",
             "example": 12,
             "description": "Number of billed calls."
+          },
+          "estimatedCalls": {
+            "type": "number",
+            "example": 1,
+            "description": "How many of `calls` booked ESTIMATED token counts rather than provider-measured ones. Lets a dashboard qualify the cost beside it instead of presenting a partly-estimated figure as metered."
           }
         },
         "required": [
           "costUsd",
           "totalTokens",
-          "calls"
+          "calls",
+          "estimatedCalls"
         ]
       },
       "InsightsByDayResponse": {
@@ -20830,6 +20854,11 @@
             "example": 12,
             "description": "Number of billed calls."
           },
+          "estimatedCalls": {
+            "type": "number",
+            "example": 1,
+            "description": "How many of `calls` booked ESTIMATED token counts rather than provider-measured ones. Lets a dashboard qualify the cost beside it instead of presenting a partly-estimated figure as metered."
+          },
           "date": {
             "type": "string",
             "example": "2026-07-16",
@@ -20840,6 +20869,7 @@
           "costUsd",
           "totalTokens",
           "calls",
+          "estimatedCalls",
           "date"
         ]
       },
@@ -20859,6 +20889,11 @@
             "example": 12,
             "description": "Number of billed calls."
           },
+          "estimatedCalls": {
+            "type": "number",
+            "example": 1,
+            "description": "How many of `calls` booked ESTIMATED token counts rather than provider-measured ones. Lets a dashboard qualify the cost beside it instead of presenting a partly-estimated figure as metered."
+          },
           "environmentId": {
             "type": "string",
             "nullable": true,
@@ -20870,6 +20905,7 @@
           "costUsd",
           "totalTokens",
           "calls",
+          "estimatedCalls",
           "environmentId"
         ]
       },
@@ -20889,6 +20925,11 @@
             "example": 12,
             "description": "Number of billed calls."
           },
+          "estimatedCalls": {
+            "type": "number",
+            "example": 1,
+            "description": "How many of `calls` booked ESTIMATED token counts rather than provider-measured ones. Lets a dashboard qualify the cost beside it instead of presenting a partly-estimated figure as metered."
+          },
           "workflowKey": {
             "type": "string",
             "nullable": true,
@@ -20900,6 +20941,7 @@
           "costUsd",
           "totalTokens",
           "calls",
+          "estimatedCalls",
           "workflowKey"
         ]
       },
@@ -20919,6 +20961,11 @@
             "example": 12,
             "description": "Number of billed calls."
           },
+          "estimatedCalls": {
+            "type": "number",
+            "example": 1,
+            "description": "How many of `calls` booked ESTIMATED token counts rather than provider-measured ones. Lets a dashboard qualify the cost beside it instead of presenting a partly-estimated figure as metered."
+          },
           "provider": {
             "type": "string",
             "example": "anthropic"
@@ -20932,6 +20979,7 @@
           "costUsd",
           "totalTokens",
           "calls",
+          "estimatedCalls",
           "provider",
           "model"
         ]
@@ -20952,6 +21000,11 @@
             "example": 12,
             "description": "Number of billed calls."
           },
+          "estimatedCalls": {
+            "type": "number",
+            "example": 1,
+            "description": "How many of `calls` booked ESTIMATED token counts rather than provider-measured ones. Lets a dashboard qualify the cost beside it instead of presenting a partly-estimated figure as metered."
+          },
           "nodeType": {
             "type": "string",
             "nullable": true,
@@ -20969,6 +21022,7 @@
           "costUsd",
           "totalTokens",
           "calls",
+          "estimatedCalls",
           "nodeType",
           "avgDurationMs"
         ]
@@ -23470,6 +23524,11 @@
             "type": "string",
             "format": "date-time",
             "example": "2026-07-04T12:00:00.000Z"
+          },
+          "estimated": {
+            "type": "boolean",
+            "example": false,
+            "description": "Whether this row's TOKEN counts are an estimate rather than a provider measurement. Scoped to tokens: a metered row can still carry a fallback PRICE (an unpriced model bills at 0)."
           }
         },
         "required": [
@@ -23482,7 +23541,8 @@
           "outputTokens",
           "totalTokens",
           "costUsd",
-          "createdAt"
+          "createdAt",
+          "estimated"
         ]
       },
       "UsageResponse": {
@@ -23497,6 +23557,11 @@
             "type": "number",
             "example": 123456,
             "description": "Total tokens across the window."
+          },
+          "estimatedCalls": {
+            "type": "number",
+            "example": 2,
+            "description": "How many calls in this window booked ESTIMATED token counts. 0 means the totals above are entirely metered."
           },
           "byModel": {
             "description": "Per-model rollup.",
@@ -23516,6 +23581,7 @@
         "required": [
           "totalCostUsd",
           "totalTokens",
+          "estimatedCalls",
           "byModel",
           "events"
         ]

@@ -125,20 +125,23 @@ async function recordEmbedUsage(
   meta: AgentMeta,
   tokens: number,
   /** Node-type tag + measured call duration (Slice 2) — the caller knows which node
-   *  kind it serves and measured the embed around the provider call. */
-  timing?: { nodeType: string; durationMs: number },
+   *  kind it serves and measured the embed around the provider call. Required since #1060: it was
+   *  optional only because it arrived after the function did, both call sites always passed it,
+   *  and a required `estimated` cannot sit behind an optional parameter. */
+  timing: { nodeType: string; durationMs: number },
   /** Did `tokens` come from `resolveEmbedTokens`'s estimate rather than the provider (#1060)?
-   *  REQUIRED at both call sites, not defaulted: an omitted argument here would silently persist
-   *  every embedding estimate as measured — the precise failure #1060 exists to prevent. */
-  estimated?: boolean,
+   *  REQUIRED — not optional, and deliberately so: an omitted argument would silently book every
+   *  embedding estimate as measured, which is the precise failure #1060 exists to prevent. Making
+   *  the type say that is the only version of this rule a future call site cannot skip. */
+  estimated: boolean,
 ): Promise<number> {
   await __agentDeps.recordUsage({
     tenantId: meta.tenantId,
     environmentId: meta.environmentId, // per-env cost tag (Slice 6)
     executionId: meta.executionId,
     nodeId: meta.nodeId,
-    nodeType: timing?.nodeType,
-    durationMs: timing?.durationMs,
+    nodeType: timing.nodeType,
+    durationMs: timing.durationMs,
     provider: "openai",
     model: EMBED_MODEL,
     usage: { inputTokens: tokens, outputTokens: 0 },

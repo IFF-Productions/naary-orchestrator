@@ -8,6 +8,12 @@ export class UsageByModelResponse {
   calls!: number;
   @ApiProperty({ example: 45120 }) totalTokens!: number;
   @ApiProperty({ example: 0.18432 }) costUsd!: number;
+  @ApiProperty({
+    example: 1,
+    description:
+      "How many of `calls` booked ESTIMATED token counts — the fail-safe used when a provider reports no usage, so a real call is never billed as free. 0 means every call here was metered.",
+  })
+  estimatedCalls!: number;
 }
 
 /** One billed LLM call from the usage ledger. */
@@ -22,12 +28,24 @@ export class UsageLineItemResponse {
   @ApiProperty({ example: 1540 }) totalTokens!: number;
   @ApiProperty({ example: 0.00616 }) costUsd!: number;
   @ApiProperty({ format: "date-time" }) createdAt!: string;
+  @ApiProperty({
+    example: false,
+    description:
+      "Whether this row's TOKEN counts are an estimate rather than a provider measurement. Scoped to tokens: a metered row can still carry a fallback PRICE (an unpriced model bills at 0).",
+  })
+  estimated!: boolean;
 }
 
 /** Aggregated + line-item spend for a tenant. */
 export class UsageSummaryResponse {
   @ApiProperty({ example: 1.234567 }) totalCostUsd!: number;
   @ApiProperty({ example: 84210 }) totalTokens!: number;
+  @ApiProperty({
+    example: 2,
+    description:
+      "How many calls in this window booked ESTIMATED token counts. 0 means the totals above are entirely metered.",
+  })
+  estimatedCalls!: number;
   @ApiProperty({ type: [UsageByModelResponse] })
   byModel!: UsageByModelResponse[];
   @ApiProperty({ type: [UsageLineItemResponse] })
@@ -42,6 +60,12 @@ export class InsightsBucketResponse {
   @ApiProperty({ example: 45120 }) totalTokens!: number;
   @ApiProperty({ example: 12, description: "Number of billed calls." })
   calls!: number;
+  @ApiProperty({
+    example: 1,
+    description:
+      "How many of `calls` booked ESTIMATED token counts rather than provider-measured ones. Lets a dashboard qualify the cost beside it instead of presenting a partly-estimated figure as metered.",
+  })
+  estimatedCalls!: number;
 }
 
 export class InsightsByDayResponse extends InsightsBucketResponse {
