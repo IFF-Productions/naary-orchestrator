@@ -759,7 +759,8 @@ model Membership {
 
   // Permission-group rows this membership carries (#1041). The FK lives on GroupMember and
   // CASCADES: losing your membership in a workspace loses your groups in that workspace, by
-  // construction rather than by a comment. See GroupMember for the expand/contract state.
+  // construction rather than by a comment. Total since #1052 made GroupMember.tenantId NOT NULL —
+  // a NULL there used to exempt the row from the FK under MATCH SIMPLE.
   groupMembers GroupMember[]
 
   @@unique([userId, tenantId])
@@ -814,21 +815,23 @@ model PermissionGroup {
 // (userId, tenantId) — so the reference needs both columns on this row. It is kept honest by the
 // group FK plus the writers, which always copy it from the group they are writing to.
 //
-// EXPAND/CONTRACT — this is the EXPAND half, and the column is NULLABLE on purpose. Deploys run
-// migrations to completion and THEN roll the images, so the OLD API image still inserts
-// (groupId, userId) with no tenantId; a NOT NULL column would 500 those writes. Under Postgres
-// MATCH SIMPLE a row with a NULL tenantId is EXEMPT from the composite FK, which is exactly what
-// makes the nullable phase safe — and also means the constraint has a hole until the CONTRACT
-// migration backfills the stragglers and SET NOT NULLs. MembersService.removeMember therefore
-// ALSO deletes these rows transactionally: that is the bridge across the expand window, and it
-// stays as defense in depth afterwards.
+// EXPAND/CONTRACT — BOTH halves have now shipped. The column was NULLABLE for one release because
+// deploys run migrations to completion and THEN roll the images, so the OLD API image still
+// inserted (groupId, userId) with no tenantId and a NOT NULL column would have 500'd those writes.
+// Under Postgres MATCH SIMPLE a row with a NULL tenantId is EXEMPT from the composite FK, so that
+// safety left the constraint holed for exactly the rows an old image wrote mid-rollout. The
+// CONTRACT migration (#1052) healed those stragglers and SET NOT NULL, so no row can be FK-exempt
+// any more. MembersService.removeMember still deletes these rows transactionally: that was the
+// bridge across the expand window and it stays as (now redundant) defense in depth.
 model GroupMember {
   groupId    String
   group      PermissionGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
   userId     String // Firebase uid
-  // The group's tenant. Nullable ONLY for the expand window above — every writer sets it.
-  tenantId   String?
-  membership Membership?     @relation(fields: [userId, tenantId], references: [userId, tenantId], onDelete: Cascade)
+  // The group's tenant — the denormalized half of the composite FK below. NOT NULL since #1052:
+  // under MATCH SIMPLE a NULL here would EXEMPT the row from that FK, which is the hole the
+  // expand phase (#1041) had to leave open for one rollout and the contract migration closed.
+  tenantId   String
+  membership Membership      @relation(fields: [userId, tenantId], references: [userId, tenantId], onDelete: Cascade)
   createdAt  DateTime        @default(now())
 
   @@id([groupId, userId])
