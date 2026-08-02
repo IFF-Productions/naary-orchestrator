@@ -15,6 +15,11 @@ import { INTEGRATION_PROSE } from "../src/docs/integration-prose";
  * is mechanically checkable, and every check catches the realistic failure, which is somebody
  * editing one store and not the other.
  *
+ * The scope check is one-directional ON PURPOSE: the catalog's list must be a SUBSET of what the
+ * prose names, so a narrower dialog list passes (GitHub ships `repo` while the prose also names
+ * the fine-grained equivalent, which its steps explain in words). The direction that matters is
+ * the other one — a scope in the dialog that nobody ever verified.
+ *
  * Deliberately NOT asserted: that a provider HAS `credentialSetup`. It is a first slice; an
  * unauthored provider still gets a derived `tokenFormat`, and demanding content would just invite
  * someone to invent a console URL to make the suite pass — the exact outcome this file exists to

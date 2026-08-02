@@ -734,7 +734,12 @@ export function ConnectForm({
           <div style={{ marginTop: 4, color: "var(--ink-3)" }}>
             {picked.authNote}
           </div>
-          <CredentialSetupHelp setup={picked.credentialSetup} />
+          {/* Not on the OAuth path: there is no token to mint there, and "create a personal
+              access token" is a wrong instruction, not merely a redundant one. Same reason the
+              token field itself is hidden for `oauth`. */}
+          {authMode !== "oauth" && (
+            <CredentialSetupHelp setup={picked.credentialSetup} />
+          )}
         </div>
       )}
 
