@@ -15,6 +15,10 @@
  *
  * `--sheet` needs no browser build — it stitches PNGs already captured (a page of <img>
  * data-URIs, screenshotted), so the before column can come from a run on the previous commit.
+ *
+ * Add `--channel email` to every command above for the EMAIL previews (#1059) instead of the
+ * Slack ones. It selects the story list, the sheet title AND a taller viewport, so it must be
+ * passed to the capture and the `--sheet` run alike.
  */
 import { chromium } from "@playwright/test";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
