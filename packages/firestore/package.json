@@ -1,6 +1,6 @@
 {
   "name": "@naary/firestore",
-  "version": "0.0.66",
+  "version": "0.0.67",
   "private": true,
   "description": "Cloud Firestore value codec + REST request builder for the firestoreQuery (read) / firestoreWrite (write) nodes. PURE — it builds requests and parses responses, it never performs I/O; the worker activity does the guarded fetch. Used by worker activities — NEVER by workflow code.",
   "main": "dist/index.js",
