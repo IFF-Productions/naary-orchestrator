@@ -10,7 +10,12 @@ import {
 import { workspaceHasAnyGrant } from "../../lib/permissions-logic";
 import { PHONE_QUERY, useMediaQuery } from "../../lib/useMediaQuery";
 import { MembersTable } from "./team/MembersTable";
-import { roleCounts } from "./team/model";
+import {
+  displayName,
+  roleCounts,
+  strandedNotice,
+  type StrandedNotice,
+} from "./team/model";
 import { RolesAccess } from "./team/RolesAccess";
 
 type Tab = "members" | "roles";
@@ -34,6 +39,9 @@ export function Team({ initialTab = "members" }: { initialTab?: Tab }) {
   // null = not fetchable for this caller (GET groups is owner/admin-only).
   const [groups, setGroups] = useState<PermissionGroup[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // #1053 — what the last removal left behind. Sticky until dismissed or the next removal:
+  // it names runs that will stay paused until someone acts, so it must not be a toast.
+  const [stranded, setStranded] = useState<StrandedNotice | null>(null);
 
   // invite dialog
   const [inviteOpen, setInviteOpen] = useState(false);
@@ -115,11 +123,17 @@ export function Team({ initialTab = "members" }: { initialTab?: Tab }) {
   async function remove(row: Member) {
     if (!tenant) return;
     setError(null);
+    setStranded(null);
     try {
       if (row.status === "invited") {
+        // Revoking a pending INVITATION is still a bare 204 — an invitee who never signed
+        // in cannot be on any paused run's approver list.
         await api.revokeInvitation(tenant, row.id);
       } else {
-        await api.removeMember(tenant, row.id);
+        const res = await api.removeMember(tenant, row.id);
+        setStranded(
+          strandedNotice(res.strandedApprovals, displayName(row.email)),
+        );
       }
       setMembers((ms) => (ms ?? []).filter((m) => m.id !== row.id));
     } catch (e) {
@@ -231,6 +245,46 @@ export function Team({ initialTab = "members" }: { initialTab?: Tab }) {
           }}
         >
           {error}
+        </div>
+      )}
+
+      {/* #1053 — the paused approvals that removal just left without an approver. The
+          removal already succeeded; this is the handle to go resolve them. */}
+      {stranded && (
+        <div
+          style={{
+            marginBottom: 14,
+            padding: "10px 12px",
+            borderRadius: "var(--radius-sm)",
+            // paused-soft, not error-soft: nothing failed. Runs are PAUSED and need a
+            // decision — the same token the run states use for exactly that.
+            background:
+              stranded.tone === "warn"
+                ? "var(--paused-soft)"
+                : "var(--info-soft)",
+            color:
+              stranded.tone === "warn"
+                ? "var(--state-paused)"
+                : "var(--state-info)",
+            fontSize: "var(--text-sm)",
+            lineHeight: 1.5,
+            display: "flex",
+            alignItems: "flex-start",
+            gap: 10,
+          }}
+        >
+          <span style={{ flex: 1 }}>
+            {stranded.text}{" "}
+            <a
+              href="/app/approvals"
+              style={{ color: "inherit", fontWeight: "var(--weight-bold)" }}
+            >
+              Open approvals
+            </a>
+          </span>
+          <Button variant="ghost" onClick={() => setStranded(null)}>
+            Dismiss
+          </Button>
         </div>
       )}
 

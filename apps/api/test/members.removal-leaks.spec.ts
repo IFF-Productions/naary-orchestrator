@@ -120,6 +120,15 @@ const prisma = {
     },
   },
   groupMember: {
+    // #1053 — the pre-delete approver-identity read; same tenant-scoping as deleteMany.
+    findMany: async ({ where }: any) =>
+      db.groupMembers
+        .filter((gm) => {
+          if (gm.userId !== where.userId) return false;
+          const g = db.groups.find((x) => x.id === gm.groupId);
+          return g?.tenantId === where.group?.tenantId;
+        })
+        .map((gm) => ({ groupId: gm.groupId })),
     // Mirrors the real filter: `{ userId, group: { tenantId } }` — the group relation is what
     // scopes the delete to ONE workspace.
     deleteMany: async ({ where }: any) => {
@@ -197,6 +206,8 @@ const prisma = {
 vi.mock("@naary/db", () => ({ getPrisma: () => prisma }));
 
 import type { Principal } from "../src/auth/tenant.decorator";
+import type { AuditService } from "../src/audit/audit.service";
+import type { ExecutionsService } from "../src/executions/executions.service";
 import type { MailerService } from "../src/mail/mailer.service";
 import type { MembershipCache } from "../src/membership/membership-cache";
 import { MembershipService } from "../src/membership/membership.service";
@@ -214,10 +225,20 @@ const cache: MembershipCache = {
 } as unknown as MembershipCache;
 
 const memberships = new MembershipService(cache);
+/** #1053 — the post-removal stranded-approval read; irrelevant to the leaks this file pins
+ *  (its own coverage is members.stranded-approvals.spec.ts). */
+const heldApprovals = vi.fn().mockResolvedValue({
+  total: 0,
+  needsOwnerOrAdmin: 0,
+  partial: false,
+  runs: [],
+});
 const svc = new MembersService(
   memberships,
   { sendInvitation } as unknown as MailerService,
   { invalidateTenant } as unknown as PermissionsService,
+  { heldApprovals } as unknown as ExecutionsService,
+  { record: vi.fn().mockResolvedValue(undefined) } as unknown as AuditService,
 );
 
 const asOwner: Principal = { tenantId: "t-1", userId: "u-own", role: "owner" };

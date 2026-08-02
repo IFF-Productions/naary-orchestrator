@@ -637,6 +637,43 @@ export interface Member {
    *  since tracking began; absent on invited rows. */
   lastActiveAt?: string | null;
 }
+
+/** One paused run the removed member was a listed approver on (#1053). */
+export interface StrandedApprovalRun {
+  workflowId: string;
+  workflowKey: string | null;
+  /** The paused humanApproval node. */
+  nodeId: string;
+  /** No listed approver identity is left — only an owner/admin (or the signed approval
+   *  link) can decide this gate now. */
+  needsOwnerOrAdmin: boolean;
+}
+
+/**
+ * What a member removal left behind (#1053). A humanApproval gate freezes its approver list
+ * at pause time, so removing someone can leave a paused run nobody can decide. The API
+ * reports it rather than auto-deciding — a run must never report a decision no human made.
+ */
+export interface StrandedApprovals {
+  /** Paused runs whose frozen approver snapshot named them. */
+  total: number;
+  /** Of those, the ones with NO approver identity left — the number to lead with. */
+  needsOwnerOrAdmin: number;
+  /** The counts are a LOWER BOUND (scan truncated, out of time, or failed). `true` with
+   *  zero counts means "could not check", NOT "none". */
+  partial: boolean;
+  /** Up to 20 of them, the ones needing an owner/admin first. */
+  runs: StrandedApprovalRun[];
+}
+
+/** `DELETE /tenants/:id/members/:userId`. The removal has ALWAYS committed by the time this
+ *  is assembled — it is a report, never a veto. */
+export interface MemberRemoval {
+  /** false when the uid held no membership here — the delete was a no-op. */
+  removed: boolean;
+  strandedApprovals: StrandedApprovals;
+}
+
 export interface TenantSettings {
   displayName: string | null;
   defaultModel: string | null;
