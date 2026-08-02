@@ -7,7 +7,7 @@
  */
 
 /** Unwrap OTel's typed `{ type, value }` span-attribute form (child spans use it; roots don't). */
-export function unwrapAttr(v: unknown): unknown {
+function unwrapAttr(v: unknown): unknown {
   if (v !== null && typeof v === "object" && !Array.isArray(v)) {
     const keys = Object.keys(v);
     if (keys.length === 2 && keys.includes("type") && keys.includes("value")) {
