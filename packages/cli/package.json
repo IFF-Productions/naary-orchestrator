@@ -1,15 +1,40 @@
 {
   "name": "@naary/cli",
   "version": "0.0.69",
-  "private": true,
   "description": "naary — a thin, dependency-free HTTP client over the public /api/v1 surface (runs, workflows, approvals). Node built-ins only; imports NO server code.",
+  "license": "UNLICENSED",
+  "homepage": "https://github.com/IFF-Productions/naary-orchestrator/tree/main/packages/cli#readme",
+  "bugs": "https://github.com/IFF-Productions/naary-orchestrator/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/IFF-Productions/naary-orchestrator.git",
+    "directory": "packages/cli"
+  },
+  "keywords": [
+    "naary",
+    "workflow",
+    "automation",
+    "cli",
+    "temporal"
+  ],
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
     "naary": "./dist/index.js"
   },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "scripts": {
-    "build": "tsc -b"
+    "build": "tsc -b",
+    "prepack": "tsc -b"
   },
   "devDependencies": {
     "@types/node": "^26.1.2"

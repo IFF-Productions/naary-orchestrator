@@ -3,7 +3,13 @@
   "compilerOptions": {
     "outDir": "dist",
     "rootDir": "src",
-    "types": ["node"]
+    "types": ["node"],
+    // This package SHIPS to npm and `files` is ["dist"], so `src` is not in the tarball.
+    // The base config turns both maps on; leaving them on here would publish .js.map/.d.ts.map
+    // pointing at "../src/*.ts" paths that do not exist for a consumer — broken sourcemaps are
+    // worse than none, because a debugger reports a file it cannot show rather than staying quiet.
+    "declarationMap": false,
+    "sourceMap": false
   },
   "include": ["src/**/*.ts"]
 }
