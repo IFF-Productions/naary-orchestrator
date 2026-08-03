@@ -235,6 +235,11 @@ services:
       # Their code defaults are `http://localhost:3000/...`, which is right for `pnpm start` and
       # useless in prod — and with neither declared, an operator could not correct them: the
       # generic MCP OAuth flow and the Atlassian 3LO callback both sent users to localhost.
+      # MCP session mode (#1065). Unset ⇒ "stateless": each request builds its own server, so a
+      # 2-container rollout never 404s a session and a deploy interrupts no client. Set to
+      # "stateful" ONLY to restore the in-memory session map — the recovery lever if a client
+      # turns out to need the server→client SSE stream.
+      MCP_SESSION_MODE: ${MCP_SESSION_MODE:-}
       OAUTH_REDIRECT_URI: ${OAUTH_REDIRECT_URI:-}
       ATLASSIAN_OAUTH_REDIRECT_URI: ${ATLASSIAN_OAUTH_REDIRECT_URI:-}
       # Early-access allowlist (comma-separated emails). Unset ⇒ open sign-up. See

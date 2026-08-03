@@ -144,7 +144,25 @@ const req = (
   body,
 });
 
+/**
+ * The two describes below are the STATEFUL contract, which #1065 moved behind
+ * `MCP_SESSION_MODE=stateful`. They are pinned to it rather than rewritten: stateless is the
+ * default now, but stateful is the documented recovery lever if a real MCP client turns out to
+ * require the GET stream — and a lever with no tests is not a lever.
+ */
+function useStatefulMode(): void {
+  const prev = process.env.MCP_SESSION_MODE;
+  beforeEach(() => {
+    process.env.MCP_SESSION_MODE = "stateful";
+  });
+  afterEach(() => {
+    if (prev === undefined) delete process.env.MCP_SESSION_MODE;
+    else process.env.MCP_SESSION_MODE = prev;
+  });
+}
+
 describe("McpController — Streamable HTTP session lifecycle (#469)", () => {
+  useStatefulMode();
   let controller: McpController;
   // Map every nry_ token → its tenant so we can drive two tenants.
   const tokenTenant: Record<string, string> = {
@@ -449,6 +467,7 @@ describe("McpController — Streamable HTTP session lifecycle (#469)", () => {
  * single-process test can stand in for it.
  */
 describe("McpController — idle sessions are swept, and the 404 says why (#1065)", () => {
+  useStatefulMode();
   const tokenTenant: Record<string, string> = {
     nry_a: "tenant-A",
     nry_b: "tenant-B",
@@ -584,5 +603,151 @@ describe("McpController — idle sessions are swept, and the 404 says why (#1065
     expect(vi.getTimerCount()).toBeGreaterThan(0);
     controller.onModuleDestroy();
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+/**
+ * STATELESS mode — the default since #1065.
+ *
+ * The multi-instance problem it solves cannot be reproduced in a single-process test (it needs two
+ * API containers and a rollout). What IS testable, and what these assert, is the property that
+ * makes it survive one: **no request depends on state left by a previous request**. If that holds
+ * in-process, it holds across containers, because there is nothing to be missing.
+ */
+describe("McpController — stateless mode (#1065, the default)", () => {
+  const tokenTenant: Record<string, string> = {
+    nry_a: "tenant-A",
+    nry_b: "tenant-B",
+  };
+  const tokens = {
+    verify: vi.fn(async (t: string) =>
+      tokenTenant[t]
+        ? { id: `id-${t}`, tenantId: tokenTenant[t], environmentId: null }
+        : null,
+    ),
+  };
+  const graphs = {
+    list: vi.fn(async () => []),
+    listMcpExposed: vi.fn(async () => []),
+  };
+  const environments = { defaultEnvId: vi.fn(async () => "env-1") };
+  const permissions = { isTenantEnforced: vi.fn(async () => false) };
+  let controller: McpController;
+
+  beforeEach(() => {
+    delete process.env.MCP_SESSION_MODE; // unset ⇒ stateless, i.e. the shipped default
+    createdTransports.length = 0;
+    harness.rejectInitialize = false;
+    buildMcpServer.mockClear();
+    graphs.listMcpExposed.mockClear();
+    controller = new McpController(
+      tokens as never,
+      graphs as never,
+      {} as never,
+      {} as never,
+      environments as never,
+      permissions as never,
+    );
+  });
+
+  const post = async (body: unknown, opts: { sessionId?: string } = {}) => {
+    const res = new FakeRes();
+    await controller.handle(
+      req("POST", { body, ...opts }) as never,
+      res as unknown as ServerResponse,
+    );
+    return res;
+  };
+
+  it("answers an initialize WITHOUT minting a session id — there is no session to hand out", async () => {
+    const res = await post(INIT_BODY);
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["mcp-session-id"]).toBeUndefined();
+  });
+
+  it("accepts a tool call with NO session id — the 400 'initialize first' gate is gone", async () => {
+    // This is the property that makes a rollout survivable: request two does not need request
+    // one's state, so it does not matter which container answers it.
+    const res = await post({ jsonrpc: "2.0", id: 7, method: "tools/list" });
+    expect(res.statusCode).toBe(200);
+  });
+
+  it("ignores a stale mcp-session-id instead of 404ing it", async () => {
+    // A client that previously spoke to a STATEFUL deployment keeps sending its old id. Rejecting
+    // it would reproduce the exact 404 this mode exists to eliminate.
+    const res = await post(
+      { jsonrpc: "2.0", id: 8, method: "tools/list" },
+      { sessionId: "00000000-0000-4000-8000-000000000000" },
+    );
+    expect(res.statusCode).toBe(200);
+  });
+
+  it("builds a FRESH transport and server per request, and closes both", async () => {
+    await post(INIT_BODY);
+    await post({ jsonrpc: "2.0", id: 2, method: "tools/list" });
+
+    // Reuse is not an option: the SDK throws "Stateless transport cannot be reused across
+    // requests" because message ids would collide between concurrent clients.
+    expect(createdTransports).toHaveLength(2);
+    expect(buildMcpServer).toHaveBeenCalledTimes(2);
+    // …and per-request construction must come with per-request teardown, or "no session leak"
+    // becomes a per-REQUEST leak, which is strictly worse.
+    expect(createdTransports.every((t) => t.closed)).toBe(true);
+  });
+
+  it("rebuilds the tool list per request — a newly opted-in workflow needs no reconnect", async () => {
+    await post(INIT_BODY);
+    await post({ jsonrpc: "2.0", id: 2, method: "tools/list" });
+    // The documented COST of this mode (a query per call) and its documented benefit (no stale
+    // tool list) are the same fact; assert it once so neither can be quietly dropped.
+    expect(graphs.listMcpExposed).toHaveBeenCalledTimes(2);
+  });
+
+  it("refuses GET with a message naming the mode, not a bare 405", async () => {
+    const res = new FakeRes();
+    await controller.handle(
+      req("GET") as never,
+      res as unknown as ServerResponse,
+    );
+    expect(res.statusCode).toBe(405);
+    expect(res.body).toContain("stateless");
+    expect(res.body).toContain("POST");
+  });
+
+  it("treats DELETE as a no-op success — a client's disconnect cleanup must not report failure", async () => {
+    const res = new FakeRes();
+    await controller.handle(
+      req("DELETE", { sessionId: "whatever" }) as never,
+      res as unknown as ServerResponse,
+    );
+    expect(res.statusCode).toBe(204);
+  });
+
+  it("still authenticates: no token is 401, never an anonymous server", async () => {
+    const res = new FakeRes();
+    await controller.handle(
+      req("POST", { token: null, body: INIT_BODY }) as never,
+      res as unknown as ServerResponse,
+    );
+    expect(res.statusCode).toBe(401);
+    expect(buildMcpServer).not.toHaveBeenCalled();
+  });
+
+  it("scopes each request to ITS OWN token's tenant", async () => {
+    await post(INIT_BODY);
+    const res = new FakeRes();
+    await controller.handle(
+      req("POST", { token: "nry_b", body: INIT_BODY }) as never,
+      res as unknown as ServerResponse,
+    );
+    // Losing sessions must not lose tenant scoping — the server is rebuilt per request, so the
+    // tenant comes from the token on THAT request.
+    // The hoisted mock is declared argument-less (the controller only needs {connect, close}),
+    // so its recorded calls type as an empty tuple — assert the shape we actually pass.
+    const calls = buildMcpServer.mock.calls as unknown as [
+      { tenantId: string },
+    ][];
+    const tenants = calls.map((c) => c[0].tenantId);
+    expect(tenants).toEqual(["tenant-A", "tenant-B"]);
   });
 });
