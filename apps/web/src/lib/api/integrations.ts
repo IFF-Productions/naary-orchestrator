@@ -135,6 +135,24 @@ export const integrationsApi = {
   // redirect to. INVERTED vs OAuth — the connection does NOT exist yet: GitHub yields an
   // installation_id only AFTER the user installs, so the API's GET /github-app/callback
   // creates the github_app connection from it and redirects back. We send only a label.
+  /**
+   * Begin Atlassian 3LO consent for an EXISTING atlassian/oauth connection.
+   *
+   * Deliberately separate from `startOauthConsent`: that path does `.well-known` discovery +
+   * dynamic registration against the connection's own serverUrl, which is right for an arbitrary
+   * MCP server and wrong for Atlassian. Atlassian is a FIXED client — our platform app's id and
+   * secret, fixed authorize/token endpoints, a required `audience`, and a cloudId resolved after
+   * the exchange — so it has its own route on the API.
+   */
+  startAtlassianConsent(
+    tenantId: string,
+    connectionId: string,
+  ): Promise<{ authorizeUrl: string }> {
+    return http(
+      `/tenants/${encodeURIComponent(tenantId)}/connections/${encodeURIComponent(connectionId)}/atlassian/oauth/start`,
+      { method: "POST" },
+    );
+  },
   startGithubAppInstall(
     tenantId: string,
     input: { label: string },

@@ -454,6 +454,98 @@ export function SigningForm({
  *  /app/integrations, not via an auto-return. (Redirecting BOTH callbacks back to the SPA is a
  *  tracked follow-up.) Hence no onChanged (we navigate away) and no token field — the app install
  *  itself IS the credential; no PAT is ever entered or stored. */
+/**
+ * Atlassian 3LO connect (#241 / APP-AUTH.md §3b) — the UI half that was never built. The API has
+ * had the whole flow since the SSO work (`atlassian-oauth.controller.ts`: start → auth.atlassian.com
+ * → ACS → cloudId), but nothing in the SPA called it, so the only reachable Atlassian connection
+ * was the API-token kind.
+ *
+ * TWO STEPS, unlike the GitHub App button beside it, and the difference is the provider's:
+ *  - GitHub App is INSTALL-first — GitHub yields an installation_id only after the user installs,
+ *    so the callback creates the connection and we send only a label.
+ *  - Atlassian 3LO is CONNECTION-first — `POST …/atlassian/oauth/start` looks the connection up by
+ *    id to read the environment the consent belongs to (the callback is `@Public()` and cannot
+ *    carry an X-Environment-Id header, so the env has to ride in the signed state).
+ * So this creates the connection, then immediately starts consent with its id.
+ *
+ * If consent is abandoned, the connection remains with no grant — visible, labelled, and
+ * re-connectable — rather than the flow silently leaving nothing behind. That is the better of the
+ * two failure modes: a half-finished connection you can see beats one you cannot.
+ */
+export function AtlassianAppForm({ tenant }: { tenant: string }) {
+  const [label, setLabel] = useState("");
+  const [site, setSite] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  async function connect() {
+    const siteUrl = site.trim();
+    if (!siteUrl) {
+      setMsg("Enter your Atlassian site URL.");
+      return;
+    }
+    setBusy(true);
+    setMsg(null);
+    try {
+      const conn = await api.createConnection(tenant, {
+        type: "atlassian",
+        authMode: "oauth",
+        label: label.trim() || "Atlassian",
+        serverUrl: siteUrl,
+      });
+      setMsg("Redirecting to Atlassian…");
+      const { authorizeUrl } = await api.startAtlassianConsent(tenant, conn.id);
+      window.location.assign(authorizeUrl); // leave the form as-is; we navigate away
+    } catch (e) {
+      // Name the likeliest cause. Atlassian 3LO needs PLATFORM credentials
+      // (ATLASSIAN_OAUTH_CLIENT_ID/_SECRET); without them the API refuses at `start`, and
+      // "try again" would be advice that cannot work.
+      const text = e instanceof Error ? e.message : "";
+      setMsg(
+        /not configured/i.test(text)
+          ? "Atlassian OAuth isn't configured on this server yet — an admin must set the Atlassian app credentials."
+          : "Could not start Atlassian consent — check the site URL and try again.",
+      );
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      <div style={{ marginBottom: 12 }}>
+        <span style={fieldLabel}>Label</span>
+        <input
+          style={fieldStyle}
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          placeholder="Atlassian (prod)"
+        />
+      </div>
+      <div style={{ marginBottom: 12 }}>
+        <span style={fieldLabel}>Site URL</span>
+        <input
+          style={fieldStyle}
+          value={site}
+          onChange={(e) => setSite(e.target.value)}
+          placeholder="https://your-site.atlassian.net"
+        />
+      </div>
+      <p style={{ fontSize: 12, color: "var(--ink-3)", margin: "0 0 12px" }}>
+        You&apos;ll be sent to Atlassian to approve access. No API token is
+        stored — the grant is held server-side and refreshed automatically.
+      </p>
+      {msg && (
+        <p style={{ fontSize: 12, color: "var(--ink-2)", margin: "0 0 12px" }}>
+          {msg}
+        </p>
+      )}
+      <Button variant="primary" disabled={busy} onClick={() => void connect()}>
+        {busy ? "Connecting…" : "Connect Atlassian"}
+      </Button>
+    </>
+  );
+}
+
 export function GithubAppForm({ tenant }: { tenant: string }) {
   const [label, setLabel] = useState("");
   const [busy, setBusy] = useState(false);
