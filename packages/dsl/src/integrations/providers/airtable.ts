@@ -8,6 +8,15 @@ export const AIRTABLE: IntegrationProvider = {
   baseUrl: "https://api.airtable.com/v0",
   description: "Read and write Airtable records — list, get, create, update.",
   auth: "A custom connection whose token is an Airtable personal access token (with data scopes for the base).",
+  credentialSetup: {
+    tokenUrl: "https://airtable.com/create/tokens",
+    scopes: ["data.records:read", "data.records:write"],
+    steps: [
+      "At airtable.com/create/tokens click Create token and grant the scopes above.",
+      "Add the specific base(s) the workflow may touch — a token with no base added returns 403 on every call, scopes or not.",
+      "Copy the token immediately; Airtable shows it once.",
+    ],
+  },
   actions: [
     {
       key: "list_records",

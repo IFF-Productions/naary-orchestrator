@@ -45,10 +45,14 @@ export {
   getIntegrationAction,
   buildIntegrationRequest,
   validateIntegrationConfig,
+  resolveCredentialSetup,
+  deriveTokenFormat,
   type IntegrationProvider,
   type IntegrationAction,
   type IntegrationField,
   type BuiltIntegrationRequest,
+  type CredentialSetup,
+  type ResolvedCredentialSetup,
 } from "./integrations";
 export {
   planIntegrationCall,

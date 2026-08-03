@@ -11,6 +11,18 @@ export const STRIPE: IntegrationProvider = {
   description:
     "Act on Stripe — create/get customers, create payment intents, list charges, refund.",
   auth: "A custom connection whose token is a Stripe secret key (`sk_live_…` / `sk_test_…`), sent as a Bearer token.",
+  credentialSetup: {
+    tokenUrl: "https://dashboard.stripe.com/apikeys",
+    steps: [
+      "In the Stripe dashboard open Developers → API keys and copy or create a secret key.",
+      "Start in test mode (`sk_test_…`) and keep that key in your sandbox environment — test and live data are separate worlds.",
+      "Prefer a restricted key limited to the resources this workflow needs.",
+    ],
+    // Authored rather than derived: the bearer sentence is true but says nothing about the trap,
+    // which is pasting the publishable key.
+    tokenFormat:
+      "Paste the SECRET key (`sk_test_…` / `sk_live_…`) on its own — the publishable `pk_…` key will not work. `Bearer ` is added for you.",
+  },
   actions: [
     {
       key: "create_customer",

@@ -8,6 +8,14 @@ export const ASANA: IntegrationProvider = {
   baseUrl: "https://app.asana.com/api/1.0",
   description: "Manage Asana tasks — read, create, update, and comment.",
   auth: "A custom connection whose token is an Asana personal access token.",
+  credentialSetup: {
+    tokenUrl: "https://app.asana.com/0/my-apps",
+    steps: [
+      "Open the Asana developer console (avatar → My Settings → Apps → Manage Developer Apps) and create a personal access token.",
+      "Copy it at creation time — it is not shown again.",
+      "The token inherits your own permissions, so it reaches only the workspaces you belong to.",
+    ],
+  },
   actions: [
     {
       key: "get_task",

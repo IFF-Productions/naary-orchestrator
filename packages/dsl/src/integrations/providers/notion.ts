@@ -26,6 +26,16 @@ export const NOTION: IntegrationProvider = {
   description:
     "Read and write Notion — get pages/databases, query a data source, create pages, append blocks.",
   auth: "A custom connection whose token is a Notion internal integration token (`secret_…` / `ntn_…`); share the target pages/databases with the integration.",
+  credentialSetup: {
+    tokenUrl: "https://www.notion.so/my-integrations",
+    steps: [
+      "Create an internal integration at notion.so/my-integrations — only a workspace owner can.",
+      "Use the ••• next to it to reveal and copy the internal integration token.",
+      "Open every page or database the workflow touches and share it with the integration (… → Connections). Skipping this is why a valid token returns 404.",
+    ],
+    tokenFormat:
+      "Paste the internal integration token (`ntn_…`, or `secret_…` on older integrations) on its own — `Bearer ` is added for you.",
+  },
   actions: [
     {
       key: "get_page",

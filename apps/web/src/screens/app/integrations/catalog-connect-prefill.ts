@@ -14,7 +14,12 @@
  * Kept out of the component and free of runtime React imports so it can be unit-tested in the web
  * suite's node environment — same shape as `mcp-registry-prefill.ts`.
  */
-import { getIntegrationProvider, INTEGRATION_PROVIDERS } from "@naary/dsl";
+import {
+  getIntegrationProvider,
+  resolveCredentialSetup,
+  INTEGRATION_PROVIDERS,
+  type ResolvedCredentialSetup,
+} from "@naary/dsl";
 
 export interface CatalogConnectPrefill {
   /** Provider label, used as the connection's default name ("PagerDuty"). */
@@ -33,6 +38,15 @@ export interface CatalogConnectPrefill {
   authHeader: string;
   /** The catalog's own prose: where the credential comes from and any per-provider caveat. */
   authNote: string;
+  /**
+   * HOW TO OBTAIN the credential (#1063): the mint-a-token link, the scopes to tick, the steps,
+   * and what the pasted value should look like.
+   *
+   * Never `undefined` — `tokenFormat` is derived from the auth scheme for providers nobody has
+   * authored yet, so this dialog always has something to say about the value being typed. The
+   * other three fields are present only where a human vouched for them.
+   */
+  credentialSetup: ResolvedCredentialSetup;
   /** True when Server URL is the real API host (a Jira site, a Shopify store) and not a label. */
   hostFromConnection: boolean;
 }
@@ -88,6 +102,33 @@ export function catalogConnectPrefill(
     authMode: "api_token",
     authHeader: describeAuthHeader(provider.authScheme),
     authNote: provider.auth,
+    credentialSetup: resolveCredentialSetup(provider),
     hostFromConnection,
   };
+}
+
+/**
+ * Split a hint into plain runs and `backticked` code runs, so the dialog can render a token
+ * shape (`sk_test_…`, `email:api_token`) as code instead of showing the reader a stray backtick.
+ *
+ * The catalog writes these strings for humans, and markdown backticks are how it has always
+ * marked a literal — this is the smallest thing that honours that without pulling a markdown
+ * renderer into the settings screen. Inline code ONLY: no bold, no links, nothing that could
+ * turn catalog prose into markup. An unpaired trailing backtick stays literal text.
+ */
+export function splitInlineCode(
+  text: string,
+): { text: string; code: boolean }[] {
+  const parts: { text: string; code: boolean }[] = [];
+  // Pairs of backticks only; the trailing alternative keeps an odd one as plain text.
+  const re = /`([^`]+)`/g;
+  let last = 0;
+  for (let m = re.exec(text); m; m = re.exec(text)) {
+    if (m.index > last)
+      parts.push({ text: text.slice(last, m.index), code: false });
+    parts.push({ text: m[1], code: true });
+    last = m.index + m[0].length;
+  }
+  if (last < text.length) parts.push({ text: text.slice(last), code: false });
+  return parts;
 }

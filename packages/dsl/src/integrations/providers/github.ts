@@ -11,6 +11,15 @@ export const GITHUB: IntegrationProvider = {
   },
   description: "Act on GitHub issues — read, create, comment, and label.",
   auth: "A GitHub connection with a Personal Access Token (repo scope) or a GitHub App token, stored as the connection's Bearer token.",
+  credentialSetup: {
+    tokenUrl: "https://github.com/settings/tokens",
+    scopes: ["repo"],
+    steps: [
+      "Open Settings → Developer settings → Personal access tokens and create a token.",
+      "Classic token: tick the repo scope. Fine-grained token: grant Issues: Read and write on the repositories this workflow touches, and add those repositories to the token — the permission alone is not enough.",
+      "Copy the token before leaving the page; GitHub shows it once.",
+    ],
+  },
   actions: [
     {
       key: "get_issue",

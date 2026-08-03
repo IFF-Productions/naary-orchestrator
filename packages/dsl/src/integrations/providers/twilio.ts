@@ -12,6 +12,12 @@ export const TWILIO: IntegrationProvider = {
   description:
     "Send SMS and place calls with Twilio — send/read messages, list messages, make a call.",
   auth: "A custom connection whose token is `AccountSid:AuthToken` (sent as HTTP Basic). Set the same Account SID as the node's `accountSid` field — the request builder needs it explicitly for the {accountSid} path segment (it is not derived from the connection token).",
+  // Only `tokenFormat`: the generated Basic sentence cannot say WHICH pair, and Twilio's is not
+  // the email pair a reader coming from Jira would assume.
+  credentialSetup: {
+    tokenFormat:
+      "Paste `AccountSid:AuthToken` — both values from the Twilio Console dashboard, colon-separated. Naary sends them as HTTP Basic.",
+  },
   actions: [
     {
       key: "send_sms",
