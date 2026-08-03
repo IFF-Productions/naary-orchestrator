@@ -1,5 +1,5 @@
 import type { ServerResponse } from "node:http";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // A fake StreamableHTTPServerTransport that models just enough of the SDK's session lifecycle to
 // prove the controller's routing: the first POST (an `initialize`) mints a session id and fires
@@ -430,5 +430,159 @@ describe("McpController — Streamable HTTP session lifecycle (#469)", () => {
       res as unknown as ServerResponse,
     );
     expect(res.statusCode).toBe(405);
+  });
+});
+
+/**
+ * Idle sweep + the truthful 404 (#1065).
+ *
+ * Before this, ONLY an explicit DELETE evicted a session: a client that simply went away left its
+ * map entry AND its built `McpServer` alive until the process exited, and a user coming back to an
+ * abandoned session got a bare "Unknown MCP session" with no way to tell a timeout from a bug.
+ *
+ * Fake timers drive both halves — `vi.useFakeTimers()` controls `Date.now()` (what `lastSeenAt` is
+ * measured against) and `setInterval` (the janitor), so these assert the real clock arithmetic
+ * rather than a seam invented for the test.
+ *
+ * NOT covered here, deliberately: the multi-instance half of #1065 (a session minted on one API
+ * container and answered by another during `docker rollout`). That needs a shared store, and no
+ * single-process test can stand in for it.
+ */
+describe("McpController — idle sessions are swept, and the 404 says why (#1065)", () => {
+  const tokenTenant: Record<string, string> = {
+    nry_a: "tenant-A",
+    nry_b: "tenant-B",
+  };
+  const tokens = {
+    verify: vi.fn(async (t: string) =>
+      tokenTenant[t]
+        ? { id: `id-${t}`, tenantId: tokenTenant[t], environmentId: null }
+        : null,
+    ),
+  };
+  const graphs = {
+    list: vi.fn(async () => []),
+    listMcpExposed: vi.fn(async () => []),
+  };
+  const environments = { defaultEnvId: vi.fn(async () => "env-1") };
+  const permissions = { isTenantEnforced: vi.fn(async () => false) };
+
+  const IDLE_MS = 30 * 60_000;
+  let controller: McpController;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    createdTransports.length = 0;
+    harness.rejectInitialize = false;
+    buildMcpServer.mockClear();
+    controller = new McpController(
+      tokens as never,
+      graphs as never,
+      {} as never,
+      {} as never,
+      environments as never,
+      permissions as never,
+    );
+  });
+
+  afterEach(() => {
+    controller.onModuleDestroy();
+    vi.useRealTimers();
+  });
+
+  async function initSession(token = "nry_a"): Promise<string> {
+    const res = new FakeRes();
+    await controller.handle(
+      req("POST", { token, body: INIT_BODY }) as never,
+      res as unknown as ServerResponse,
+    );
+    return res.headers["mcp-session-id"];
+  }
+
+  /** Send a request on an existing session id and return the response. */
+  async function onSession(sid: string, token = "nry_a"): Promise<FakeRes> {
+    const res = new FakeRes();
+    await controller.handle(
+      req("POST", {
+        token,
+        sessionId: sid,
+        body: { jsonrpc: "2.0", id: 2, method: "tools/list" },
+      }) as never,
+      res as unknown as ServerResponse,
+    );
+    return res;
+  }
+
+  it("closes a session left untouched past the idle window — the leak, not just the map entry", async () => {
+    const sid = await initSession();
+    const transport = createdTransports[0];
+    expect(transport.closed).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(IDLE_MS + 61_000);
+
+    // The TRANSPORT is closed, which is what releases the built server — deleting the map entry
+    // alone would have left the McpServer alive, i.e. fixed the symptom and kept the leak.
+    expect(transport.closed).toBe(true);
+    const res = await onSession(sid);
+    expect(res.statusCode).toBe(404);
+  });
+
+  it("does NOT sweep a session that is still being used", async () => {
+    const sid = await initSession();
+    const transport = createdTransports[0];
+
+    // Two thirds of the window, a request, then two thirds again: never idle for a full window,
+    // though the session is now older than one. Age must not be the criterion.
+    await vi.advanceTimersByTimeAsync((IDLE_MS * 2) / 3);
+    expect((await onSession(sid)).statusCode).not.toBe(404);
+    await vi.advanceTimersByTimeAsync((IDLE_MS * 2) / 3);
+
+    expect(transport.closed).toBe(false);
+    expect((await onSession(sid)).statusCode).not.toBe(404);
+  });
+
+  it("tells the OWNER its session expired, instead of a bare 'unknown'", async () => {
+    const sid = await initSession("nry_a");
+    await vi.advanceTimersByTimeAsync(IDLE_MS + 61_000);
+
+    const res = await onSession(sid, "nry_a");
+    expect(res.statusCode).toBe(404);
+    expect(res.body).toContain("expired");
+    expect(res.body).toContain("30 minutes idle");
+    expect(res.body).toContain("Re-initialize");
+  });
+
+  it("does NOT tell ANOTHER tenant that the id ever existed — the message must not become an oracle", async () => {
+    const sid = await initSession("nry_a");
+    await vi.advanceTimersByTimeAsync(IDLE_MS + 61_000);
+
+    const foreign = await onSession(sid, "nry_b");
+    const madeUp = await onSession(
+      "00000000-0000-4000-8000-000000000000",
+      "nry_b",
+    );
+
+    // Same status AND same prose: a stranger cannot distinguish a real expired id from one they
+    // invented, which is the property the flat 404 exists to hold.
+    expect(foreign.statusCode).toBe(404);
+    expect(madeUp.statusCode).toBe(404);
+    expect(foreign.body).toBe(madeUp.body);
+    expect(foreign.body).not.toContain("expired after");
+  });
+
+  it("an id that never existed still names the causes a user can act on", async () => {
+    const res = await onSession("00000000-0000-4000-8000-000000000000");
+    expect(res.statusCode).toBe(404);
+    // The deploy case is the one we can never observe (the process that held it is gone), so the
+    // generic message has to name it rather than claim knowledge it doesn't have.
+    expect(res.body).toContain("redeployed");
+    expect(res.body).toContain("Re-initialize");
+  });
+
+  it("onModuleDestroy stops the janitor so a shutting-down process can exit", async () => {
+    await initSession();
+    expect(vi.getTimerCount()).toBeGreaterThan(0);
+    controller.onModuleDestroy();
+    expect(vi.getTimerCount()).toBe(0);
   });
 });

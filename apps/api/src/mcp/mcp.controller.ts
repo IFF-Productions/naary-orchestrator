@@ -1,6 +1,13 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { All, BadRequestException, Controller, Req, Res } from "@nestjs/common";
+import {
+  All,
+  BadRequestException,
+  Controller,
+  type OnModuleDestroy,
+  Req,
+  Res,
+} from "@nestjs/common";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { ApiExcludeController } from "@nestjs/swagger";
 import type { GraphDef } from "@naary/dsl";
@@ -44,6 +51,27 @@ function deriveWorkflowKey(name: string): string {
 
 /** Nest/Express parses the JSON body onto the request; the transport wants that parsed value. */
 type McpRequest = IncomingMessage & { body?: unknown };
+
+/**
+ * How long a session may sit untouched before the sweep closes it (#1065).
+ *
+ * 30 minutes is chosen against the CLIENT's behaviour, not ours: Claude Desktop / Cursor hold a
+ * session open across a user's whole working session, and a person can easily leave one idle over
+ * a meal. Anything much shorter turns "come back to your editor" into an unexplained 404, which is
+ * the failure this work exists to reduce — so the leak is traded down, not off.
+ */
+const SESSION_IDLE_MS = 30 * 60_000;
+
+/** How often the janitor runs. Coarse on purpose: this reclaims memory, it does not enforce a
+ *  deadline, so a session may live up to one interval past its idle window. */
+const SWEEP_INTERVAL_MS = 60_000;
+
+/** How long an expired session id is remembered so its OWNER gets a truthful message. Comfortably
+ *  longer than a client's retry/backoff, far shorter than the process. */
+const EXPIRED_MEMORY_MS = 60 * 60_000;
+
+/** Hard cap on remembered ids, so a burst of short sessions can't outpace the TTL sweep. */
+const EXPIRED_MAX = 500;
 
 /** A JSON-RPC 2.0 error envelope (what MCP speaks) for failures before the transport runs. */
 function rpcError(
@@ -125,8 +153,13 @@ function looksLikeInitialize(body: unknown): boolean {
  *
  * The session map is in-memory and per-API-instance — inherent to the SDK's Streamable HTTP model
  * (this is the NestJS control plane, not the Temporal worker; Tier-1 rule 7 is about the latter).
- * A multi-instance API would need sticky routing; an idle session with no DELETE leaks its map
- * entry until process exit (follow-up: an idle-timeout sweep).
+ * TWO consequences, and only one of them is now handled (#1065):
+ *   - An idle session no longer leaks: a sweep closes anything untouched for SESSION_IDLE_MS, and
+ *     the owner of a swept session is told so rather than getting a bare "unknown".
+ *   - A MULTI-INSTANCE API still needs sticky routing or a shared store. `docker rollout` scales
+ *     the API to 2 during a deploy, so a session minted on one container can be answered by the
+ *     other — and every session dies when the old container retires. That is the remaining half of
+ *     #1065 and the prerequisite for MCP subscriptions/logging, which assume a durable session.
  *
  * Params are typed as Node's IncomingMessage/ServerResponse (what the SDK transport expects);
  * the Express objects Nest passes at runtime extend them.
@@ -136,7 +169,7 @@ function looksLikeInitialize(body: unknown): boolean {
 // bogus @All route; consumers connect with an MCP client, not curl.
 @ApiExcludeController()
 @Controller("mcp")
-export class McpController {
+export class McpController implements OnModuleDestroy {
   /**
    * Live MCP sessions, keyed by the transport's `mcp-session-id`. Each entry owns the tenant it was
    * initialized for; GET/DELETE/subsequent-POST must present a matching tenant or the session is
@@ -149,8 +182,33 @@ export class McpController {
       transport: StreamableHTTPServerTransport;
       server: ReturnType<typeof buildMcpServer>;
       tenantId: string;
+      /** Wall-clock of the last request dispatched to this session — the idle sweep's input. */
+      lastSeenAt: number;
     }
   >();
+
+  /**
+   * Sessions THIS instance evicted for idleness, so the owner can be told why (#1065).
+   *
+   * Without this, an expired session and a never-existent one give the same "Unknown MCP session",
+   * and a user whose client sat idle over lunch has no way to tell a bug from a timeout.
+   *
+   * TENANT-MATCHED on read, which is the whole reason this is safe. The 404 above is deliberately
+   * indistinguishable between "no such session" and "someone else's session" — saying "expired"
+   * to a stranger would confirm that an id they guessed once existed. So a tombstone only ever
+   * speaks to the tenant that owned the session; everyone else still gets the flat answer.
+   *
+   * Only OUR evictions land here. A session lost to a deploy leaves no tombstone — the process
+   * that held it is gone — which is exactly why the generic message names a deploy as a cause
+   * rather than pretending we can always tell.
+   */
+  private readonly expired = new Map<
+    string,
+    { tenantId: string; at: number }
+  >();
+
+  /** The idle sweep's timer, cleared on shutdown so a test/worker process can exit. */
+  private sweepTimer?: ReturnType<typeof setInterval>;
 
   constructor(
     private readonly tokens: ApiTokenService,
@@ -201,9 +259,17 @@ export class McpController {
     if (sessionId) {
       const session = this.sessions.get(sessionId);
       if (!session || session.tenantId !== tenantId) {
-        rpcError(404, -32001, "Unknown MCP session.", res);
+        rpcError(
+          404,
+          -32001,
+          this.unknownSessionMessage(sessionId, tenantId),
+          res,
+        );
         return;
       }
+      // Touch BEFORE dispatching: a long-running tool call must not look idle for its duration,
+      // and a GET holding the SSE stream open would otherwise be swept mid-stream.
+      session.lastSeenAt = Date.now();
       await session.transport.handleRequest(req, res, req.body);
       return;
     }
@@ -295,7 +361,15 @@ export class McpController {
       sessionIdGenerator: () => randomUUID(),
       // Register the session under the tenant it was born in the moment the id is minted.
       onsessioninitialized: (sid) => {
-        this.sessions.set(sid, { transport, server, tenantId });
+        this.sessions.set(sid, {
+          transport,
+          server,
+          tenantId,
+          lastSeenAt: Date.now(),
+        });
+        // A reused id would otherwise keep reporting "expired" for a session that is live again.
+        this.expired.delete(sid);
+        this.startSweep();
       },
     });
     // The session — not the response — owns the teardown: fires on DELETE / terminate, evicting
@@ -334,6 +408,95 @@ export class McpController {
   private sessionIdHeader(req: McpRequest): string | undefined {
     const raw = req.headers["mcp-session-id"];
     return Array.isArray(raw) ? raw[0] : raw;
+  }
+
+  /**
+   * What to say when a session id doesn't resolve (#1065).
+   *
+   * The 404 stays a 404 in every case — this only chooses the prose. The owner of a session WE
+   * swept gets the true reason; everyone else gets a message that names the causes without
+   * claiming to know which one applies, because for the two we cannot observe (a deploy replaced
+   * the process; the id was never real) we genuinely cannot tell.
+   *
+   * The tenant match is load-bearing, not incidental: an unmatched id must read exactly like an
+   * unknown one, or the wording becomes an oracle for which session ids exist.
+   */
+  private unknownSessionMessage(sessionId: string, tenantId: string): string {
+    const tomb = this.expired.get(sessionId);
+    if (tomb && tomb.tenantId === tenantId) {
+      return (
+        `MCP session expired after ${Math.round(SESSION_IDLE_MS / 60_000)} minutes idle. ` +
+        `Re-initialize to start a new one.`
+      );
+    }
+    return (
+      "Unknown MCP session — it may have expired, or ended when the server was redeployed. " +
+      "Re-initialize to start a new one."
+    );
+  }
+
+  /**
+   * Start the idle sweep on first session, not at construction.
+   *
+   * Nest instantiates this controller in every API process including ones that never see an MCP
+   * request; a timer created eagerly would tick forever for nothing. Lazily started and
+   * `unref()`d, so it never holds the event loop open — a test or a shutting-down process exits
+   * with the timer still armed, which is the behaviour we want from a janitor.
+   */
+  private startSweep(): void {
+    if (this.sweepTimer) return;
+    this.sweepTimer = setInterval(() => this.sweep(), SWEEP_INTERVAL_MS);
+    this.sweepTimer.unref?.();
+  }
+
+  /**
+   * Close sessions no request has touched for `SESSION_IDLE_MS`.
+   *
+   * Why this exists (#1065): only an explicit DELETE evicted a session, so a client that simply
+   * went away left its map entry AND its built `McpServer` alive until the process exited. Every
+   * abandoned session was a permanent leak, and the exposure grows with uptime.
+   *
+   * Closing the TRANSPORT rather than deleting the map entry directly: `transport.onclose` is what
+   * owns teardown (it deletes the entry and closes the server), so going through it keeps one
+   * teardown path instead of two that can drift. The entry is tombstoned first, because onclose
+   * runs synchronously enough that writing it afterwards would race the next request.
+   */
+  private sweep(): void {
+    const now = Date.now();
+    for (const [sid, s] of this.sessions) {
+      if (now - s.lastSeenAt < SESSION_IDLE_MS) continue;
+      this.rememberExpired(sid, s.tenantId, now);
+      void Promise.resolve(s.transport.close()).catch(() => {
+        // Best-effort: a transport that fails to close must not stop the sweep from reaching the
+        // rest of the map, and there is no client waiting on this.
+        this.sessions.delete(sid);
+      });
+    }
+    // Tombstones are a courtesy, not state anyone depends on — expire them on the same pass so
+    // this map cannot become the leak the sweep was written to fix.
+    for (const [sid, t] of this.expired) {
+      if (now - t.at > EXPIRED_MEMORY_MS) this.expired.delete(sid);
+    }
+  }
+
+  private rememberExpired(
+    sessionId: string,
+    tenantId: string,
+    at: number,
+  ): void {
+    // Bounded by count as well as by time: a burst of short-lived sessions must not outrun the
+    // TTL sweep above. Oldest insertion goes first (Map preserves insertion order).
+    if (this.expired.size >= EXPIRED_MAX) {
+      const oldest = this.expired.keys().next().value;
+      if (oldest !== undefined) this.expired.delete(oldest);
+    }
+    this.expired.set(sessionId, { tenantId, at });
+  }
+
+  /** Nest lifecycle: stop the janitor so a shutting-down process (or a test) isn't kept alive. */
+  onModuleDestroy(): void {
+    if (this.sweepTimer) clearInterval(this.sweepTimer);
+    this.sweepTimer = undefined;
   }
 
   /**
