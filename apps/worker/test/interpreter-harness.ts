@@ -1390,14 +1390,75 @@ async function waitFor(
   throw new Error("waitFor: condition not met within timeout");
 }
 
-/** Build a Worker bound to the given per-file test env. */
-export function makeWorker(env: TestWorkflowEnvironment): Promise<Worker> {
-  return Worker.create({
-    connection: env.nativeConnection,
-    taskQueue: TASK_QUEUE,
-    workflowsPath: WORKFLOWS_PATH,
-    activities: mockActivities,
-  });
+/**
+ * The Rust core's rejection when a worker registers on a namespace + task queue that another
+ * worker still holds (#1073):
+ *
+ *   Registration of multiple workers with overlapping worker task types on the same namespace,
+ *   task queue, and deployment build ID not allowed: SlotKey { namespace: "default",
+ *   task_queue: "orchestrator" } …
+ *
+ * Matched on the stable English prefix, not the whole message — the `SlotKey { … }` tail carries a
+ * generated worker instance uuid and the task types list, both of which vary per occurrence.
+ */
+export const WORKER_REGISTRATION_OVERLAP_RE =
+  /Registration of multiple workers with overlapping worker task types/i;
+
+/** Same shape as local-test-env.ts's startup retry: immediate, then two backed-off attempts. */
+const WORKER_MAX_ATTEMPTS = 3;
+const WORKER_BACKOFF_MS = [0, 250, 750];
+
+/**
+ * Build a Worker bound to the given per-file test env, retrying the one registration race the
+ * core rejects outright (#1073).
+ *
+ * WHY A RETRY AND NOT A UNIQUE TASK QUEUE. The obvious fix — a fresh task queue per test — would
+ * go green while deleting what these specs prove. `chaos-durability.e2e.spec.ts` deliberately
+ * creates worker1 → worker2 → worker3 in sequence to model a crash and restart, and the
+ * REPLACEMENT worker must poll the SAME queue or it is not picking the run back up; it is starting
+ * a different one. The shared queue is the test, not an accident of the harness.
+ *
+ * WHY IT RACES AT ALL. Registration happens in `Worker.create`, not in `run()` — so the window is
+ * between one worker's teardown reaching the core and the next `create` arriving, which a
+ * saturated CI runner widens. It is a transient the core resolves on its own, which is exactly
+ * what a bounded retry is for; `local-test-env.ts` already treats the two server-startup flakes
+ * this way and the reasoning transfers.
+ *
+ * Deliberately NARROW: any other Worker.create failure (a bad workflow bundle, a dead connection)
+ * throws on the first attempt, because retrying a real misconfiguration three times only delays
+ * the report and muddies it.
+ */
+export async function makeWorker(
+  env: TestWorkflowEnvironment,
+): Promise<Worker> {
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < WORKER_MAX_ATTEMPTS; attempt++) {
+    if (attempt > 0) {
+      await new Promise((r) => setTimeout(r, WORKER_BACKOFF_MS[attempt]));
+    }
+    try {
+      return await Worker.create({
+        connection: env.nativeConnection,
+        taskQueue: TASK_QUEUE,
+        workflowsPath: WORKFLOWS_PATH,
+        activities: mockActivities,
+      });
+    } catch (e) {
+      if (!WORKER_REGISTRATION_OVERLAP_RE.test(String(e))) throw e;
+      lastErr = e;
+      // Logged on purpose, matching local-test-env.ts: a spec that passed on its third attempt
+      // still says the runner is saturated, and a silent retry hides that trend.
+      console.warn(
+        `[test-env] worker registration overlapped on "${TASK_QUEUE}" ` +
+          `(attempt ${attempt + 1}/${WORKER_MAX_ATTEMPTS}), retrying`,
+      );
+    }
+  }
+  throw new Error(
+    `INFRASTRUCTURE: a worker could not register on "${TASK_QUEUE}" after ${WORKER_MAX_ATTEMPTS} ` +
+      `attempts — the predecessor never released it. NOT a test failure (#1073). ` +
+      `Last error: ${String(lastErr)}`,
+  );
 }
 
 export {
