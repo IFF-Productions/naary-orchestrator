@@ -65,17 +65,83 @@ const src = readFileSync(
  *  own comment quotes `flex: 1` to explain what it replaced). */
 const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
 
+/**
+ * `text.indexOf(needle, from)`, but LOUD when the anchor has moved.
+ *
+ * Every slice below is taken between two anchors, and a bare `indexOf` answers -1 for one that
+ * moved — which `String.slice` then reads as "one character from the end", so `slice(from, -1)`
+ * silently returns the whole REST OF THE FILE. That is not a false alarm, it is a vacuous PASS:
+ * measured on this file's own drawer slice, mangling the end anchor grew it from 300 to 3368
+ * characters and swept in three unrelated `flexDirection: "column"` declarations, so the positive
+ * control kept passing while guarding nothing at all.
+ */
+function mustIndexOf(
+  text: string,
+  needle: string | RegExp,
+  what: string,
+  from = 0,
+): number {
+  let i: number;
+  if (typeof needle === "string") {
+    i = text.indexOf(needle, from);
+  } else {
+    const re = new RegExp(needle.source, needle.flags.replace("g", "") + "g");
+    re.lastIndex = from;
+    i = re.exec(text)?.index ?? -1;
+  }
+  if (i < 0) {
+    throw new Error(
+      `workspace-switcher-width.spec: anchor not found — ${what}. The source shape this guard ` +
+        `slices on has moved; re-anchor it rather than deleting the assertion.`,
+    );
+  }
+  return i;
+}
+
+/**
+ * `<WorkspaceSwitcher />` as JSX rather than as text: prettier may or may not put a space before
+ * the self-closing slash. What is being pinned is "this parent renders the switcher", not one
+ * particular run of whitespace.
+ *
+ * DELIBERATELY does NOT tolerate props. A `[\s\S]{0,200}?\/>` arm for a wrapped, prop-carrying
+ * call would be lazy enough to terminate on the WRONG `/>` — and this regex is the end anchor for
+ * the drawer slice below, where `<VariantSwitcher />` is the very next sibling, so a mismatch
+ * would hand back a silently short slice (the `toBeLessThan` bound only catches a long one).
+ * Neither call site passes props today (`labelOp` has no caller anywhere in the tree), so the arm
+ * bought nothing; if one ever gains one, `mustIndexOf` fails loudly by name, which is the whole
+ * point of this file.
+ */
+const RENDERS_SWITCHER = /<WorkspaceSwitcher\s*\/>/;
+
+/** The label `<span>` — the flex child inside the trigger whose `flex: 1` is the OPPOSITE of the
+ *  root's rule and must survive. Whitespace-tolerant for the same reason as above. */
+const LABEL_SPAN =
+  /<span\s+style=\{\{\s*flex:\s*1,\s*minWidth:\s*0,?\s*\}\}\s*>/;
+
 /** The ROOT element's own style object — the flex item in the ContextBar row. Its children carry
  *  `flex`/`minWidth` of their own, so a file-wide assertion would read the wrong box. */
 const rootStyle = (() => {
-  const from = code.indexOf("style={{", code.indexOf("return ("));
-  return code.slice(from, code.indexOf("}}", from) + 2);
+  const from = mustIndexOf(
+    code,
+    "style={{",
+    "the root element's style object, after `return (`",
+    mustIndexOf(code, "return (", "the component's `return (`"),
+  );
+  return code.slice(
+    from,
+    mustIndexOf(code, "}}", "the root style's `}}`", from) + 2,
+  );
 })();
 
 /** The trigger `<button>` — from its own `style={{` to the chevron `<Icon>` that closes it. */
 const trigger = code.slice(
-  code.indexOf("style={{", code.indexOf('title="Switch workspace"')),
-  code.indexOf('name="chevron-up-down"'),
+  mustIndexOf(
+    code,
+    "style={{",
+    "the trigger button's style object",
+    mustIndexOf(code, 'title="Switch workspace"', "the trigger button"),
+  ),
+  mustIndexOf(code, 'name="chevron-up-down"', "the trigger's chevron Icon"),
 );
 
 describe("workspace switcher sizes to its label, not to the app bar", () => {
@@ -90,8 +156,14 @@ describe("workspace switcher sizes to its label, not to the app bar", () => {
       path.resolve(__dirname, "../src/app/ContextBar.tsx"),
       "utf8",
     );
-    expect(bar).toContain("<WorkspaceSwitcher />");
-    expect(bar).toMatch(/display: "flex",[\s\S]{0,600}?flexWrap: "nowrap"/);
+    expect(
+      bar,
+      "the ContextBar no longer renders WorkspaceSwitcher — the desktop app bar is the row whose " +
+        "spare width `flex: 1` used to absorb, so without it this whole file guards nothing",
+    ).toMatch(RENDERS_SWITCHER);
+    expect(bar, "the ContextBar is no longer a single-line flex row").toMatch(
+      /display: "flex",[\s\S]{0,600}?flexWrap: "nowrap"/,
+    );
     // The only OTHER caller is the nav drawer's context box, and the reason a root-level fix is
     // safe there is that it lays out as a COLUMN (see the header). If that ever becomes a row,
     // `0 1 auto` would unpin the chevron from the drawer's right edge and the fix has to move out
@@ -100,12 +172,34 @@ describe("workspace switcher sizes to its label, not to the app bar", () => {
       path.resolve(__dirname, "../src/app/AppShell.tsx"),
       "utf8",
     );
-    const drawer = shell.slice(
-      shell.indexOf('className="drawer-context"'),
-      shell.indexOf("<WorkspaceSwitcher />"),
+    const drawerFrom = mustIndexOf(
+      shell,
+      'className="drawer-context"',
+      "AppShell's drawer-context box",
     );
-    expect(drawer, "the drawer context box moved").toContain("flex");
-    expect(drawer).toContain('flexDirection: "column"');
+    const drawer = shell.slice(
+      drawerFrom,
+      mustIndexOf(
+        shell,
+        RENDERS_SWITCHER,
+        "the drawer's <WorkspaceSwitcher />",
+        drawerFrom,
+      ),
+    );
+    // AppShell holds FOUR `flexDirection: "column"` declarations, so this assertion is only
+    // meaningful while the slice is actually the drawer box — hence a bound on its size rather
+    // than the near-vacuous `toContain("flex")` this used to be ("flex" is a substring of
+    // "flexDirection"). The box is ~300 characters; the rest of the file is ~3400.
+    expect(
+      drawer.length,
+      "the drawer-context slice is not the box",
+    ).toBeLessThan(1000);
+    expect(drawer).toContain('flex: "none"');
+    expect(
+      drawer,
+      "the drawer context box is no longer a COLUMN — a root-level `flex: 0 1 auto` is only " +
+        "inert at this second render site while its main axis is vertical",
+    ).toContain('flexDirection: "column"');
   });
 
   it("the root does not GROW — no `flex: 1` / no grow factor above 0", () => {
@@ -136,15 +230,26 @@ describe("workspace switcher sizes to its label, not to the app bar", () => {
     // same reason — it is the opposite of the root's rule, and must not be "fixed" to match it.
     expect(trigger).toContain('width: "100%"');
     expect(trigger).toContain("minWidth: 0");
-    expect(trigger).toMatch(/<span style=\{\{ flex: 1, minWidth: 0 \}\}>/);
+    expect(
+      trigger,
+      "the label span lost its own `flex: 1` — that is what lets the label absorb the button's " +
+        "width so the chevron pins right and the ellipsis has somewhere to happen. It is the " +
+        "OPPOSITE of the root's rule on purpose; do not 'fix' it to match",
+    ).toMatch(LABEL_SPAN);
   });
 
   it("the label truncates rather than overflowing", () => {
     // The shrinkable half of the requirement, and the part a future edit is most likely to drop:
     // without all three the root's `minWidth: 0` just lets a long name spill out of the bar.
+    const labelFrom = mustIndexOf(code, LABEL_SPAN, "the label span");
     const label = code.slice(
-      code.indexOf("<span style={{ flex: 1, minWidth: 0 }}>"),
-      code.indexOf("{active ? workspaceLabel("),
+      labelFrom,
+      mustIndexOf(
+        code,
+        /\{active\s*\?\s*workspaceLabel\(/,
+        "the workspace name expression that ends the label span",
+        labelFrom,
+      ),
     );
     expect(label).toContain('whiteSpace: "nowrap"');
     expect(label).toContain('overflow: "hidden"');

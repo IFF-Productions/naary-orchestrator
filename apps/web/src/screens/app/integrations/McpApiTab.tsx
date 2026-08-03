@@ -7,6 +7,7 @@ import {
   type GraphSummary,
   type MintedToken,
 } from "../../../lib/api";
+import { exposedWorkflowTools } from "./mcp-tools";
 import { cardShell, EnvChip, IconTile, UrlCopy } from "./shared";
 
 const mcpUrl = (): string => `${window.location.origin}/api/mcp`;
@@ -20,10 +21,6 @@ const BASE_TOOLS = [
   "get_run",
   "approve",
 ];
-
-/** How the server names a workflow's own tool (mirrors toolNamesFor's slugify). */
-const workflowTool = (key: string): string =>
-  `run_${key.replace(/[^A-Za-z0-9_-]/g, "_")}`;
 
 /** How many workflow tools to list before collapsing into "+N more". */
 const TOOL_DISPLAY_CAP = 6;
@@ -119,7 +116,9 @@ export function McpApiTab({
       .catch(() => setErr("Could not revoke the token."));
   }
 
-  const wfTools = (workflows ?? []).map((w) => workflowTool(w.workflowKey));
+  // Only the workflows that OPTED IN — the server exposes a tool for a workflow whose START
+  // node is an mcpServerTrigger, nothing else (#1063).
+  const wfTools = exposedWorkflowTools(workflows ?? []);
   const shown = wfTools.slice(0, TOOL_DISPLAY_CAP);
   const extra = wfTools.length - shown.length;
 
@@ -174,7 +173,7 @@ export function McpApiTab({
           workflow in <EnvChip slug={env} /> also gets its own{" "}
           <code>run_*</code> tool when it OPTS IN — its start node must be an{" "}
           <b>MCP Server Trigger</b>. Add or remove that node and reconnect the
-          client to pick the change up.
+          client to pick up the change.
         </div>
         <div
           className="mono"
@@ -233,8 +232,9 @@ export function McpApiTab({
                 <div
                   style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}
                 >
-                  No saved workflows in this environment yet — each saved
-                  workflow becomes a callable tool.
+                  No workflow here exposes a tool yet. Give a workflow an{" "}
+                  <b>MCP Server Trigger</b> as its start node to add one — the
+                  base tools below work regardless.
                 </div>
               )}
               {BASE_TOOLS.map((t) => (
