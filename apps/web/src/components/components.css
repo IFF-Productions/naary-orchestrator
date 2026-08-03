@@ -18,7 +18,10 @@
   cursor: pointer;
   border: 1px solid transparent;
   white-space: nowrap;
-  transition: filter 0.14s ease, background 0.14s ease, border-color 0.14s ease,
+  transition:
+    filter 0.14s ease,
+    background 0.14s ease,
+    border-color 0.14s ease,
     color 0.14s ease;
   text-decoration: none;
 }
@@ -117,6 +120,35 @@
   .btn-icon,
   .btn-icon.btn-sm {
     width: 44px;
+    height: 44px;
+  }
+}
+
+/* …and the OTHER half of a split button has to follow, or the touch rule above breaks the very
+   control it grows. A split pair is one primary + one icon-only caret, so at <= 1024 the caret
+   went to 44px and the primary stayed at its base height — measured on `screens-rundetail--failed`
+   at 390: primary 34px (bottom 243), caret 44px (bottom 253). A 10px overhang, on the one control
+   whose whole design (see .btn-split above) is a single continuous outline. Reported twice as
+   "the Re-run button is not aligned on mobile".
+
+   Flex `align-items: stretch` does NOT save this: `.btn` sets an explicit `height`, not a
+   `min-height`, and a definite height wins over stretch. Equalising here is the fix; switching
+   `.btn` to min-height would change every button in the app to chase one control.
+
+   ONLY a LABELLED primary is affected, which is why this went unnoticed. The Runs list renders the
+   same control with no label, so `iconOnly` makes BOTH halves `.btn-icon` and the rule above
+   already equalised them — measured at 390: 44/44, identical before and after this block. Run
+   detail passes `label="Re-run"`, so its primary is the one control in the app that took the
+   caret's growth without matching it.
+
+   `.btn-sm` and `.btn-icon` are named to beat `.btn-sm`'s 28px and `.btn-icon.btn-sm`'s (0,2,0)
+   regardless of source order — the same specificity note the touch-target rule carries. `.btn-sm`
+   is defensive rather than observed: no labelled `size="sm"` split button exists today, and one
+   added later would land at 28px against 44px. */
+@media (max-width: 1024px) {
+  .btn-split > .btn,
+  .btn-split > .btn.btn-sm,
+  .btn-split > .btn.btn-icon {
     height: 44px;
   }
 }
@@ -255,7 +287,9 @@
   caret-color: var(--ink);
   font-family: var(--font-sans);
   font-size: 13px;
-  transition: border-color 0.14s ease, box-shadow 0.14s ease;
+  transition:
+    border-color 0.14s ease,
+    box-shadow 0.14s ease;
 }
 .input::placeholder {
   color: var(--ink-3);
@@ -348,7 +382,9 @@
   height: 18px;
   border-radius: 50%;
   background: var(--ink-3);
-  transition: transform 0.16s ease, background 0.16s ease;
+  transition:
+    transform 0.16s ease,
+    background 0.16s ease;
 }
 .switch.on {
   background: var(--brand);
@@ -601,7 +637,9 @@
   color: var(--ink-2);
   cursor: pointer;
   box-shadow: var(--shadow-card);
-  transition: background 0.14s ease, color 0.14s ease;
+  transition:
+    background 0.14s ease,
+    color 0.14s ease;
 }
 .rf-fs-btn:hover {
   background: var(--card-2);
@@ -625,7 +663,9 @@
   padding: 10px 12px;
   margin-bottom: -1px;
   cursor: pointer;
-  transition: color 0.14s ease, border-color 0.14s ease;
+  transition:
+    color 0.14s ease,
+    border-color 0.14s ease;
 }
 .tabs button:hover {
   color: var(--ink);
@@ -706,7 +746,9 @@
   pointer-events: none;
   opacity: 0;
   transform: translateX(-50%) translateY(2px);
-  transition: opacity 0.14s ease, transform 0.14s ease;
+  transition:
+    opacity 0.14s ease,
+    transform 0.14s ease;
   z-index: 50;
 }
 .tooltip-wrap:hover .tooltip {
