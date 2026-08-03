@@ -1,8 +1,8 @@
 {
   "name": "@naary/cli",
   "version": "0.0.69",
-  "description": "naary — a thin, dependency-free HTTP client over the public /api/v1 surface (runs, workflows, approvals). Node built-ins only; imports NO server code.",
-  "license": "UNLICENSED",
+  "description": "naary \u2014 a thin, dependency-free HTTP client over the public /api/v1 surface (runs, workflows, approvals). Node built-ins only; imports NO server code.",
+  "license": "MIT",
   "homepage": "https://github.com/IFF-Productions/naary-orchestrator/tree/main/packages/cli#readme",
   "bugs": "https://github.com/IFF-Productions/naary-orchestrator/issues",
   "repository": {
