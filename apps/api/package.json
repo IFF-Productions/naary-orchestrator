@@ -1,6 +1,6 @@
 {
   "name": "@naary/api",
-  "version": "0.0.69",
+  "version": "0.0.70",
   "private": true,
   "description": "NestJS control plane: start / approve / get-state endpoints over the Temporal client.",
   "main": "dist/main.js",
