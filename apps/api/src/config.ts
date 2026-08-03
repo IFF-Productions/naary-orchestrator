@@ -252,3 +252,32 @@ export function resumeSnapshotsEnabled(env: Env = process.env): boolean {
 export function storageProvider(env: Env = process.env): string | undefined {
   return env.STORAGE_PROVIDER;
 }
+
+/**
+ * How the MCP endpoint manages sessions (#1065).
+ *
+ * STATELESS is the default, and it is a deliberate trade rather than a simplification. The
+ * SDK's stateful mode keeps `{ transport, server }` in an in-memory map, so on a multi-container
+ * API — `docker rollout` scales to 2 — a session minted on one container 404s when the other
+ * answers, and EVERY session dies when the old container retires. The SDK offers no public way
+ * to adopt a session id on another instance (`sessionId` is a getter; `_initialized` is private),
+ * and sticky routing is unavailable because rollout requires `container_name: !reset null`, so
+ * there are no stable per-container hostnames to route to.
+ *
+ * Stateless removes the shared state instead of trying to share it: every request builds its own
+ * server and transport, so any container can answer anything and a deploy interrupts nothing.
+ *
+ * WHAT IT COSTS, stated plainly: the tool list is rebuilt per request (one `listMcpExposed`
+ * query per call, where stateful paid it once per session), and the server→client SSE stream is
+ * gone — so resource subscriptions and server-initiated logging are foreclosed until this flips
+ * back. Nothing we expose today uses either: every tool in `mcp.server.ts` is request/response.
+ *
+ * `MCP_SESSION_MODE=stateful` restores the old behaviour. It exists because whether real MCP
+ * clients REQUIRE the GET stream to hold a connection was not verifiable before shipping — this
+ * is the lever that recovers a broken client without a rollback.
+ */
+export function mcpSessionMode(
+  env: Env = process.env,
+): "stateless" | "stateful" {
+  return env.MCP_SESSION_MODE?.trim() === "stateful" ? "stateful" : "stateless";
+}

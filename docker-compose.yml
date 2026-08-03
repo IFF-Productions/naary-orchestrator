@@ -130,11 +130,11 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env (see .env.example)}
       POSTGRES_DB: ${POSTGRES_DB:-naary_orchestrator}
     ports:
-      - '5432:5432'
+      - "5432:5432"
     volumes:
       - naary-pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      test: ["CMD-SHELL", 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
       interval: 5s
       timeout: 5s
       retries: 10
@@ -157,23 +157,31 @@ services:
     user: root
     command:
       [
-        'server',
-        'start-dev',
-        '--ip',
-        '0.0.0.0',
-        '--db-filename',
-        '/data/temporal.db',
-        '--log-level',
-        'warn',
+        "server",
+        "start-dev",
+        "--ip",
+        "0.0.0.0",
+        "--db-filename",
+        "/data/temporal.db",
+        "--log-level",
+        "warn",
       ]
     ports:
-      - '7233:7233' # gRPC — the api client + worker connect here
-      - '8233:8233' # Web UI
+      - "7233:7233" # gRPC — the api client + worker connect here
+      - "8233:8233" # Web UI
     volumes:
       - naary-temporal:/data
     healthcheck:
       test:
-        ['CMD', 'temporal', 'operator', 'cluster', 'health', '--address', '127.0.0.1:7233']
+        [
+          "CMD",
+          "temporal",
+          "operator",
+          "cluster",
+          "health",
+          "--address",
+          "127.0.0.1:7233",
+        ]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -187,13 +195,14 @@ services:
       dockerfile: Dockerfile
     image: naary-backend
     container_name: naary-migrate
-    command: ['pnpm', '--filter', '@naary/db', 'exec', 'prisma', 'migrate', 'deploy']
+    command:
+      ["pnpm", "--filter", "@naary/db", "exec", "prisma", "migrate", "deploy"]
     environment:
       <<: *backend-env
     depends_on:
       postgres:
         condition: service_healthy
-    restart: 'no'
+    restart: "no"
 
   # NestJS control plane.
   api:
@@ -203,10 +212,10 @@ services:
     image: naary-backend
     container_name: naary-api
     restart: unless-stopped
-    command: ['pnpm', '--filter', '@naary/api', 'start']
+    command: ["pnpm", "--filter", "@naary/api", "start"]
     environment:
       <<: *backend-env
-      PORT: '3000'
+      PORT: "3000"
       # This app's OWN Sentry project (falls back to SENTRY_DSN when unset).
       SENTRY_DSN_API: ${SENTRY_DSN_API:-}
       # Self-healing (Phase 2): the API also hosts a small Temporal worker polling the heal
@@ -235,6 +244,11 @@ services:
       # Their code defaults are `http://localhost:3000/...`, which is right for `pnpm start` and
       # useless in prod — and with neither declared, an operator could not correct them: the
       # generic MCP OAuth flow and the Atlassian 3LO callback both sent users to localhost.
+      # MCP session mode (#1065). Unset ⇒ "stateless": each request builds its own server, so a
+      # 2-container rollout never 404s a session and a deploy interrupts no client. Set to
+      # "stateful" ONLY to restore the in-memory session map — the recovery lever if a client
+      # turns out to need the server→client SSE stream.
+      MCP_SESSION_MODE: ${MCP_SESSION_MODE:-}
       OAUTH_REDIRECT_URI: ${OAUTH_REDIRECT_URI:-}
       ATLASSIAN_OAUTH_REDIRECT_URI: ${ATLASSIAN_OAUTH_REDIRECT_URI:-}
       # Early-access allowlist (comma-separated emails). Unset ⇒ open sign-up. See
@@ -268,7 +282,7 @@ services:
       FLAGSMITH_ENVIRONMENT_KEY: ${FLAGSMITH_ENVIRONMENT_KEY:-}
       FLAGSMITH_API_URL: ${FLAGSMITH_API_URL:-}
     ports:
-      - '3000:3000'
+      - "3000:3000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -279,7 +293,7 @@ services:
     healthcheck:
       test:
         [
-          'CMD-SHELL',
+          "CMD-SHELL",
           'node -e "fetch(\"http://localhost:3000/healthz\").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"',
         ]
       interval: 10s
@@ -296,7 +310,7 @@ services:
     image: naary-backend
     container_name: naary-worker
     restart: unless-stopped
-    command: ['pnpm', '--filter', '@naary/worker', 'start']
+    command: ["pnpm", "--filter", "@naary/worker", "start"]
     environment:
       <<: *backend-env
       # This app's OWN Sentry project (falls back to SENTRY_DSN when unset). Both worker
@@ -313,7 +327,7 @@ services:
       # unreachable — no compose file forwarded it.
       WORKER_HEARTBEAT: ${WORKER_HEARTBEAT:-}
     ports:
-      - '9091:9091' # Prometheus /metrics scrape
+      - "9091:9091" # Prometheus /metrics scrape
     depends_on:
       temporal:
         condition: service_healthy
@@ -326,7 +340,7 @@ services:
     healthcheck:
       test:
         [
-          'CMD-SHELL',
+          "CMD-SHELL",
           '[ "$${METRICS_PORT:-9091}" = "0" ] || node -e "fetch(\"http://127.0.0.1:\"+(process.env.METRICS_PORT||9091)+\"/metrics\").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"',
         ]
       interval: 10s
@@ -346,7 +360,7 @@ services:
     image: naary-backend
     container_name: naary-worker-heavy
     restart: unless-stopped
-    command: ['pnpm', '--filter', '@naary/worker', 'start']
+    command: ["pnpm", "--filter", "@naary/worker", "start"]
     environment:
       <<: *backend-env
       # Same worker code ⇒ same Sentry project as the default worker.
@@ -359,7 +373,7 @@ services:
       WORKER_SHUTDOWN_GRACE: ${WORKER_SHUTDOWN_GRACE:-}
       WORKER_HEARTBEAT: ${WORKER_HEARTBEAT:-} # see `worker` above
     ports:
-      - '9092:9091' # distinct host port; container still serves /metrics on 9091
+      - "9092:9091" # distinct host port; container still serves /metrics on 9091
     depends_on:
       temporal:
         condition: service_healthy
@@ -368,7 +382,7 @@ services:
     healthcheck:
       test:
         [
-          'CMD-SHELL',
+          "CMD-SHELL",
           '[ "$${METRICS_PORT:-9091}" = "0" ] || node -e "fetch(\"http://127.0.0.1:\"+(process.env.METRICS_PORT||9091)+\"/metrics\").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"',
         ]
       interval: 10s
@@ -408,7 +422,7 @@ services:
     container_name: naary-web
     restart: unless-stopped
     ports:
-      - '8081:80'
+      - "8081:80"
     depends_on:
       api:
         condition: service_started
@@ -416,7 +430,7 @@ services:
     # busybox wget ships in nginx:alpine (no curl there). Prod rolling deploys
     # (docker rollout) gate on this before retiring the old web container.
     healthcheck:
-      test: ['CMD-SHELL', 'wget -q --spider http://127.0.0.1/ || exit 1']
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1/ || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 6

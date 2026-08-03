@@ -21,6 +21,7 @@ import { GraphsService } from "../graphs/graphs.service";
 import { PermissionsService } from "../permissions/permissions.service";
 import type { McpCreateWorkflowArgs } from "./mcp.server";
 import { buildMcpServer } from "./mcp.server";
+import { mcpSessionMode } from "../config";
 
 /** Light top-level shape guard (upsert's validateGraph does the deep checks) so a non-graph
  *  arg is a clean 400, not a 500. */
@@ -139,6 +140,18 @@ function looksLikeInitialize(body: unknown): boolean {
  * verified with the SAME ApiTokenService the guard uses, yielding the session's tenantId — the
  * one and only tenant scope for every tool call.
  *
+ * TWO MODES (#1065). `MCP_SESSION_MODE` selects; STATELESS is the default.
+ *
+ * STATELESS — every request builds its own server + transport and closes both. No session map, so
+ * any API container can answer anything and a `docker rollout` interrupts nothing. Costs one
+ * `listMcpExposed` per call and forecloses the server→client stream (no subscriptions, no
+ * server-initiated logging) — neither of which anything here uses today. GET is refused with a
+ * message naming the mode; DELETE is a no-op 204.
+ *
+ * STATEFUL — the original design, below, kept as the recovery lever. Whether real MCP clients
+ * REQUIRE the GET stream to hold a connection could not be verified before shipping, so this
+ * exists to fix a broken client without a rollback.
+ *
  * Stateful Streamable HTTP (ticket #469): a POST carrying an MCP `initialize` request opens a
  * SESSION — the transport mints an `mcp-session-id`, we build the tenant-scoped server ONCE and
  * keep the { transport, server, tenantId } tuple in a per-instance map. Subsequent requests carry
@@ -251,6 +264,14 @@ export class McpController implements OnModuleDestroy {
     }
     const { tenantId } = auth;
 
+    // STATELESS (#1065, the default): no session map at all, so nothing below about session ids
+    // applies. Diverting here rather than threading conditionals through the stateful path keeps
+    // the two modes readable as two modes.
+    if (mcpSessionMode() === "stateless") {
+      await this.handleStateless(auth, req, res);
+      return;
+    }
+
     const sessionId = this.sessionIdHeader(req);
 
     // A request carrying a session id must resolve to a live session OWNED BY THIS TENANT. A
@@ -297,15 +318,16 @@ export class McpController implements OnModuleDestroy {
   }
 
   /**
-   * Open a new MCP session for an `initialize` POST: build the tenant-scoped server once, hand it a
-   * session-minting transport, and register the { transport, server, tenantId } tuple keyed by the
-   * generated session id so later GET/DELETE/POST on this session resolve to it.
+   * Build a tenant-scoped `McpServer` for this token. Extracted from `openSession` because the
+   * STATELESS path (#1065) needs the identical server per request — one construction site means
+   * the two modes cannot drift on tenant scoping, actor derivation or which tools are exposed,
+   * which is the part that would be a security bug rather than a behaviour difference.
    */
-  private async openSession(
-    auth: { id: string; tenantId: string; environmentId: string | null },
-    req: McpRequest,
-    res: ServerResponse,
-  ): Promise<void> {
+  private async buildScopedServer(auth: {
+    id: string;
+    tenantId: string;
+    environmentId: string | null;
+  }): Promise<ReturnType<typeof buildMcpServer>> {
     const { tenantId } = auth;
 
     // A token bound to an environment operates in it; an unbound token falls back to the
@@ -356,6 +378,98 @@ export class McpController implements OnModuleDestroy {
         this.executions.approve(runId, approved, tenantId, note, actor),
       exposedWorkflows,
     });
+    return server;
+  }
+
+  /**
+   * Serve one MCP request with no session state at all (#1065).
+   *
+   * WHY THIS MODE EXISTS. Stateful Streamable HTTP keeps `{ transport, server }` in a map on ONE
+   * API container. `docker rollout` scales the API to 2, so a session minted on container A 404s
+   * whenever B answers, and every session dies when A retires. The SDK exposes no way to adopt a
+   * session id elsewhere (`sessionId` is a getter, `_initialized` is private), and sticky routing
+   * needs stable per-container hostnames that rollout deliberately removes. Stateless deletes the
+   * shared state rather than trying to share it: any container can answer anything, and a deploy
+   * interrupts nothing.
+   *
+   * A FRESH TRANSPORT PER REQUEST IS MANDATORY, not tidiness. The SDK throws
+   * "Stateless transport cannot be reused across requests" on a second `handleRequest` — reuse
+   * would collide JSON-RPC message ids between concurrent clients. So the server is rebuilt too,
+   * which is the real cost: one `listMcpExposed` query per call where stateful paid it per
+   * session. Accepted knowingly — it also means a workflow that just opted in shows up on the
+   * NEXT call rather than requiring a reconnect, which was its own reported confusion.
+   *
+   * GET IS REFUSED, and that is the honest answer rather than a gap. GET opens the server→client
+   * SSE stream, which presupposes a session to stream INTO; there isn't one, and nothing in
+   * `mcp.server.ts` pushes server-initiated messages anyway (no subscriptions, no logging — every
+   * tool is request/response). Refusing with a message that names the mode beats accepting a
+   * stream that can never deliver anything.
+   */
+  private async handleStateless(
+    auth: { id: string; tenantId: string; environmentId: string | null },
+    req: McpRequest,
+    res: ServerResponse,
+  ): Promise<void> {
+    const method = req.method ?? "";
+    if (method === "GET") {
+      rpcError(
+        405,
+        -32000,
+        "This MCP endpoint is stateless — there is no server→client stream to open. " +
+          "Send tool calls as POSTs; no session id is needed.",
+        res,
+        requestId(req.body),
+      );
+      return;
+    }
+    if (method === "DELETE") {
+      // Terminating a session that does not exist is a no-op, not an error: a spec-compliant
+      // client sends DELETE on disconnect and must not be told its cleanup failed.
+      res.writeHead(204);
+      res.end();
+      return;
+    }
+
+    const server = await this.buildScopedServer(auth);
+    // `sessionIdGenerator: undefined` is what puts the SDK in stateless mode — session validation
+    // is skipped entirely, so an `mcp-session-id` header from a client that once spoke to a
+    // stateful deployment is ignored rather than 404'd.
+    const transport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: undefined,
+    });
+    try {
+      await server.connect(transport);
+      await transport.handleRequest(req, res, req.body);
+    } finally {
+      // Both are per-request now, so both must go — otherwise "no session leak" is traded for a
+      // per-REQUEST leak, which is strictly worse. try/catch each: the response is already
+      // written by here, so a throw would surface as an unhandled rejection on a request the
+      // client considers answered.
+      try {
+        await transport.close();
+      } catch {
+        /* best-effort teardown */
+      }
+      try {
+        await server.close();
+      } catch {
+        /* best-effort teardown */
+      }
+    }
+  }
+
+  /**
+   * Open a new MCP session for an `initialize` POST: build the tenant-scoped server once, hand it a
+   * session-minting transport, and register the { transport, server, tenantId } tuple keyed by the
+   * generated session id so later GET/DELETE/POST on this session resolve to it.
+   */
+  private async openSession(
+    auth: { id: string; tenantId: string; environmentId: string | null },
+    req: McpRequest,
+    res: ServerResponse,
+  ): Promise<void> {
+    const { tenantId } = auth;
+    const server = await this.buildScopedServer(auth);
 
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => randomUUID(),
