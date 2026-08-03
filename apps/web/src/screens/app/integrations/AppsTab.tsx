@@ -13,6 +13,7 @@ import { CodeAgentCard } from "./CodeAgentCard";
 import { CodeAgentCredentialCard } from "./CodeAgentCredentialCard";
 import {
   ConnectForm,
+  AtlassianAppForm,
   GithubAppForm,
   type ConnectFormPrefill,
 } from "./connection-forms";
@@ -67,7 +68,7 @@ export function AppsTab({
   const confirm = useConfirm();
   const phone = useMediaQuery(PHONE_QUERY);
   const [dialog, setDialog] = useState<
-    "github" | "mcp" | "mcp-registry" | null
+    "github" | "atlassian" | "mcp" | "mcp-registry" | null
   >(null);
   // Set when a registry row was picked (#578): the same ConnectForm, opened with the transport +
   // auth scheme filled in, so the user only supplies credentials.
@@ -159,6 +160,9 @@ export function AppsTab({
           </Button>
           <Button variant="primary" onClick={() => setDialog("github")}>
             Install GitHub App
+          </Button>
+          <Button variant="secondary" onClick={() => setDialog("atlassian")}>
+            Connect Atlassian
           </Button>
         </div>
       </div>
@@ -386,12 +390,15 @@ export function AppsTab({
           title={
             dialog === "github"
               ? "Install GitHub App"
-              : dialog === "mcp-registry"
-                ? "Browse MCP servers"
-                : "Connect a service"
+              : dialog === "atlassian"
+                ? "Connect Atlassian"
+                : dialog === "mcp-registry"
+                  ? "Browse MCP servers"
+                  : "Connect a service"
           }
         >
           {dialog === "github" && <GithubAppForm tenant={tenant} />}
+          {dialog === "atlassian" && <AtlassianAppForm tenant={tenant} />}
           {dialog === "mcp-registry" && (
             <McpRegistryBrowser
               onPick={(server: McpRegistryServerRow) => {
