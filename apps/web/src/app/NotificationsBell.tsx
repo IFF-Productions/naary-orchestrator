@@ -1,8 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Icon } from "../components";
-import { api } from "../lib/api";
+import { api, getActiveWorkspace } from "../lib/api";
 import { isFailure, runStatusUi } from "../lib/run-status";
+import {
+  NO_TRUST,
+  approvalKey,
+  browserDismissalStore,
+  dismissAll,
+  readDismissed,
+  reconcileDismissed,
+  reconcilePoll,
+  runKey,
+  sameIds,
+  writeDismissed,
+} from "./notifications-dismissed";
 
 interface NotifItem {
   kind: "approval" | "failed";
@@ -12,6 +24,13 @@ interface NotifItem {
   at: string;
   to: string;
 }
+
+/** How many items the panel shows at once. The dismissal set is reconciled against ALL fetched
+ *  items, never this slice — see notifications-dismissed.ts. */
+const MAX_VISIBLE = 8;
+
+/** Resolved once: `localStorage`, or null where it is unavailable/blocked. */
+const STORE = browserDismissalStore();
 
 /** Short relative time, e.g. "3m", "2h", "5d". */
 function ago(iso: string): string {
@@ -26,46 +45,118 @@ function ago(iso: string): string {
  * Topbar notifications: the things that actually need your attention — workflow runs paused for
  * approval + recently failed runs (the same events the webhook-notifications feature alerts on).
  * Polls every 45s; the unread dot is REAL (reflects the item count), not decorative.
+ *
+ * There is no server-side inbox behind this — the list is derived live from the two queries below
+ * on every poll. "Clear all" therefore records the ids of what you have seen (per workspace, in
+ * localStorage) and every later poll filters them out; see notifications-dismissed.ts for why that
+ * stays per-item and self-pruning rather than becoming a mute switch.
  */
 export function NotificationsBell() {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<NotifItem[] | null>(null);
+  /** Dismissed items that this poll saw are still live — cleared, but not resolved. */
+  const [hiddenCount, setHiddenCount] = useState(0);
+  /** BOTH queries failed, so an empty list means "we couldn't look", not "nothing is happening". */
+  const [unreachable, setUnreachable] = useState(false);
+  /** The last poll's FULL fetched list (pre-cap), so Clear all and its immediate re-render work
+   *  from everything the server sent, not just the eight rows on screen. */
+  const candidatesRef = useRef<NotifItem[]>([]);
+  /** Bumped by every Clear all, so a poll can tell whether the user cleared while it was in
+   *  flight — see `reconcilePoll`. */
+  const clearGenRef = useRef(0);
   const rootRef = useRef<HTMLDivElement>(null);
 
   const load = useCallback(async () => {
+    // Pinned BEFORE the fetch, and re-checked after it. Switching workspace mid-poll would
+    // otherwise reconcile the NEW workspace's dismissed set against the OLD workspace's items —
+    // and with both queries answered, every id not coincidentally present in the other
+    // workspace's data would be pruned as stale, silently un-clearing them. The provider's
+    // remount does not prevent this: `setActiveWorkspace` flips the module state at once, and
+    // this write goes to localStorage, not to the unmounted component's state.
+    const workspaceId = getActiveWorkspace();
+    const clearGen = clearGenRef.current;
     try {
+      // `null` (not `[]`) on failure: an errored query means "no data", which must never be read
+      // as "these items are gone" — that would prune dismissals and resurrect cleared items.
       const [approvals, runs] = await Promise.all([
-        api.listAwaitingApprovals().catch(() => []),
-        api.listRuns().catch(() => []),
+        api.listAwaitingApprovals().catch(() => null),
+        api.listRuns().catch(() => null),
       ]);
-      const approvalItems: NotifItem[] = approvals.map((a) => ({
+      // This data describes a workspace we are no longer in — drop it; the remounted bell is
+      // already fetching the right one.
+      if (getActiveWorkspace() !== workspaceId) return;
+      const approvalItems: NotifItem[] = (approvals ?? []).map((a) => ({
         kind: "approval",
-        key: `ap-${a.workflowId}-${a.nodeId}`,
+        key: approvalKey(a.workflowId, a.nodeId),
         title: `Approval needed: ${a.title}`,
         sub: a.workflowName ?? a.workflowKey ?? a.workflowId,
         at: a.createdAt,
         to: `/app/runs/${a.workflowId}`,
       }));
-      const failItems: NotifItem[] = runs
+      const failItems: NotifItem[] = (runs ?? [])
         .filter((r) => isFailure(r.status))
-        .slice(0, 12)
         .map((r) => ({
           kind: "failed",
-          key: `run-${r.workflowId}`,
+          key: runKey(r.workflowId),
           title: `Run failed: ${r.workflowName ?? r.workflowKey ?? "workflow"}`,
           sub: runStatusUi(r.status).label,
           at: r.startedAt,
           to: `/app/runs/${r.workflowId}`,
         }));
-      setItems(
-        [...approvalItems, ...failItems]
-          .sort((a, b) => (a.at < b.at ? 1 : -1))
-          .slice(0, 8),
+      const candidates = [...approvalItems, ...failItems].sort((a, b) =>
+        a.at < b.at ? 1 : -1,
       );
+      candidatesRef.current = candidates;
+      // Read storage fresh HERE, after the await — never captured before it — so a Clear all that
+      // landed while this poll was in flight is already in the set we reconcile against, and so a
+      // clear from another tab converges on the next poll.
+      const stored = readDismissed(STORE, workspaceId);
+      // …and if the user cleared during this poll, the clear also covers what this poll fetched:
+      // it could only dismiss the ids the app had already seen, but everything here existed at the
+      // moment of the click. Without this, an item that arrived between the previous poll and this
+      // one appears a heartbeat after "Clear all" — which reads as the clear not sticking.
+      const { visible, persist, liveHiddenCount } = reconcilePoll(
+        candidates,
+        stored,
+        { approvals: approvals !== null, runs: runs !== null },
+        clearGenRef.current !== clearGen,
+      );
+      if (!sameIds(persist, stored))
+        writeDismissed(STORE, workspaceId, persist);
+      setItems(visible.slice(0, MAX_VISIBLE));
+      setHiddenCount(liveHiddenCount);
+      setUnreachable(approvals === null && runs === null);
     } catch {
       setItems([]);
+      setHiddenCount(0);
+      setUnreachable(true);
     }
+  }, []);
+
+  /**
+   * Clear all: dismiss every item this poll fetched — including any beyond the eight on screen,
+   * because a button labelled "Clear all" that leaves a fresh page of rows behind reads as broken.
+   * Still strictly per-id, so the next new approval or failure comes straight back.
+   */
+  const clearAll = useCallback(() => {
+    // Tell any in-flight poll that a clear happened after it started fetching.
+    clearGenRef.current += 1;
+    const workspaceId = getActiveWorkspace();
+    const candidates = candidatesRef.current;
+    const next = dismissAll(
+      readDismissed(STORE, workspaceId),
+      candidates.map((c) => c.key),
+    );
+    writeDismissed(STORE, workspaceId, next);
+    // NO_TRUST: this is the previous poll's data, so there is nothing new to prune against.
+    const { visible, liveHiddenCount } = reconcileDismissed(
+      candidates,
+      next,
+      NO_TRUST,
+    );
+    setItems(visible.slice(0, MAX_VISIBLE));
+    setHiddenCount(liveHiddenCount);
   }, []);
 
   useEffect(() => {
@@ -151,6 +242,10 @@ export function NotificationsBell() {
         >
           <div
             style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 8,
               padding: "11px 14px",
               borderBottom: "1px solid var(--line)",
               fontSize: 12.5,
@@ -158,7 +253,24 @@ export function NotificationsBell() {
               color: "var(--ink)",
             }}
           >
-            Notifications
+            <span>Notifications</span>
+            {count > 0 && (
+              <button
+                type="button"
+                onClick={clearAll}
+                aria-label="Clear all notifications"
+                title="Dismiss these notifications. Pending approvals stay open in the Approvals inbox."
+                style={{
+                  all: "unset",
+                  cursor: "pointer",
+                  fontSize: 11.5,
+                  fontWeight: 600,
+                  color: "var(--brand)",
+                }}
+              >
+                Clear all
+              </button>
+            )}
           </div>
 
           {items === null ? (
@@ -167,7 +279,15 @@ export function NotificationsBell() {
             </div>
           ) : count === 0 ? (
             <div style={{ padding: 18, fontSize: 12.5, color: "var(--ink-2)" }}>
-              You're all caught up — no pending approvals or recent failures.
+              {/* "All caught up" is a claim about the world, so only say it when we actually
+                  looked and found nothing. An empty list because both queries failed, or because
+                  things were CLEARED (clearing dismisses the notification, not the work behind
+                  it), each gets its own honest sentence. */}
+              {unreachable
+                ? "Couldn't check for approvals or failures — the API didn't answer."
+                : hiddenCount > 0
+                  ? `Nothing new. ${hiddenCount} cleared ${hiddenCount === 1 ? "item is" : "items are"} still open — they stay in Approvals and Activity.`
+                  : "You're all caught up — no pending approvals or recent failures."}
             </div>
           ) : (
             items.map((it) => (
