@@ -292,12 +292,17 @@ export function CanvasPage() {
    * asked to fit to it. Verified by screenshot: without the drag-end fit, widening the drawer left
    * the far end of the graph clipped behind the inspector.
    */
+  const refitTimer = useRef<number | null>(null);
   const refitCanvas = useCallback(() => {
+    // Supersede a pending fit rather than stacking one on top of it — a toggle immediately
+    // followed by a drag would otherwise run two, and the one that lands last is not necessarily
+    // the one that measured the layout the user ended up with.
+    if (refitTimer.current !== null) window.clearTimeout(refitTimer.current);
     // 200ms, not 90: React Flow re-measures its container through a ResizeObserver, and at 90ms
     // it was still fitting to the PRE-resize width — the screenshot showed the graph re-framed but
     // shifted, with the first node clipped off the left edge. The wait is invisible next to the
     // fit's own 220ms animation.
-    setTimeout(
+    refitTimer.current = window.setTimeout(
       () =>
         rfRef.current?.fitView({
           duration: 220,
@@ -311,7 +316,15 @@ export function CanvasPage() {
       200,
     );
   }, []);
-  useEffect(refitCanvas, [showAi, refitCanvas]);
+  // Own the timer. Two toggles in quick succession would otherwise queue two fits, and whichever
+  // landed last would win regardless of which layout it measured; an unmount mid-wait would fire
+  // into a dead instance. Cleared before rescheduling and on the way out.
+  useEffect(() => {
+    refitCanvas();
+    return () => {
+      if (refitTimer.current !== null) window.clearTimeout(refitTimer.current);
+    };
+  }, [showAi, refitCanvas]);
 
   // Turn `?fix=<runId>` into a prefilled first MESSAGE in the AI panel's composer. Prefills only —
   // the user reads what the model will be told about their run and presses Send themselves. That
@@ -1410,7 +1423,9 @@ export function CanvasPage() {
       {/* BODY: desktop = 60px icon rail · AI drawer · canvas · 492px inspector dock (a flex ROW).
           ≤1024 (stacked) = a flex COLUMN: the rail is hidden, the graph is a capped
           pan/scroll viewport on top, the dock is a full-width panel below it, and the AI
-          conversation is a bottom sheet OVER the canvas rather than a third block in the column. */}
+          conversation is a resizable bottom sheet — a real flex item at the END of the column
+          (via `order: 1`), not an overlay, so React Flow measures a container that matches what
+          the user can actually see. */}
       <div
         style={{
           display: "flex",
@@ -1431,8 +1446,9 @@ export function CanvasPage() {
         {/* Build with AI — a resizable drawer BESIDE the graph (#1090). It used to be a strip
             above the body, which grew with the conversation until the canvas it was editing was
             off-screen; watching nodes stream in is the whole reason to build here rather than on
-            /app/build-ai. On ≤1024 the same component renders as a bottom sheet, absolutely
-            positioned inside this (relative) body. */}
+            /app/build-ai. Written here, before the stage, because that is where the desktop drawer
+            belongs; on ≤1024 the component gives itself `order: 1` and lands below the stage as a
+            bottom sheet, so there is one render site rather than two. */}
         {showAi && (
           <AiPromptPanel
             aiPrompt={aiPrompt}

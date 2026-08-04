@@ -24,6 +24,7 @@ import { buildFixInstruction, type GraphDef, type NodeDef } from "@naary/dsl";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { useState } from "react";
 import { SAVE_OPTION } from "../../lib/api/builder";
+import { BELOW_RAIL_QUERY, useMediaQuery } from "../../lib/useMediaQuery";
 import type { BuildPhase, ChatMsg } from "../app/build-ai/ConversationPanel";
 import { planFromStream } from "../app/build-ai/model";
 import type { ProviderOption } from "../app/build-ai/providers";
@@ -74,16 +75,23 @@ function Harness({
   const [mode, setMode] = useState<AiMode>(initialMode);
   const [prompt, setPrompt] = useState(initialPrompt);
   const [provider, setProvider] = useState<ProviderOption["id"] | null>(null);
+  // The same query CanvasPage uses for `stacked` — the harness has to switch axis where the real
+  // body does, or the compact stories are decorative rather than representative.
+  const compact = useMediaQuery(BELOW_RAIL_QUERY);
   return (
-    // The canvas BODY, in miniature: a flex row of a fixed height, with something standing in for
-    // the graph. The panel is a drawer now (#1090) — it sizes itself and the canvas takes what is
-    // left — so a story that gave it the full width would show precisely the layout the drawer
-    // exists to replace. `position: relative` is load-bearing: below 1024px the same component
-    // renders as a bottom sheet absolutely positioned inside this box.
+    // The canvas BODY, in miniature: a flex container of a fixed height, with something standing
+    // in for the graph. The panel is a drawer now (#1090) — it sizes itself and the canvas takes
+    // what is left — so a story that gave it the full width would show precisely the layout the
+    // drawer exists to replace.
+    //
+    // The DIRECTION has to match the real body, not just look similar. Below 1024px CanvasPage
+    // switches to a column and the panel gives itself `order: 1` to land below the stage; in a row
+    // that same order would put it to the RIGHT of the canvas, and the compact stories would show
+    // a layout that does not exist.
     <div
       style={{
         display: "flex",
-        flexDirection: "row",
+        flexDirection: compact ? "column" : "row",
         position: "relative",
         width: width ?? 940,
         height: 620,

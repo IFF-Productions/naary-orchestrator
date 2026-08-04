@@ -253,7 +253,14 @@ export function useResizablePane(opts: ResizablePaneOptions): ResizablePane {
       "aria-label": label,
       "aria-valuenow": Math.round(size),
       "aria-valuemin": min,
-      "aria-valuemax": Math.round(typeof max === "function" ? max() : max),
+      // Floored at `min` for the same reason `clampSize` lets the minimum win a crossed pair: on a
+      // viewport narrow enough that the cap falls below the floor, the raw max would publish
+      // valuemin > valuemax, which is invalid and leaves a screen reader announcing a range that
+      // cannot contain the current value.
+      "aria-valuemax": Math.max(
+        min,
+        Math.round(typeof max === "function" ? max() : max),
+      ),
       onPointerDown,
       onPointerMove,
       onPointerUp,
