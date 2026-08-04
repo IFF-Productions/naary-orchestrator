@@ -149,6 +149,12 @@ export const NODE_CATALOG: Record<NodeType, NodeCatalogEntry> = {
       "GraphQL query/mutation (POST); output {data,errors,httpStatus}. Branch on <id>.errors (GraphQL returns 200-with-errors) or read <id>.data. A secret auth header uses {{ $secrets.NAME }}.",
     config: "{ url, query, variables?, headers? }",
   },
+  kafkaPublish: {
+    group: "data-source",
+    summary:
+      "Publish one message to a Kafka topic; output {topic,partition,offset}. At-most-once — never retried.",
+    config: "{ connectionId, topic, value, key?, correlationId?, replyTopic? }",
+  },
   sqlQuery: {
     group: "data-source",
     summary: "Read-only SQL against a tenant DB; output {rows,rowCount}.",

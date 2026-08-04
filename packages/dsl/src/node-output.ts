@@ -125,6 +125,9 @@ export interface NodeOutputMap {
     body: unknown;
   };
   graphQL: { data: unknown; errors: unknown; httpStatus: number };
+  /** What the broker acknowledged. `partition`/`offset` are the message's identity — the same
+   *  triple slice 2 uses as a dedupe key, so a downstream node can correlate without a lookup. */
+  kafkaPublish: { topic: string; partition: number; offset: string };
   sqlQuery: { rows: unknown; rowCount: number };
   sqlExec: { rowsAffected: number };
   /** `truncated` is the node's own answer to "did I drop documents?" — surfaced in the

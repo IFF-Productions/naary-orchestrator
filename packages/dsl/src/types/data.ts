@@ -113,6 +113,44 @@ export interface HttpPaginationConfig {
  * the activity (never in this config, which rides in workflow history).
  * Placeholder style is engine-specific: `$1..$n` (Postgres) / `@p1..@pn` (MSSQL).
  */
+/**
+ * `kafkaPublish` — produce ONE message to a topic (pub/sub design #1086, slice 1).
+ *
+ * Publish only. Consuming needs something that holds a connection, which is slice 2 — so this
+ * node is a plain request/response activity: connect, produce, disconnect.
+ *
+ * `correlationId`/`replyTopic` are here from the start ON PURPOSE. They are useful immediately
+ * with no consumer of ours (an external service reads reply-to and answers wherever it is told,
+ * including a `wait(webhook)` resume URL), and adding them later would mean rewriting every graph
+ * authored in the meantime.
+ */
+export interface KafkaPublishNodeConfig {
+  /** A `kafka` connection; its brokers + SASL credentials are read in-activity. */
+  connectionId: string;
+  /** Topic to produce to. Templates resolve before the activity runs. */
+  topic: string;
+  /** Message body. A non-string is JSON-stringified by the activity, never here. */
+  value: unknown;
+  /** Partition key. Same key ⇒ same partition ⇒ per-key ordering; omitted ⇒ round-robin. */
+  key?: string;
+  /** Extra message headers, merged UNDER the correlation headers below (which win). */
+  headers?: Record<string, string>;
+  /** Written as the `correlationId` header — the join key a reply is matched on later. */
+  correlationId?: string;
+  /** Written as the `replyTo` header. Where a consumer should send its response. */
+  replyTopic?: string;
+  /**
+   * Broker acknowledgement level. -1 = all in-sync replicas (default, safest), 1 = leader only,
+   * 0 = fire-and-forget. Deliberately NOT defaulted to 0: a publish that cannot be observed to
+   * have failed is indistinguishable from one that worked.
+   */
+  acks?: -1 | 0 | 1;
+  /** Per-publish timeout (ms). */
+  timeoutMs?: number;
+  /** Flat per-call cost metered into the run budget (Arch§4.6). */
+  costUsd?: number;
+}
+
 export interface SqlQueryNodeConfig {
   /** A `postgres`/`mssql` connection; its stored DSN is read in-activity. */
   connectionId: string;

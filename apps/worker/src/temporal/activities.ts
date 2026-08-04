@@ -187,6 +187,12 @@ export type {
 export { callIntegration } from "./activities/integration";
 export type { IntegrationResult } from "./activities/integration";
 
+export { __kafkaDeps, callKafkaPublish } from "./activities/kafka";
+export type {
+  KafkaPublishActivityConfig,
+  KafkaPublishResult,
+} from "./activities/kafka";
+
 export {
   __sqlDeps,
   dsnHost,

@@ -165,6 +165,16 @@ export const { callSqlQuery } = wf.proxyActivities<typeof activities>({
   retry: { maximumAttempts: 3 },
 });
 
+// A PUBLISH is not idempotent from the broker's side: a send whose ack is lost may still have
+// been written, so an automatic retry can duplicate the message on the topic. Same reasoning as
+// callSqlExec and callSendEmail — AT-MOST-ONCE, and a failure fails the node rather than risk a
+// consumer processing the same event twice. (Kafka's idempotent-producer mode could relax this
+// later; it needs a stable producer id across attempts, which a fresh activity does not have.)
+export const { callKafkaPublish } = wf.proxyActivities<typeof activities>({
+  startToCloseTimeout: "60 seconds",
+  retry: { maximumAttempts: 1 },
+});
+
 // A WRITE is NOT idempotent — a retry after a partial/ambiguous first attempt could
 // double-write. So sqlExec runs AT-MOST-ONCE (maximumAttempts: 1), like callSendEmail:
 // a failure fails the node rather than risk applying the statement twice.

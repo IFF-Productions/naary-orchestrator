@@ -262,6 +262,116 @@ export function renderDataSections(c: ConfigSectionCtx) {
         </>
       )}
 
+      {kind === "kafkaPublish" && (
+        <>
+          <Labeled label="Kafka connection id">
+            <ConnectionSelect
+              connections={connections}
+              types={CONNECTION_TYPES[kind] ?? []}
+              value={str("connectionId")}
+              onChange={(id) => onChange({ connectionId: id })}
+            />
+          </Labeled>
+          <div
+            style={{
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-3)",
+              marginTop: -6,
+            }}
+          >
+            Publishes ONE message. At-most-once — never retried, because a send
+            whose acknowledgement is lost may still have been written, and a
+            retry would duplicate the message on the topic.
+          </div>
+
+          <Labeled label="Topic">
+            <input
+              value={str("topic")}
+              onChange={(e) => onChange({ topic: e.target.value })}
+              style={inputStyle}
+              placeholder="orders.created"
+            />
+          </Labeled>
+
+          <Labeled label="Value">
+            <textarea
+              value={str("value")}
+              // Empty must persist as null, not "": the hint below promises a tombstone, and the
+              // activity sends a string VERBATIM — so an empty string would publish an empty
+              // message body while the UI claimed otherwise.
+              onChange={(e) =>
+                onChange({
+                  value: e.target.value === "" ? null : e.target.value,
+                })
+              }
+              style={{ ...inputStyle, minHeight: 90 }}
+              placeholder={'{{ trigger.body }} or {"id": {{ lookup.id }} }'}
+            />
+          </Labeled>
+          <div
+            style={{
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-3)",
+              marginTop: -6,
+            }}
+          >
+            A string is sent verbatim; anything else is JSON-encoded. Leave
+            empty to send a null value (a tombstone on a compacted topic).
+          </div>
+
+          <Labeled label="Partition key (optional)">
+            <input
+              value={str("key")}
+              onChange={(e) => onChange({ key: e.target.value || undefined })}
+              style={inputStyle}
+              placeholder="{{ order.customerId }}"
+            />
+          </Labeled>
+          <div
+            style={{
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-3)",
+              marginTop: -6,
+            }}
+          >
+            Same key ⇒ same partition ⇒ messages for that key stay ordered.
+            Omitted ⇒ round-robin, no ordering guarantee.
+          </div>
+
+          <Labeled label="Correlation id (optional)">
+            <input
+              value={str("correlationId")}
+              onChange={(e) =>
+                onChange({ correlationId: e.target.value || undefined })
+              }
+              style={inputStyle}
+              placeholder="{{ $runId }}"
+            />
+          </Labeled>
+          <Labeled label="Reply topic (optional)">
+            <input
+              value={str("replyTopic")}
+              onChange={(e) =>
+                onChange({ replyTopic: e.target.value || undefined })
+              }
+              style={inputStyle}
+              placeholder="orders.created.reply"
+            />
+          </Labeled>
+          <div
+            style={{
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-3)",
+              marginTop: -6,
+            }}
+          >
+            Sent as the <code>correlationId</code> and <code>replyTo</code>{" "}
+            headers. A consumer can answer wherever you tell it — including a
+            Wait (webhook) step&apos;s resume URL.
+          </div>
+        </>
+      )}
+
       {(kind === "sqlQuery" || kind === "sqlExec") && (
         <>
           <Labeled label="Database connection id">
