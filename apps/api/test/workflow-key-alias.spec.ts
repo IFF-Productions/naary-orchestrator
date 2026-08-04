@@ -200,6 +200,7 @@ function scheduleStub() {
   return {
     syncPollSchedule: vi.fn(async () => undefined),
     syncCronSchedule: vi.fn(async () => undefined),
+    syncKafkaSchedule: vi.fn(async () => undefined),
     teardownForWorkflow: vi.fn(async () => undefined),
   };
 }

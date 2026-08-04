@@ -187,10 +187,19 @@ export type {
 export { callIntegration } from "./activities/integration";
 export type { IntegrationResult } from "./activities/integration";
 
-export { __kafkaDeps, callKafkaPublish } from "./activities/kafka";
+export {
+  __kafkaDeps,
+  callKafkaPublish,
+  callKafkaConsume,
+  callKafkaCommit,
+} from "./activities/kafka";
 export type {
   KafkaPublishActivityConfig,
   KafkaPublishResult,
+  KafkaConsumeActivityConfig,
+  KafkaConsumeResult,
+  KafkaDrainedMessage,
+  KafkaCommitConfig,
 } from "./activities/kafka";
 
 export {

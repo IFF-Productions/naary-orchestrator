@@ -221,6 +221,9 @@ export const NODE_KINDS: NodeKind[] = [
   { type: "pollTrigger", label: "Poll", group: "Triggers", accent: "var(--node-poll, #4f9ad6)",
     description: "Check a URL on a set interval; only continue when the result changed.",
     defaultConfig: { url: "https://api.example.com/resource", intervalSeconds: 300 } },
+  { type: "kafkaTrigger", label: "Kafka", group: "Triggers", accent: "var(--node-poll, #4f9ad6)",
+    description: "Start one run per Kafka message. Messages are drained on an interval; a redelivery does not start a second run.",
+    defaultConfig: { topic: "orders.created", groupId: "naary-orders", intervalSeconds: 30 } },
   { type: "scheduleTrigger", label: "Schedule", group: "Triggers", accent: "var(--node-schedule, #5b8def)",
     description: "Run the workflow on a cron schedule (e.g. every weekday at 9am).",
     defaultConfig: { cron: "0 9 * * 1-5" } },
@@ -602,6 +605,16 @@ export function nodeSubtitle(
     const host = url ? url.replace(/^https?:\/\//, "").slice(0, 22) : undefined;
     const every = secs ? `every ${secs}s` : undefined;
     return [every, host].filter(Boolean).join(" · ") || undefined;
+  }
+  if (kind === "kafkaTrigger") {
+    // Topic and cadence — the two facts that tell one Kafka trigger from another at a glance.
+    const topic = config.topic as string | undefined;
+    const secs = config.intervalSeconds as number | undefined;
+    return (
+      [topic, secs ? `every ${secs}s` : undefined]
+        .filter(Boolean)
+        .join(" · ") || undefined
+    );
   }
   if (kind === "executeSubWorkflow") {
     const key = config.workflowKey as string | undefined;

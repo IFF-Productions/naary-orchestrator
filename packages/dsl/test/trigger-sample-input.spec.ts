@@ -31,6 +31,10 @@ describe("trigger sample input (#983)", () => {
     "formTrigger",
     "chatTrigger",
     "mcpServerTrigger",
+    // kafkaTrigger accepts one for the same reason webhook/form do, and NOT for the reason
+    // schedule/poll are excluded below: a real firing carries a real Kafka message, so there is
+    // something for a manual run to be faithful TO. (#1086 slice 2.)
+    "kafkaTrigger",
   ];
 
   it("every entry node that accepts a sample declares it in its registry schema", () => {

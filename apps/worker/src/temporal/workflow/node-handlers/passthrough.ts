@@ -1,6 +1,7 @@
 // Passthrough / entry-node leaf handlers (extracted VERBATIM from run-graph.ts's
 // execNodeInner switch — zero behavior change). DETERMINISTIC WORKFLOW CODE.
 import * as wf from "@temporalio/workflow";
+import type { NodeOutputMap } from "@naary/dsl";
 import type { NodeHandler } from "./contract";
 
 // end: a pure no-op. It is the terminal passthrough — it genuinely has no output, and the
@@ -38,6 +39,21 @@ export const handleStart: NodeHandler = async ({ node, ctx }) => {
 export const handleWebhookTrigger: NodeHandler = async ({ node, ctx }) => {
   // Slice #4: the inbound event (the workflow input) is this node's output.
   ctx[node.id] = ctx.__input;
+  return;
+};
+
+/**
+ * `kafkaTrigger` — one run per Kafka message (#1086 slice 2).
+ *
+ * Shaped like `webhookTrigger`, NOT like `pollTrigger`: the data arrives WITH the run (the drain
+ * workflow passes the message as the run input) rather than being fetched here. A handler that
+ * fetched would be a second consumer, outside the drain's offset accounting.
+ *
+ * `satisfies` anchors the projection to the declared output shape, so a change to what the drain
+ * sends fails to compile here rather than silently reaching authors' bindings as `undefined`.
+ */
+export const handleKafkaTrigger: NodeHandler = async ({ node, ctx }) => {
+  ctx[node.id] = ctx.__input as NodeOutputMap["kafkaTrigger"];
   return;
 };
 

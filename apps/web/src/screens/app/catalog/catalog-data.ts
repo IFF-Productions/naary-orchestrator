@@ -157,6 +157,8 @@ const NODE_IPATH: Partial<Record<NodeType, string>> = {
     "M4 12h16M12 4a15 15 0 0 1 0 16M12 4a15 15 0 0 0 0 16M20 12a8 8 0 1 1-16 0 8 8 0 0 1 16 0z",
   graphQL: "M12 3l7.5 4.5v9L12 21l-7.5-4.5v-9zM12 3v18M4.5 7.5 12 12l7.5-4.5",
   kafkaPublish: "M4 7h16M4 12h10M4 17h16M17 9l3 3-3 3",
+  // Mirror of kafkaPublish's glyph with the arrow reversed — it consumes rather than produces.
+  kafkaTrigger: "M20 7H4m16 5H10m10 5H4M7 9l-3 3 3 3",
   sqlQuery:
     "M5 6c0-1.5 3-2.5 7-2.5S19 4.5 19 6m-14 0v12c0 1.5 3 2.5 7 2.5s7-1 7-2.5V6m-14 6c0 1.5 3 2.5 7 2.5s7-1 7-2.5",
   sqlExec:
