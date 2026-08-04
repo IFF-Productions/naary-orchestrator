@@ -19006,11 +19006,25 @@
             "type": "boolean",
             "example": true,
             "description": "Whether ATLASSIAN_OAUTH_CLIENT_ID and _SECRET are set on the server. False ⇒ starting consent will refuse, so the UI can say so before the user fills the form."
+          },
+          "scopes": {
+            "example": [
+              "read:jira-work",
+              "write:jira-work",
+              "read:jira-user",
+              "offline_access"
+            ],
+            "description": "The scopes THIS deployment will request. ATLASSIAN_OAUTH_SCOPES overrides the built-in defaults outright, so a scope added in a release may never reach the authorize URL — which surfaces as a 401 on whichever action needed it. Every scope listed here must also be enabled on the Atlassian app itself.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         },
         "required": [
           "redirectUri",
-          "configured"
+          "configured",
+          "scopes"
         ]
       },
       "ScheduleResponse": {

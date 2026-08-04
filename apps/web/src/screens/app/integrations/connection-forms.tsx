@@ -483,6 +483,7 @@ export function AtlassianAppForm({ tenant }: { tenant: string }) {
   const [setup, setSetup] = useState<{
     redirectUri: string;
     configured: boolean;
+    scopes?: string[];
   } | null>(null);
   const [copied, setCopied] = useState(false);
 
@@ -580,6 +581,32 @@ export function AtlassianAppForm({ tenant }: { tenant: string }) {
             Authorization &rarr; OAuth 2.0 (3LO). It must match exactly — a
             different host or a trailing slash is rejected as an invalid
             callback.
+          </p>
+        </div>
+      )}
+      {/* The scopes this server will actually ASK FOR, listed for the same reason the callback URL
+          above is: it is a value that must be matched in the Atlassian app, and when it does not
+          match, the failure names nothing. A scope that is requested but not enabled on the app
+          fails at consent; a scope the app has but the server never requests fails LATER, as a 401
+          on whichever action needed it — which is how `get_myself` went unexplained. */}
+      {setup && setup.scopes && setup.scopes.length > 0 && (
+        <div style={{ marginBottom: 14 }}>
+          <span style={fieldLabel}>Scopes this server requests</span>
+          <p
+            className="mono"
+            style={{
+              fontSize: 12,
+              color: "var(--ink-2)",
+              margin: "2px 0 0",
+              wordBreak: "break-word",
+            }}
+          >
+            {setup.scopes.join(" · ")}
+          </p>
+          <p style={{ fontSize: 12, color: "var(--ink-3)", margin: "6px 0 0" }}>
+            Enable each of these on the same app, under Permissions. Changing
+            them later needs a re-authorization — a token keeps the scopes it
+            was granted.
           </p>
         </div>
       )}

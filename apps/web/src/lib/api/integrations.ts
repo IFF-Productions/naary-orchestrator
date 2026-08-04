@@ -150,9 +150,12 @@ export const integrationsApi = {
    * string rather than asking someone to retype it — the two must match exactly, and Atlassian's
    * rejection names neither side.
    */
-  atlassianOauthConfig(
-    tenantId: string,
-  ): Promise<{ redirectUri: string; configured: boolean }> {
+  atlassianOauthConfig(tenantId: string): Promise<{
+    redirectUri: string;
+    configured: boolean;
+    /** Optional: an API that predates the field answers without it (a deploy mid-rollout). */
+    scopes?: string[];
+  }> {
     return http(
       `/tenants/${encodeURIComponent(tenantId)}/connections/atlassian/oauth/config`,
     );
