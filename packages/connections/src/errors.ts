@@ -61,15 +61,26 @@ export class ConnectCallbackError extends Error {
  * `"undefined"`, and the egress guard — correctly — refused to fetch a URL that will not parse. The
  * user was shown an SSRF error for a server that simply isn't an OAuth authorization server.
  *
- * So discovery now says what it found. USER-RECOVERABLE (they typed a URL, or picked a server that
- * does not support this flow), which is why the API maps it to a 4xx rather than letting it reach
- * the 500 handler and the error budget.
+ * So discovery now says what it found — and distinguishes WHY, because the two cases deserve
+ * different answers. A 404 means the server does not implement this flow and no amount of retrying
+ * changes that: the user's request is the thing to fix (4xx). A 500 or a network failure means the
+ * server may well implement it and be having a bad minute: telling that user "your request is
+ * wrong" is false, and telling them not to retry is worse. That is what `transient` carries.
  */
 export class OAuthDiscoveryError extends Error {
   constructor(
     /** The origin whose metadata was being read — named so the message is actionable. */
     public readonly origin: string,
     detail: string,
+    /**
+     * The failure is on the OTHER server's side and may not recur — a 5xx, a gateway timeout, a
+     * connection reset. The API answers these with a 502 rather than a 400: "we couldn't reach
+     * them" and "you asked for the wrong thing" are different sentences, and only one of them is
+     * worth retrying.
+     */
+    public readonly transient = false,
+    /** The upstream HTTP status, when there was one. Diagnostic only. */
+    public readonly upstreamStatus?: number,
   ) {
     super(`No usable OAuth metadata at ${origin}: ${detail}`);
     this.name = "OAuthDiscoveryError";
