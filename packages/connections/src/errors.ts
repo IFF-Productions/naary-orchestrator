@@ -50,3 +50,28 @@ export class ConnectCallbackError extends Error {
     this.name = "ConnectCallbackError";
   }
 }
+
+/**
+ * The server we were asked to connect to does not publish usable OAuth metadata.
+ *
+ * Reported from production (Sentry NAARY-API-4) as `BlockedEgressError: Blocked outbound request:
+ * invalid URL`, which is a true statement about the wrong thing. What had actually happened:
+ * `/.well-known/oauth-protected-resource` and `/.well-known/oauth-authorization-server` both 404'd,
+ * `asm.token_endpoint` was therefore `undefined`, `String(undefined)` produced the literal
+ * `"undefined"`, and the egress guard — correctly — refused to fetch a URL that will not parse. The
+ * user was shown an SSRF error for a server that simply isn't an OAuth authorization server.
+ *
+ * So discovery now says what it found. USER-RECOVERABLE (they typed a URL, or picked a server that
+ * does not support this flow), which is why the API maps it to a 4xx rather than letting it reach
+ * the 500 handler and the error budget.
+ */
+export class OAuthDiscoveryError extends Error {
+  constructor(
+    /** The origin whose metadata was being read — named so the message is actionable. */
+    public readonly origin: string,
+    detail: string,
+  ) {
+    super(`No usable OAuth metadata at ${origin}: ${detail}`);
+    this.name = "OAuthDiscoveryError";
+  }
+}

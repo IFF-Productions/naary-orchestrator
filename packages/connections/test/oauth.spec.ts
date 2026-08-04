@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { NeedsReauthError } from "../src/errors";
+import { NeedsReauthError, OAuthDiscoveryError } from "../src/errors";
 import {
   __resetOAuthCaches,
   buildAuthorizeUrl,
+  discoverOAuthMetadata,
   getOAuthAccessToken,
   type OAuthConfig,
 } from "../src/oauth";
@@ -357,15 +358,13 @@ describe("getOAuthAccessToken (B4 refresh)", () => {
     // serializing lock (the advisory-lock seam) orders them. We stub that lock and reset
     // the in-process caches between the two calls to stand in for the second process.
     const { store, put } = persistingStore(baseCfg);
-    const fetchFn = vi
-      .fn()
-      .mockResolvedValue(
-        okJson({
-          access_token: "AT1",
-          refresh_token: "RT-rotated",
-          expires_in: 3600,
-        }),
-      );
+    const fetchFn = vi.fn().mockResolvedValue(
+      okJson({
+        access_token: "AT1",
+        refresh_token: "RT-rotated",
+        expires_in: 3600,
+      }),
+    );
     // Serialize critical sections exactly like pg_advisory_xact_lock does across procs.
     let chain: Promise<unknown> = Promise.resolve();
     const refreshLock = vi.fn(
@@ -435,5 +434,83 @@ describe("getOAuthAccessToken (B4 refresh)", () => {
     });
     expect(token).toBe("AT-new");
     expect(fetchFn).toHaveBeenCalledOnce();
+  });
+});
+
+/**
+ * Discovery failures say what happened (Sentry NAARY-API-4).
+ *
+ * Production reported four events of `BlockedEgressError: Blocked outbound request: invalid URL`
+ * from `POST /connections/:id/oauth/start`. That message is true and useless: the two `.well-known`
+ * documents had 404'd, so `asm.token_endpoint` was `undefined`, `String(undefined)` produced the
+ * literal `"undefined"`, and the egress guard — the LAST component to touch a value that went wrong
+ * three steps earlier — refused to fetch it. The user saw an SSRF error for a server that simply
+ * does not implement OAuth.
+ */
+describe("discoverOAuthMetadata — failing honestly (Sentry NAARY-API-4)", () => {
+  const notFound = () =>
+    ({
+      ok: false,
+      status: 404,
+      json: async () => ({}),
+    }) as unknown as Response;
+
+  it("a 404 on the AS document is 'this server doesn't advertise OAuth', not an egress error", async () => {
+    const err = await discoverOAuthMetadata(
+      "https://mcp.example.com",
+      (async () => notFound()) as never,
+      assertEgress as never,
+    ).catch((e) => e);
+    expect(err).toBeInstanceOf(OAuthDiscoveryError);
+    expect(err.message).toContain("doesn't advertise OAuth");
+    // The exact regression: the words the user was shown before.
+    expect(err.message).not.toMatch(/invalid URL|Blocked outbound/i);
+  });
+
+  it("a 200 document MISSING token_endpoint names the missing fields", async () => {
+    // The precise production shape: the fetch succeeds, the body parses, and the fields we need
+    // are simply absent — which used to become the string "undefined" and travel onward.
+    const fetchFn = (async (url: string) =>
+      url.includes("oauth-authorization-server")
+        ? okJson({ issuer: "https://as.example.com" })
+        : notFound()) as never;
+    const err = await discoverOAuthMetadata(
+      "https://mcp.example.com",
+      fetchFn,
+      assertEgress as never,
+    ).catch((e) => e);
+    expect(err).toBeInstanceOf(OAuthDiscoveryError);
+    expect(err.message).toContain("authorization_endpoint");
+    expect(err.message).toContain("token_endpoint");
+  });
+
+  it("a serverUrl that isn't a URL blames the URL, not the egress guard", async () => {
+    const err = await discoverOAuthMetadata(
+      "acme.atlassian.net", // no scheme — what someone types into a "site" field
+      (async () => okJson({})) as never,
+      // The REAL guard here: this is the branch that produced the misleading message.
+      undefined,
+    ).catch((e) => e);
+    expect(err).toBeInstanceOf(OAuthDiscoveryError);
+    expect(err.message).toContain("isn't a URL");
+  });
+
+  it("still succeeds when only the RFC 8414 document exists — the 9728 one is optional", async () => {
+    // Not every server publishes protected-resource metadata, and a hard failure there would
+    // break connections that work today.
+    const fetchFn = (async (url: string) =>
+      url.includes("oauth-authorization-server")
+        ? okJson({
+            issuer: "https://mcp.example.com",
+            authorization_endpoint: "https://mcp.example.com/authorize",
+            token_endpoint: "https://mcp.example.com/token",
+          })
+        : notFound()) as never;
+    const meta = await discoverOAuthMetadata(
+      "https://mcp.example.com",
+      fetchFn,
+      assertEgress as never,
+    );
+    expect(meta.tokenEndpoint).toBe("https://mcp.example.com/token");
   });
 });
