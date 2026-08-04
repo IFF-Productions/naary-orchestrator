@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   __atlassianDeps,
+  atlassianOAuthConfig,
   buildAtlassianAuthorizeUrl,
   completeAtlassianConsent,
   startAtlassianConsent,
@@ -48,6 +49,57 @@ beforeEach(() => {
   __atlassianDeps.assertEgressAllowed = (async (u: string) =>
     new URL(u)) as never;
   __atlassianDeps.config = () => CFG;
+});
+
+describe("default scopes", () => {
+  const withEnv = <T>(env: Record<string, string | undefined>, f: () => T) => {
+    const saved = { ...process.env };
+    Object.assign(process.env, env);
+    try {
+      return f();
+    } finally {
+      process.env = saved;
+    }
+  };
+
+  it("asks for read:jira-user — without it the CONNECTION CHECK is the one call that 401s", () => {
+    // `get_myself` (GET /rest/api/2/myself) is the catalog's `probe: true` action: the thing a
+    // user runs to find out whether their Atlassian connection works at all. Atlassian scopes it
+    // `read:jira-user`, which `read:jira-work` does not imply — so the health check was guaranteed
+    // to fail, as a bare 401 indistinguishable from a bad credential. Reported from production.
+    const cfg = withEnv(
+      {
+        ATLASSIAN_OAUTH_CLIENT_ID: "cid",
+        ATLASSIAN_OAUTH_CLIENT_SECRET: "sec",
+        ATLASSIAN_OAUTH_SCOPES: "",
+      },
+      atlassianOAuthConfig,
+    );
+    expect(cfg?.scopes).toContain("read:jira-user");
+    // Still the two it always had, and the refresh-token one — this widened the set, it did not
+    // replace it.
+    expect(cfg?.scopes).toEqual(
+      expect.arrayContaining([
+        "read:jira-work",
+        "write:jira-work",
+        "offline_access",
+      ]),
+    );
+  });
+
+  it("an explicit ATLASSIAN_OAUTH_SCOPES still wins outright", () => {
+    // The env override is a full replacement, not an addition: an operator narrowing the set must
+    // get exactly what they asked for.
+    const cfg = withEnv(
+      {
+        ATLASSIAN_OAUTH_CLIENT_ID: "cid",
+        ATLASSIAN_OAUTH_CLIENT_SECRET: "sec",
+        ATLASSIAN_OAUTH_SCOPES: "read:jira-work",
+      },
+      atlassianOAuthConfig,
+    );
+    expect(cfg?.scopes).toEqual(["read:jira-work"]);
+  });
 });
 
 describe("buildAtlassianAuthorizeUrl", () => {

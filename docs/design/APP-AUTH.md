@@ -101,8 +101,12 @@ today's flow assumes **Dynamic Client Registration + `.well-known` discovery** o
   per-endpoint secret for app-delivered events (or we keep per-endpoint — decide in Slice 3).
 
 ### 3b. Atlassian OAuth 2.0 3LO (`authMode: "oauth"`, confidential client)
-- **One-time (ops):** register an Atlassian OAuth 2.0 (3LO) app — scopes e.g.
-  `read:jira-work`, `write:jira-work`, `offline_access`; callback URL; client id/secret → env.
+- **One-time (ops):** register an Atlassian OAuth 2.0 (3LO) app — scopes
+  `read:jira-work`, `write:jira-work`, `read:jira-user`, `offline_access`; callback URL; client
+  id/secret → env. The scopes must ALSO be enabled on the app itself (Permissions → Jira API):
+  requesting a scope the app does not hold fails at consent. `read:jira-user` is what
+  `GET /rest/api/2/myself` needs — the `get_myself` probe, i.e. the connection check — and it is
+  not implied by `read:jira-work`.
 - **Connect flow:** button → `auth.atlassian.com/authorize` (fixed endpoint + our client id +
   scopes + `state` + PKCE) → consent → callback `?code&state` → `exchangeCode` **with
   client_secret** → store `{ refreshToken, cloudId/site, scopes }` under `conn:<id>`. Resolve
