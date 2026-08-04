@@ -144,6 +144,19 @@ export const integrationsApi = {
    * secret, fixed authorize/token endpoints, a required `audience`, and a cloudId resolved after
    * the exchange — so it has its own route on the API.
    */
+  /**
+   * The values an admin needs to register the Atlassian app: the callback URL THIS server will
+   * send, and whether the platform credentials are set. Read so the UI can be the source of the
+   * string rather than asking someone to retype it — the two must match exactly, and Atlassian's
+   * rejection names neither side.
+   */
+  atlassianOauthConfig(
+    tenantId: string,
+  ): Promise<{ redirectUri: string; configured: boolean }> {
+    return http(
+      `/tenants/${encodeURIComponent(tenantId)}/connections/atlassian/oauth/config`,
+    );
+  },
   startAtlassianConsent(
     tenantId: string,
     connectionId: string,

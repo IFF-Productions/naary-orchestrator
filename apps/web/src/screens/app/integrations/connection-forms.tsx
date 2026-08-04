@@ -1,5 +1,5 @@
 // Connection/credential create forms (MCP, GitHub App, database, SMTP, signing) for the Integrations screen.
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { INTEGRATION_PROVIDERS } from "@naary/dsl";
 import { Button } from "../../../components";
 import { api } from "../../../lib/api";
@@ -477,6 +477,27 @@ export function AtlassianAppForm({ tenant }: { tenant: string }) {
   const [site, setSite] = useState("");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  // The callback URL this server will send, read from the server rather than reconstructed in the
+  // browser. Reconstructing it from window.location would be a SECOND guess at the same string —
+  // and when the two disagree, Atlassian's error names neither, which is the whole failure mode.
+  const [setup, setSetup] = useState<{
+    redirectUri: string;
+    configured: boolean;
+  } | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    void api
+      .atlassianOauthConfig(tenant)
+      .then((c) => alive && setSetup(c))
+      // Best-effort: the setup hint is an aid, not a gate. If it fails to load, the form still
+      // works and `start` still reports a real misconfiguration.
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
+  }, [tenant]);
 
   async function connect() {
     const siteUrl = site.trim();
@@ -512,6 +533,50 @@ export function AtlassianAppForm({ tenant }: { tenant: string }) {
 
   return (
     <>
+      {setup && !setup.configured && (
+        <p
+          style={{
+            fontSize: 12,
+            color: "var(--state-paused)",
+            margin: "0 0 12px",
+          }}
+        >
+          Atlassian OAuth isn&apos;t configured on this server yet — an admin
+          must set the Atlassian app credentials before this will work.
+        </p>
+      )}
+      {setup && (
+        <div style={{ marginBottom: 14 }}>
+          <span style={fieldLabel}>Callback URL for your Atlassian app</span>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <input
+              style={{ ...fieldStyle, fontFamily: "var(--font-mono)" }}
+              value={setup.redirectUri}
+              readOnly
+              onFocus={(e) => e.currentTarget.select()}
+            />
+            <Button
+              variant="secondary"
+              onClick={() => {
+                void navigator.clipboard
+                  ?.writeText(setup.redirectUri)
+                  .then(() => setCopied(true))
+                  // Clipboard access can be denied; the field is selectable either way, so a
+                  // failure must not look like the value is wrong.
+                  .catch(() => undefined);
+              }}
+            >
+              {copied ? "Copied" : "Copy"}
+            </Button>
+          </div>
+          <p style={{ fontSize: 12, color: "var(--ink-3)", margin: "6px 0 0" }}>
+            Paste this into your app at developer.atlassian.com under
+            Authorization &rarr; OAuth 2.0 (3LO). It must match exactly — a
+            different host or a trailing slash is rejected as an invalid
+            callback.
+          </p>
+        </div>
+      )}
       <div style={{ marginBottom: 12 }}>
         <span style={fieldLabel}>Label</span>
         <input

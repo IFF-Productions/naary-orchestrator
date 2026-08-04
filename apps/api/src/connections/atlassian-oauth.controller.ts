@@ -20,6 +20,7 @@ import { ApiEndpoint } from "../swagger/api-decorators";
 import { connectReturnUrl } from "./connect-return";
 import { OAuthStartResponse } from "./connection.response";
 import { atlassianOauthRedirectUri } from "../config";
+import { atlassianOAuthConfig } from "@naary/connections";
 
 /**
  * Atlassian OAuth 2.0 3LO connect flow (docs/design/APP-AUTH.md §3b). Parallel to
@@ -33,6 +34,39 @@ import { atlassianOauthRedirectUri } from "../config";
 export class AtlassianOAuthController {
   private readonly logger = new Logger(AtlassianOAuthController.name);
   constructor(private readonly connections: ConnectionService) {}
+
+  /**
+   * What an admin needs to register the app at developer.atlassian.com — so the callback URL is
+   * COPIED from us rather than retyped and hoped to match.
+   *
+   * This exists because of a real 20-minute debug: Atlassian answers a mismatched redirect with
+   * "The app's callback URL is invalid", which names neither the value we sent nor the value it
+   * expected. The only way to see ours was to URL-decode the authorize URL out of the browser's
+   * address bar. Two systems must agree on one string exactly; the fix is to let one of them be
+   * the source.
+   *
+   * NOT a secret. The redirect URI is a public URL that appears in every authorize request and in
+   * the user's address bar. `configured` is a BOOLEAN over the client id/secret — never the values
+   * — so this answers "can I connect?" without becoming a credential read. Same posture as the
+   * SAML SP metadata route, which echoes SP config for an IdP admin for the same reason.
+   */
+  @ApiBearerAuth("bearer")
+  @ApiEndpoint({
+    summary:
+      "Atlassian 3LO setup values (callback URL + whether the app is configured)",
+  })
+  @Get("tenants/:id/connections/atlassian/oauth/config")
+  oauthConfig(@Param("id") _tenantId: string): {
+    redirectUri: string;
+    configured: boolean;
+  } {
+    return {
+      redirectUri: atlassianOauthRedirectUri(),
+      // Null ⇒ ATLASSIAN_OAUTH_CLIENT_ID/_SECRET are unset, so `start` would refuse. Telling the
+      // user that BEFORE they fill the form beats a failure after they have committed to it.
+      configured: atlassianOAuthConfig() !== null,
+    };
+  }
 
   @ApiBearerAuth("bearer")
   @ApiEndpoint({
