@@ -52,6 +52,7 @@ import type {
   McpServerTriggerConfig,
   NumberConfig,
   PollTriggerConfig,
+  KafkaTriggerConfig,
   RandomConfig,
   RenameKeysConfig,
   RespondToWebhookConfig,
@@ -86,6 +87,7 @@ export interface NodeConfigMap {
   webhookTrigger: WebhookTriggerConfig;
   errorTrigger: ErrorTriggerConfig;
   pollTrigger: PollTriggerConfig;
+  kafkaTrigger: KafkaTriggerConfig;
   scheduleTrigger: ScheduleTriggerConfig;
   formTrigger: FormTriggerConfig;
   chatTrigger: ChatTriggerConfig;

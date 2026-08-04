@@ -209,6 +209,47 @@ export interface PollTriggerNodeConfig {
 }
 
 /**
+ * Kafka Trigger — ONE RUN PER MESSAGE, drained on an interval (#1086 slice 2).
+ *
+ * The shape follows from the fact that nothing in this system holds a long-lived broker
+ * connection: workers are stateless and disposable (Tier-1 §7), and every trigger today is either
+ * inbound HTTP or a Temporal Schedule. So a Temporal interval Schedule fires a small `kafkaDrain`
+ * workflow, which consumes a BOUNDED batch, starts one `runGraph` child per message, and only then
+ * commits the offsets. The cost is latency (bounded by `intervalSeconds`); the benefit is that no
+ * new stateful deployable exists.
+ *
+ * REDELIVERY IS A NO-OP BY CONSTRUCTION, and the construction is specific. Each run's workflowId is
+ * derived from `(topic, partition, offset)`, and the child is started with
+ * `workflowIdReusePolicy: REJECT_DUPLICATE`. That policy is NOT the default — Temporal's default is
+ * ALLOW_DUPLICATE, which only rejects an id whose prior execution is still RUNNING, and a
+ * redelivered message almost always arrives after its run has finished. Bounded by namespace
+ * retention: once the closed execution ages out, the id is forgotten and a redelivery would run
+ * again.
+ *
+ * `sampleInput` IS offered here (unlike scheduleTrigger/pollTrigger, see the note above): a real
+ * firing carries a real message, so a manual "Run now" has something meaningful to stand in for.
+ */
+export interface KafkaTriggerNodeConfig extends TriggerSampleInputConfig {
+  /** A `kafka` connection; brokers + SASL credentials are read in-activity, never in the graph. */
+  connectionId: string;
+  /** Topic to consume. */
+  topic: string;
+  /**
+   * Consumer group. The broker holds this group's committed offsets, so it is what makes the drain
+   * resume where it left off — two graphs sharing a group would split the topic between them.
+   */
+  groupId: string;
+  /** How often to drain, in seconds (the Schedule interval; floored server-side). */
+  intervalSeconds?: number;
+  /** Most messages to take in one drain. Each becomes its own run. */
+  maxMessages?: number;
+  /** Longest to wait for messages before finishing an empty drain (ms). */
+  maxWaitMs?: number;
+  /** Start at the earliest retained offset when the group has NO committed offset yet. */
+  fromBeginning?: boolean;
+}
+
+/**
  * Respond to Webhook node — set the HTTP response the webhook ingress should return
  * synchronously (for graphs triggered by a webhook). PURE: it records the response
  * into run state; the run then CONTINUES (respond fast, keep working). `body` is

@@ -69,6 +69,7 @@ import type {
   ChatTriggerNodeConfig,
   McpServerTriggerNodeConfig,
   PollTriggerNodeConfig,
+  KafkaTriggerNodeConfig,
   RandomNodeConfig,
   RenameKeysNodeConfig,
   RespondToWebhookNodeConfig,
@@ -286,6 +287,16 @@ const CONFIG_SCHEMAS = {
     url: z.string(),
     intervalSeconds: z.number(),
     changeKey: z.string().optional(),
+  }),
+  kafkaTrigger: z.object({
+    ...triggerSampleInput,
+    connectionId: z.string(),
+    topic: z.string(),
+    groupId: z.string(),
+    intervalSeconds: z.number().optional(),
+    maxMessages: z.number().optional(),
+    maxWaitMs: z.number().optional(),
+    fromBeginning: z.boolean().optional(),
   }),
 
   // --- AI ---
@@ -979,6 +990,7 @@ export type ScheduleTriggerConfig = z.infer<
   typeof CONFIG_SCHEMAS.scheduleTrigger
 >;
 export type PollTriggerConfig = z.infer<typeof CONFIG_SCHEMAS.pollTrigger>;
+export type KafkaTriggerConfig = z.infer<typeof CONFIG_SCHEMAS.kafkaTrigger>;
 export type AgentConfig = z.infer<typeof CONFIG_SCHEMAS.agent>;
 export type CodeAgentConfig = z.infer<typeof CONFIG_SCHEMAS.codeAgent>;
 export type TextToSpeechConfig = z.infer<typeof CONFIG_SCHEMAS.textToSpeech>;
@@ -1055,6 +1067,7 @@ const _configParity: {
   chatTrigger: Exact<ChatTriggerConfig, ChatTriggerNodeConfig>;
   mcpServerTrigger: Exact<McpServerTriggerConfig, McpServerTriggerNodeConfig>;
   pollTrigger: Exact<PollTriggerConfig, PollTriggerNodeConfig>;
+  kafkaTrigger: Exact<KafkaTriggerConfig, KafkaTriggerNodeConfig>;
   codeAgent: Exact<CodeAgentConfig, CodeAgentNodeConfig>;
   textToSpeech: Exact<TextToSpeechConfig, TextToSpeechNodeConfig>;
   mcpTool: Exact<McpToolConfig, McpToolNodeConfig>;
@@ -1115,6 +1128,7 @@ const _configParity: {
   chatTrigger: true,
   mcpServerTrigger: true,
   pollTrigger: true,
+  kafkaTrigger: true,
   codeAgent: true,
   textToSpeech: true,
   mcpTool: true,

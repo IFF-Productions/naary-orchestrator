@@ -72,6 +72,16 @@ export const NODE_CATALOG: Record<NodeType, NodeCatalogEntry> = {
       "Polls a URL on an interval; output {changed, body}. Branch on <id>.changed.",
     config: "{ url, intervalSeconds, changeKey? }",
   },
+  kafkaTrigger: {
+    group: "trigger",
+    entry: true,
+    sampleInput: true,
+    summary:
+      "One run per Kafka message, drained on an interval; output is the message " +
+      "{topic, partition, offset, key, value, headers, timestamp}.",
+    config:
+      "{ connectionId, topic, groupId, intervalSeconds?, maxMessages?, maxWaitMs?, fromBeginning?, sampleInput? }",
+  },
   scheduleTrigger: {
     group: "trigger",
     entry: true,

@@ -39,6 +39,22 @@ export interface NodeOutputMap {
   chatTrigger: unknown;
   mcpServerTrigger: unknown;
   pollTrigger: { changed: boolean; body: unknown };
+  /**
+   * One Kafka message. `value` is the parsed body when it was JSON and the raw string otherwise —
+   * a topic carrying CSV or a bare id is not an error, so the parse is attempted, not required.
+   * `offset` is a STRING because Kafka offsets are int64 and exceed Number.MAX_SAFE_INTEGER on a
+   * busy topic; it is also part of the message's identity, and a rounded identity is worse than
+   * useless.
+   */
+  kafkaTrigger: {
+    topic: string;
+    partition: number;
+    offset: string;
+    key: string | null;
+    value: unknown;
+    headers: Record<string, string>;
+    timestamp: string;
+  };
 
   // --- AI / tools (structured, cost-accumulating) ---
   agent: {

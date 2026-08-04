@@ -12,6 +12,7 @@ export type NodeType =
   | "formTrigger" // entry node: started by a hosted public form; output is the submitted fields
   | "chatTrigger" // entry node: started by a hosted chat message; output is { message, sessionId }
   | "mcpServerTrigger" // entry node: hosts the workflow as a tool on naary's MCP server; output is the invocation args
+  | "kafkaTrigger" // entry node: one run per Kafka message, drained on an interval; output is the message
   | "agent"
   | "codeAgent" // runs an agentic coding CLI (Claude Code/Cursor/Copilot) as a BYOK activity
   | "textToSpeech" // synthesizes text → an audio object in storage (BYOK); output is a ref + metadata
