@@ -1,6 +1,6 @@
 {
   "name": "@naary/observability",
-  "version": "0.0.71",
+  "version": "0.0.72",
   "private": true,
   "description": "Sentry init + a security-critical event scrubber shared by api + worker. Errors only; never secrets (CLAUDE.md: keys never enter telemetry).",
   "main": "dist/index.js",
