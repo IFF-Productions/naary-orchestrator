@@ -52,13 +52,18 @@ beforeEach(() => {
 });
 
 describe("default scopes", () => {
-  const withEnv = <T>(env: Record<string, string | undefined>, f: () => T) => {
-    const saved = { ...process.env };
-    Object.assign(process.env, env);
+  /**
+   * Set env for one call. `vi.stubEnv` rather than assigning to `process.env` and putting a copy
+   * back: `process.env` is a live object with its own semantics, and REPLACING it (rather than
+   * mutating keys) leaves later tests reading something that only looks like the real thing.
+   * Same pattern as apps/web/test/firebase-lazy.spec.ts.
+   */
+  const withEnv = <T>(env: Record<string, string>, f: () => T) => {
+    for (const [k, v] of Object.entries(env)) vi.stubEnv(k, v);
     try {
       return f();
     } finally {
-      process.env = saved;
+      vi.unstubAllEnvs();
     }
   };
 
