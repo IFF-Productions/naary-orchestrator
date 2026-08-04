@@ -180,3 +180,25 @@ export class GithubAppInstallStartResponse {
   })
   installUrl!: string;
 }
+
+/**
+ * What an admin needs to register the Atlassian app — so the callback URL is COPIED from us
+ * rather than retyped. Both fields are non-secret: the redirect URI rides in every authorize
+ * request and in the user's address bar, and `configured` is a BOOLEAN over the platform client
+ * id/secret, never the values.
+ */
+export class AtlassianOAuthConfigResponse {
+  @ApiProperty({
+    example: "https://app.example.com/api/atlassian/oauth/callback",
+    description:
+      "The redirect_uri THIS server sends. Must match the app's Callback URL byte for byte — a different host or a trailing slash is rejected as an invalid callback.",
+  })
+  redirectUri!: string;
+
+  @ApiProperty({
+    example: true,
+    description:
+      "Whether ATLASSIAN_OAUTH_CLIENT_ID and _SECRET are set on the server. False ⇒ starting consent will refuse, so the UI can say so before the user fills the form.",
+  })
+  configured!: boolean;
+}

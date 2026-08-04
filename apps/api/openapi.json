@@ -3693,6 +3693,82 @@
         ]
       }
     },
+    "/tenants/{id}/connections/atlassian/oauth/config": {
+      "get": {
+        "operationId": "AtlassianOAuthController_oauthConfig",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AtlassianOAuthConfigResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Atlassian 3LO setup values (callback URL + whether the app is configured)",
+        "tags": [
+          "AtlassianOAuth"
+        ]
+      }
+    },
     "/tenants/{id}/connections/{connectionId}/atlassian/oauth/start": {
       "post": {
         "description": "Returns the auth.atlassian.com authorize URL for the browser to begin interactive consent.",
@@ -18916,6 +18992,25 @@
         },
         "required": [
           "installUrl"
+        ]
+      },
+      "AtlassianOAuthConfigResponse": {
+        "type": "object",
+        "properties": {
+          "redirectUri": {
+            "type": "string",
+            "example": "https://app.example.com/api/atlassian/oauth/callback",
+            "description": "The redirect_uri THIS server sends. Must match the app's Callback URL byte for byte — a different host or a trailing slash is rejected as an invalid callback."
+          },
+          "configured": {
+            "type": "boolean",
+            "example": true,
+            "description": "Whether ATLASSIAN_OAUTH_CLIENT_ID and _SECRET are set on the server. False ⇒ starting consent will refuse, so the UI can say so before the user fills the form."
+          }
+        },
+        "required": [
+          "redirectUri",
+          "configured"
         ]
       },
       "ScheduleResponse": {
