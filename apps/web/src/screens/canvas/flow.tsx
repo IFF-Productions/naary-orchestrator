@@ -69,6 +69,7 @@ export function isEntryKind(kind: NodeType): boolean {
     kind === "webhookTrigger" ||
     kind === "scheduleTrigger" ||
     kind === "pollTrigger" ||
+    kind === "kafkaTrigger" ||
     kind === "errorTrigger" ||
     kind === "formTrigger" ||
     kind === "chatTrigger"

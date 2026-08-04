@@ -34,6 +34,7 @@ const ENTRY_TYPES: ReadonlySet<NodeType> = new Set<NodeType>([
   "formTrigger",
   "chatTrigger",
   "pollTrigger",
+  "kafkaTrigger",
   "errorTrigger",
 ]);
 
@@ -67,7 +68,11 @@ export function compileGraph(
   if (entries.length > 1) {
     return {
       error:
-        "Multiple entry nodes — keep exactly one trigger (Start/Webhook/Schedule/Poll).",
+        // Deliberately NOT an enumeration of trigger types: the list read
+        // "(Start/Webhook/Schedule/Poll)" and was already missing Form, Chat and Error before
+        // Kafka made it wrong a fourth time. A list that has to be updated whenever a trigger is
+        // added is a list that will be stale, and the reader can see their own two entry nodes.
+        "Multiple entry nodes — a workflow starts in exactly one place, so keep one trigger.",
     };
   }
 

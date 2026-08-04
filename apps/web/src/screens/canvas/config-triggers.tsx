@@ -3,7 +3,12 @@ import type { FormBrandingConfig } from "@naary/dsl";
 import type { ConfigSectionCtx } from "./ConfigPanel";
 import { Button } from "../../components";
 import { api } from "../../lib/api";
-import { inputStyle, Labeled } from "./fields";
+import {
+  CONNECTION_TYPES,
+  ConnectionSelect,
+  inputStyle,
+  Labeled,
+} from "./fields";
 import { FormBrandingSection } from "./FormBrandingSection";
 import { TemplateSelect } from "./TemplateSelect";
 
@@ -51,6 +56,107 @@ export function renderTriggerSections(c: ConfigSectionCtx) {
               placeholder="items.0.id (blank = whole response)"
             />
           </Labeled>
+        </>
+      )}
+
+      {kind === "kafkaTrigger" && (
+        <>
+          <Labeled label="Kafka connection">
+            <ConnectionSelect
+              connections={connections}
+              types={CONNECTION_TYPES[kind] ?? []}
+              value={str("connectionId")}
+              onChange={(id) => onChange({ connectionId: id })}
+            />
+          </Labeled>
+          <div
+            style={{
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-3)",
+              marginTop: -6,
+              lineHeight: 1.5,
+            }}
+          >
+            Starts ONE run per message. Messages are drained on the interval
+            below, so a message waits up to that long before its run starts. A
+            redelivered message does not start a second run — the run is
+            identified by the message&apos;s topic, partition and offset.
+          </div>
+
+          <Labeled label="Topic">
+            <input
+              value={str("topic")}
+              onChange={(e) => onChange({ topic: e.target.value })}
+              style={inputStyle}
+              placeholder="orders.created"
+            />
+          </Labeled>
+
+          <Labeled label="Consumer group">
+            <input
+              value={str("groupId")}
+              onChange={(e) => onChange({ groupId: e.target.value })}
+              style={inputStyle}
+              placeholder="naary-orders"
+            />
+          </Labeled>
+          <div
+            style={{
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-3)",
+              marginTop: -6,
+              lineHeight: 1.5,
+            }}
+          >
+            The broker remembers this group&apos;s position, which is what lets
+            the workflow resume where it left off. Give each workflow its own
+            group — two workflows sharing one would split the topic between
+            them, and each would see only some of the messages.
+          </div>
+
+          <Labeled label="Check every (seconds)">
+            <input
+              type="number"
+              value={num("intervalSeconds") ?? 30}
+              onChange={(e) =>
+                onChange({ intervalSeconds: Number(e.target.value) })
+              }
+              style={inputStyle}
+              placeholder="30"
+            />
+          </Labeled>
+
+          <Labeled label="Messages per check (max)">
+            <input
+              type="number"
+              value={num("maxMessages") ?? 50}
+              onChange={(e) =>
+                onChange({ maxMessages: Number(e.target.value) })
+              }
+              style={inputStyle}
+              placeholder="50"
+            />
+          </Labeled>
+
+          <Labeled label="Start from the beginning of the topic">
+            <input
+              type="checkbox"
+              checked={config.fromBeginning === true}
+              onChange={(e) => onChange({ fromBeginning: e.target.checked })}
+            />
+          </Labeled>
+          <div
+            style={{
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-3)",
+              marginTop: -6,
+              lineHeight: 1.5,
+            }}
+          >
+            Only applies the first time this consumer group runs — once it has a
+            saved position, that position wins. Turning it on later does not
+            replay the topic.
+          </div>
         </>
       )}
 

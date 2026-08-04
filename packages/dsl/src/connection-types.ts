@@ -33,6 +33,7 @@ export const CONNECTION_TYPES: Record<string, ConnectionType[]> = {
   sqlQuery: ["postgres", "mssql", "mysql"],
   sqlExec: ["postgres", "mssql", "mysql"],
   kafkaPublish: ["kafka"],
+  kafkaTrigger: ["kafka"],
   firestoreQuery: ["firestore"],
   firestoreWrite: ["firestore"],
   sendEmail: ["smtp"],
