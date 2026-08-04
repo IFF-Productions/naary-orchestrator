@@ -1,5 +1,4 @@
 import * as path from "node:path";
-import { KafkaContainer } from "@testcontainers/kafka";
 import { TestWorkflowEnvironment } from "@temporalio/testing";
 import { Worker } from "@temporalio/worker";
 import { Kafka, logLevel } from "kafkajs";
@@ -7,6 +6,11 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { TASK_QUEUE } from "@naary/contracts";
 import type { GraphDef } from "@naary/dsl";
 import { createLocalTestEnv } from "./local-test-env";
+import {
+  ensureTopic,
+  startTestKafka,
+  type TestBroker,
+} from "./kafka-container";
 import * as activities from "../src/temporal/activities";
 import { runGraph } from "../src/temporal/workflows";
 
@@ -33,24 +37,16 @@ const WORKFLOWS_PATH = path.join(__dirname, "../src/temporal/workflows.ts");
 const TOPIC = "naary.integration.orders";
 
 let env: TestWorkflowEnvironment;
-let container: Awaited<ReturnType<KafkaContainer["start"]>>;
+let started: TestBroker;
 let broker: string;
 
 beforeAll(async () => {
-  container = await new KafkaContainer("confluentinc/cp-kafka:7.6.1").start();
-  broker = `${container.getHost()}:${container.getMappedPort(9093)}`;
+  started = await startTestKafka("naary-it-admin");
+  broker = started.broker;
   env = await createLocalTestEnv();
-
-  // The topic is created up front rather than left to auto-creation: an auto-created topic races
-  // the first produce, and a flaky first assertion would be read as a bug in the node.
-  const admin = new Kafka({
-    clientId: "naary-it-admin",
-    brokers: [broker],
-    logLevel: logLevel.NOTHING,
-  }).admin();
-  await admin.connect();
-  await admin.createTopics({ topics: [{ topic: TOPIC, numPartitions: 1 }] });
-  await admin.disconnect();
+  // Created up front rather than left to auto-creation: an auto-created topic races the first
+  // produce, and a flaky first assertion would be read as a bug in the node.
+  await ensureTopic(started.kafka, TOPIC);
 
   activities.__kafkaDeps.resolveKafkaConnection = async () => ({
     brokers: [broker],
@@ -61,7 +57,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await env?.teardown();
-  await container?.stop();
+  await started?.container.stop();
 });
 
 function makeWorker(): Promise<Worker> {
