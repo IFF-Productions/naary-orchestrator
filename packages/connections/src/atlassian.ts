@@ -42,8 +42,26 @@ const AUDIENCE = "api.atlassian.com";
 const jiraApiBase = (cloudId: string) =>
   `https://api.atlassian.com/ex/jira/${cloudId}`;
 
-/** Least-privilege default scopes; `offline_access` is REQUIRED to receive a refresh token. */
-const DEFAULT_SCOPES = ["read:jira-work", "write:jira-work", "offline_access"];
+/**
+ * Least-privilege default scopes; `offline_access` is REQUIRED to receive a refresh token.
+ *
+ * `read:jira-user` is here because of a 401 nobody could place: the Jira catalog's `get_myself`
+ * action is marked `probe: true` — it is THE connection check, the thing a user runs first to find
+ * out whether their connection works — and `GET /rest/api/2/myself` is scoped `read:jira-user`,
+ * which is not implied by `read:jira-work`. Without it the check that exists to prove a connection
+ * is healthy was the one call guaranteed to fail, and it failed as a bare 401 that reads exactly
+ * like a bad credential.
+ *
+ * Adding a scope only changes what NEW consent asks for. A connection authorized before this still
+ * holds a token minted without it and has to be re-authorized — a granted scope set is fixed at
+ * consent time, and no refresh widens it.
+ */
+const DEFAULT_SCOPES = [
+  "read:jira-work",
+  "write:jira-work",
+  "read:jira-user",
+  "offline_access",
+];
 
 /** Platform-level Atlassian OAuth app credentials, from env. Null when unconfigured. */
 export interface AtlassianOAuthConfig {

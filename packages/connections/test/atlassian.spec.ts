@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   __atlassianDeps,
+  atlassianOAuthConfig,
   buildAtlassianAuthorizeUrl,
   completeAtlassianConsent,
   startAtlassianConsent,
@@ -48,6 +49,62 @@ beforeEach(() => {
   __atlassianDeps.assertEgressAllowed = (async (u: string) =>
     new URL(u)) as never;
   __atlassianDeps.config = () => CFG;
+});
+
+describe("default scopes", () => {
+  /**
+   * Set env for one call. `vi.stubEnv` rather than assigning to `process.env` and putting a copy
+   * back: `process.env` is a live object with its own semantics, and REPLACING it (rather than
+   * mutating keys) leaves later tests reading something that only looks like the real thing.
+   * Same pattern as apps/web/test/firebase-lazy.spec.ts.
+   */
+  const withEnv = <T>(env: Record<string, string>, f: () => T) => {
+    for (const [k, v] of Object.entries(env)) vi.stubEnv(k, v);
+    try {
+      return f();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  };
+
+  it("asks for read:jira-user — without it the CONNECTION CHECK is the one call that 401s", () => {
+    // `get_myself` (GET /rest/api/2/myself) is the catalog's `probe: true` action: the thing a
+    // user runs to find out whether their Atlassian connection works at all. Atlassian scopes it
+    // `read:jira-user`, which `read:jira-work` does not imply — so the health check was guaranteed
+    // to fail, as a bare 401 indistinguishable from a bad credential. Reported from production.
+    const cfg = withEnv(
+      {
+        ATLASSIAN_OAUTH_CLIENT_ID: "cid",
+        ATLASSIAN_OAUTH_CLIENT_SECRET: "sec",
+        ATLASSIAN_OAUTH_SCOPES: "",
+      },
+      atlassianOAuthConfig,
+    );
+    expect(cfg?.scopes).toContain("read:jira-user");
+    // Still the two it always had, and the refresh-token one — this widened the set, it did not
+    // replace it.
+    expect(cfg?.scopes).toEqual(
+      expect.arrayContaining([
+        "read:jira-work",
+        "write:jira-work",
+        "offline_access",
+      ]),
+    );
+  });
+
+  it("an explicit ATLASSIAN_OAUTH_SCOPES still wins outright", () => {
+    // The env override is a full replacement, not an addition: an operator narrowing the set must
+    // get exactly what they asked for.
+    const cfg = withEnv(
+      {
+        ATLASSIAN_OAUTH_CLIENT_ID: "cid",
+        ATLASSIAN_OAUTH_CLIENT_SECRET: "sec",
+        ATLASSIAN_OAUTH_SCOPES: "read:jira-work",
+      },
+      atlassianOAuthConfig,
+    );
+    expect(cfg?.scopes).toEqual(["read:jira-work"]);
+  });
 });
 
 describe("buildAtlassianAuthorizeUrl", () => {

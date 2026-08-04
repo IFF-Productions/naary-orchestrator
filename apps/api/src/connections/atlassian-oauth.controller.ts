@@ -63,12 +63,20 @@ export class AtlassianOAuthController {
   oauthConfig(@Param("id") _tenantId: string): {
     redirectUri: string;
     configured: boolean;
+    scopes: string[];
   } {
+    const cfg = atlassianOAuthConfig();
     return {
       redirectUri: atlassianOauthRedirectUri(),
       // Null ⇒ ATLASSIAN_OAUTH_CLIENT_ID/_SECRET are unset, so `start` would refuse. Telling the
       // user that BEFORE they fill the form beats a failure after they have committed to it.
-      configured: atlassianOAuthConfig() !== null,
+      configured: cfg !== null,
+      // The scopes THIS deployment will actually request — not the ones in the source. They are
+      // overridable by `ATLASSIAN_OAUTH_SCOPES`, and when that is set the built-in defaults are
+      // dead: a scope added in a release simply never reaches the authorize URL. That is invisible
+      // from outside and surfaces as a 401 on whichever action needed it, so the effective set is
+      // reported here alongside the redirect URI, which exists for exactly the same reason.
+      scopes: cfg?.scopes ?? [],
     };
   }
 
