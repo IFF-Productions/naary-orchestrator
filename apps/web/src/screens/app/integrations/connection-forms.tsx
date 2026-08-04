@@ -806,7 +806,12 @@ export function ConnectForm({
       if (authMode === "oauth") {
         try {
           setMsg("Redirecting to authorize…");
-          const { authorizeUrl } = await api.startOauthConsent(tenant, conn.id);
+          // Same split as AppsTab's Re-authorize: an `atlassian` connection must take the
+          // fixed-client route, not `.well-known` discovery against its own site URL.
+          const { authorizeUrl } =
+            type === "atlassian"
+              ? await api.startAtlassianConsent(tenant, conn.id)
+              : await api.startOauthConsent(tenant, conn.id);
           window.location.assign(authorizeUrl);
           return; // navigating away — leave the form as-is
         } catch {

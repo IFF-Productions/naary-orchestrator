@@ -98,8 +98,20 @@ export function AppsTab({
   function reconnect(c: ConnectionRow) {
     if (!tenant || reconnecting) return;
     setReconnecting(c.id);
-    void api
-      .startOauthConsent(tenant, c.id)
+    // Two OAuth flows exist and they are not interchangeable. The generic one does `.well-known`
+    // discovery + dynamic client registration against the connection's OWN serverUrl — right for
+    // an arbitrary MCP server, impossible for Atlassian, whose serverUrl is a *.atlassian.net site
+    // that publishes no such metadata. Atlassian is a FIXED confidential client (our platform app,
+    // fixed endpoints, a required `audience`), so it has its own route.
+    //
+    // Dispatching on `type` rather than `authMode`: both are `oauth`, which is exactly why this
+    // was wrong — "Re-authorize" on an Atlassian connection sent the browser down the discovery
+    // path and could never succeed.
+    const start =
+      c.type === "atlassian"
+        ? api.startAtlassianConsent(tenant, c.id)
+        : api.startOauthConsent(tenant, c.id);
+    void start
       .then(({ authorizeUrl }) => window.location.assign(authorizeUrl))
       .catch(() => {
         onError("Could not start re-authorization.");
