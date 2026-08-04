@@ -15,8 +15,6 @@ export class ConnectionResponse {
       "mysql",
       "firestore",
       "kafka",
-      "kafka",
-      "kafka",
       "signing",
       "smtp",
     ],

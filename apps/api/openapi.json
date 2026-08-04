@@ -18662,6 +18662,7 @@
               "mssql",
               "mysql",
               "firestore",
+              "kafka",
               "signing",
               "smtp"
             ],
@@ -18735,6 +18736,7 @@
               "mssql",
               "mysql",
               "firestore",
+              "kafka",
               "signing",
               "smtp"
             ],

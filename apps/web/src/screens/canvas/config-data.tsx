@@ -296,7 +296,14 @@ export function renderDataSections(c: ConfigSectionCtx) {
           <Labeled label="Value">
             <textarea
               value={str("value")}
-              onChange={(e) => onChange({ value: e.target.value })}
+              // Empty must persist as null, not "": the hint below promises a tombstone, and the
+              // activity sends a string VERBATIM — so an empty string would publish an empty
+              // message body while the UI claimed otherwise.
+              onChange={(e) =>
+                onChange({
+                  value: e.target.value === "" ? null : e.target.value,
+                })
+              }
               style={{ ...inputStyle, minHeight: 90 }}
               placeholder={'{{ trigger.body }} or {"id": {{ lookup.id }} }'}
             />

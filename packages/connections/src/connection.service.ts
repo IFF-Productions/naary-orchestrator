@@ -322,6 +322,14 @@ export async function resolveKafkaConnection(
       `Connection '${connectionId}' has no Kafka brokers configured.`,
     );
   }
+  // Validate the ENTRIES, not just the array. `{"brokers":[1]}` passes an Array check and then
+  // dies deep in the activity with `broker.trim is not a function` — an error that names neither
+  // the connection nor the real problem. Fail here, where we can say which.
+  if (cfg.brokers.some((b) => typeof b !== "string" || b.trim() === "")) {
+    throw new Error(
+      `Connection '${connectionId}' has an invalid Kafka broker entry (each must be a non-empty "host:port" string).`,
+    );
+  }
   return cfg;
 }
 

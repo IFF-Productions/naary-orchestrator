@@ -152,7 +152,7 @@ export const NODE_CATALOG: Record<NodeType, NodeCatalogEntry> = {
   kafkaPublish: {
     group: "data-source",
     summary:
-      "Publish one message to a Kafka topic; output {topic,partition,offset}. At-least-once.",
+      "Publish one message to a Kafka topic; output {topic,partition,offset}. At-most-once — never retried.",
     config: "{ connectionId, topic, value, key?, correlationId?, replyTopic? }",
   },
   sqlQuery: {

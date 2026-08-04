@@ -174,6 +174,26 @@ describe("callKafkaPublish", () => {
     expect(producerDisconnected).toBe(1);
   });
 
+  it("refuses to invent an identity when the broker returns no metadata", async () => {
+    // The old code answered `partition: 0, offset: ""`. That is a lie downstream logic cannot
+    // detect — (topic, partition, offset) IS the message's identity, so a fabricated one
+    // silently corrupts correlation. Better to fail with a message naming the likely cause.
+    sendImpl = async () => [{ topicName: "orders" }];
+    const err = await callKafkaPublish(cfg(), {}, META).catch((e) => e);
+    expect(err.type).toBe("KAFKA_NO_METADATA");
+    expect(err.message).toContain("acks");
+  });
+
+  it("accepts offset 0 — a falsy but entirely real offset", async () => {
+    // The guard must test for undefined/null, not truthiness: the FIRST message on a partition
+    // has offset 0, and rejecting it would break every freshly created topic.
+    sendImpl = async () => [
+      { topicName: "orders", partition: 0, baseOffset: "0" },
+    ];
+    const res = await callKafkaPublish(cfg(), {}, META);
+    expect(res.output).toEqual({ topic: "orders", partition: 0, offset: "0" });
+  });
+
   it("a missing topic is a config error, not a broker round trip", async () => {
     const err = await callKafkaPublish(cfg({ topic: "  " }), {}, META).catch(
       (e) => e,

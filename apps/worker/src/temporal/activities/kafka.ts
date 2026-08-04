@@ -94,11 +94,15 @@ function brokerHost(broker: string): string {
  * ranges, and pin the address. Without it a "connection" pointed at 10.0.0.x is a port scanner
  * against our own Postgres and Temporal hosts.
  *
- * AT-LEAST-ONCE, stated rather than implied: a send that times out may still have been written by
- * the broker. Retrying this activity can therefore duplicate a message. That is Kafka's normal
- * contract and the reason slice 2's consumer dedupes on (topic, partition, offset) — but an author
- * publishing to a non-idempotent consumer should know it, which is why `acks` defaults to -1
- * (wait for all in-sync replicas) instead of the faster-but-blind 0.
+ * AT-MOST-ONCE — and the distinction matters, because the first version of this comment said the
+ * opposite. THIS NODE never retries (`callKafkaPublish` is `maximumAttempts: 1`), so a failed
+ * publish fails the node rather than risking a second copy on the topic. The reason a retry would
+ * be unsafe is Kafka's own contract: a send that times out may still have been written, so a
+ * second attempt can duplicate. Refusing to retry is how at-most-once is achieved, not a
+ * contradiction of it.
+ *
+ * `acks` defaults to -1 (all in-sync replicas) rather than the faster-but-blind 0, because with no
+ * retry the acknowledgement is the ONLY evidence the message landed.
  */
 export async function callKafkaPublish(
   cfg: KafkaPublishActivityConfig,
@@ -184,6 +188,7 @@ export async function callKafkaPublish(
     logLevel: 0,
   });
 
+  const headers = buildHeaders(cfg);
   const producer = kafka.producer();
   try {
     await producer.connect();
@@ -195,19 +200,34 @@ export async function callKafkaPublish(
         {
           value: serializeValue(cfg.value),
           ...(cfg.key ? { key: cfg.key } : {}),
-          ...(buildHeaders(cfg) ? { headers: buildHeaders(cfg) } : {}),
+          ...(headers ? { headers } : {}),
         },
       ],
     });
+    // NO PLACEHOLDER IDENTITY. `partition: 0, offset: ""` would be a lie that downstream logic
+    // cannot detect: (topic, partition, offset) IS a message's identity — it is what slice 2
+    // dedupes on — so a fabricated one silently corrupts correlation. If the broker did not tell
+    // us where the message landed, say so instead of guessing.
+    if (
+      !record ||
+      record.partition === undefined ||
+      record.baseOffset === undefined ||
+      record.baseOffset === null
+    ) {
+      throw ApplicationFailure.nonRetryable(
+        "Kafka accepted the publish but returned no partition/offset metadata, so the message " +
+          "cannot be identified. This usually means acks=0 — set acks to 1 or -1 to get it.",
+        "KAFKA_NO_METADATA",
+      );
+    }
     return {
       status: "ok",
       output: {
-        topic: record?.topicName ?? cfg.topic,
-        partition: record?.partition ?? 0,
+        topic: record.topicName ?? cfg.topic,
+        partition: record.partition,
         // A string, not a number: Kafka offsets are int64 and exceed Number.MAX_SAFE_INTEGER on a
-        // busy topic. Rounding a message's identity would be worse than useless — slice 2 dedupes
-        // on it.
-        offset: String(record?.baseOffset ?? ""),
+        // busy topic. Rounding a message's identity would be worse than useless.
+        offset: String(record.baseOffset),
       },
       costUsd: cfg.costUsd ?? 0,
     };
