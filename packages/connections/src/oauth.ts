@@ -2,9 +2,13 @@ import { createHash, randomBytes } from "node:crypto";
 import { getPrisma } from "@naary/db";
 import { SecretStore } from "@naary/secrets";
 import { ConnectionService, connectionSecretKey } from "./connection.service";
-import { assertEgressAllowed } from "./egress";
+import { BlockedEgressError, assertEgressAllowed } from "./egress";
 import { safeFetch } from "./safe-fetch";
-import { ConnectCallbackError, NeedsReauthError } from "./errors";
+import {
+  ConnectCallbackError,
+  NeedsReauthError,
+  OAuthDiscoveryError,
+} from "./errors";
 import { hasDatabase } from "./config";
 
 const b64url = (b: Buffer) => b.toString("base64url");
@@ -421,6 +425,54 @@ export interface DiscoveredMetadata {
   scopesSupported?: string[];
 }
 
+/**
+ * Fetch one discovery document, insisting it actually IS one.
+ *
+ * `.json()` on a 404 was the hole: a server that answers HTML gets a parse error (fine), but one
+ * that answers `{}` or a JSON error body parsed happily into an object with none of the fields we
+ * need — and the missing values only became visible several steps later, as a URL that would not
+ * parse. Status is checked first, then the body's shape, so the failure names the document.
+ */
+async function readDiscoveryDoc(
+  fetchFn: FetchFn,
+  url: string,
+  origin: string,
+  opts: { required: boolean },
+): Promise<Record<string, unknown> | null> {
+  let res: Awaited<ReturnType<FetchFn>>;
+  try {
+    res = await fetchFn(url);
+  } catch (e) {
+    if (!opts.required) return null;
+    throw new OAuthDiscoveryError(
+      origin,
+      `it could not be reached (${(e as Error).message})`,
+    );
+  }
+  if (!res.ok) {
+    if (!opts.required) return null;
+    throw new OAuthDiscoveryError(
+      origin,
+      `${url} answered ${res.status} — this server doesn't advertise OAuth`,
+    );
+  }
+  try {
+    const body = (await res.json()) as unknown;
+    if (!body || typeof body !== "object") {
+      if (!opts.required) return null;
+      throw new OAuthDiscoveryError(
+        origin,
+        `${url} didn't return a JSON object`,
+      );
+    }
+    return body as Record<string, unknown>;
+  } catch (e) {
+    if (e instanceof OAuthDiscoveryError) throw e;
+    if (!opts.required) return null;
+    throw new OAuthDiscoveryError(origin, `${url} didn't return JSON`);
+  }
+}
+
 /** Discover AS metadata: protected-resource-metadata (RFC 9728) → AS metadata (RFC 8414). */
 export async function discoverOAuthMetadata(
   serverUrl: string,
@@ -429,16 +481,73 @@ export async function discoverOAuthMetadata(
 ): Promise<DiscoveredMetadata> {
   // SSRF guard: both the resource origin and the authorization-server origin it
   // returns are fetched server-side, so both must pass the egress allowlist.
-  const origin = (await assertEgress(new URL(serverUrl).origin)).origin;
-  const prm = (await (
-    await fetchFn(`${origin}/.well-known/oauth-protected-resource`)
-  ).json()) as { authorization_servers?: string[] };
+  //
+  // The serverUrl itself may not be a URL at all — a connection row can hold anything a user
+  // typed. Answering that with the egress guard's "invalid URL" blames the wrong component
+  // (see OAuthDiscoveryError).
+  // Parsed FIRST, in its own step. `new URL()` throws a raw TypeError ("Invalid URL") before the
+  // egress guard is ever reached, so catching only BlockedEgressError here let that TypeError
+  // through — which is how this function reported a bad server URL before, one layer down. Caught
+  // by the spec, not by reading it.
+  let parsed: URL;
+  try {
+    parsed = new URL(serverUrl);
+  } catch {
+    throw new OAuthDiscoveryError(
+      serverUrl || "(empty)",
+      "that isn't a URL — a server URL must look like https://host",
+    );
+  }
+  let origin: string;
+  try {
+    origin = (await assertEgress(parsed.origin)).origin;
+  } catch (e) {
+    // The guard's own "invalid URL" verdict, restated in this function's terms for the same
+    // reason: the caller is trying to connect a server, not debug our egress layer.
+    if (e instanceof BlockedEgressError && /invalid URL/i.test(e.message)) {
+      throw new OAuthDiscoveryError(
+        serverUrl,
+        "that isn't a URL — a server URL must look like https://host",
+      );
+    }
+    throw e;
+  }
+  const prm = (await readDiscoveryDoc(
+    fetchFn,
+    `${origin}/.well-known/oauth-protected-resource`,
+    origin,
+    // Optional by design: RFC 9728 is the newer half of the pair, and plenty of servers publish
+    // only the RFC 8414 document. A miss here falls back to the resource's own origin, exactly
+    // as before — what must NOT be tolerated is a miss on the AS document below.
+    { required: false },
+  )) as { authorization_servers?: string[] } | null;
   const asOrigin = (
-    await assertEgress(new URL(prm.authorization_servers?.[0] ?? origin).origin)
+    await assertEgress(
+      new URL(prm?.authorization_servers?.[0] ?? origin).origin,
+    )
   ).origin;
-  const asm = (await (
-    await fetchFn(`${asOrigin}/.well-known/oauth-authorization-server`)
-  ).json()) as Record<string, unknown>;
+  const asm = (await readDiscoveryDoc(
+    fetchFn,
+    `${asOrigin}/.well-known/oauth-authorization-server`,
+    asOrigin,
+    { required: true },
+  )) as Record<string, unknown>;
+  // Every required endpoint is CHECKED rather than String()-ed.
+  //
+  // `String(undefined)` yields the literal "undefined", which then flowed into the egress guard
+  // and came back as `BlockedEgressError: invalid URL` — an SSRF error for a server that simply
+  // does not implement this flow (Sentry NAARY-API-4, four events in production). The guard was
+  // doing its job; it was just the last component to touch a value that went wrong three steps
+  // earlier.
+  const missing = ["authorization_endpoint", "token_endpoint", "issuer"].filter(
+    (k) => typeof asm[k] !== "string" || !(asm[k] as string).trim(),
+  );
+  if (missing.length > 0) {
+    throw new OAuthDiscoveryError(
+      asOrigin,
+      `its metadata document is missing ${missing.join(", ")}`,
+    );
+  }
   const discovered: DiscoveredMetadata = {
     authorizationEndpoint: String(asm.authorization_endpoint),
     tokenEndpoint: String(asm.token_endpoint),

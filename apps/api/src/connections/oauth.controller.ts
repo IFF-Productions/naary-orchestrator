@@ -12,6 +12,7 @@ import {
 import { ApiBearerAuth, ApiOperation, ApiResponse } from "@nestjs/swagger";
 import {
   ConnectionService,
+  OAuthDiscoveryError,
   completeConsent,
   startConsent,
 } from "@naary/connections";
@@ -77,13 +78,25 @@ export class OAuthController {
     const redirectUri = oauthRedirectUri();
     // Consent stores the refresh token in the connection's OWN env (Slice 5) — the callback is
     // @Public and can't send X-Environment-Id, so the env rides in the (encoded) state.
-    return startConsent({
-      tenantId,
-      environmentId: conn.environmentId,
-      connectionId,
-      serverUrl,
-      redirectUri,
-    });
+    try {
+      return await startConsent({
+        tenantId,
+        environmentId: conn.environmentId,
+        connectionId,
+        serverUrl,
+        redirectUri,
+      });
+    } catch (e) {
+      // "This server doesn't do OAuth" is the USER's problem to fix (wrong URL, wrong kind of
+      // server), not a fault of ours — a 500 puts it in the error budget and tells them nothing.
+      // Production reported four of these as `BlockedEgressError: invalid URL` (Sentry
+      // NAARY-API-4) because a 404'd discovery document became the string "undefined" and the
+      // egress guard, last to touch it, got the blame.
+      if (e instanceof OAuthDiscoveryError) {
+        throw new BadRequestException(e.message);
+      }
+      throw e;
+    }
   }
 
   @ApiOperation({
