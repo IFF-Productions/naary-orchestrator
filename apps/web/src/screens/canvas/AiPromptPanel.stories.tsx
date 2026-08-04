@@ -4,9 +4,12 @@
  * whole request, and nothing on screen remembered what had already been asked for.
  *
  * It is now the SAME conversation as the Build with AI screen (#1003) — the identical
- * `ConversationPanel`, in its `panel` variant, with the canvas-specific parts passed in: the
- * `?fix=` disclosure banner, the edit-vs-create chooser, and a status header. So the states worth
- * looking at come in two groups.
+ * `ConversationPanel`, in its `drawer` variant, with the canvas-specific parts passed in: the
+ * `?fix=` disclosure banner, the edit-vs-create chooser, and a status header. Since #1090 it is a
+ * RESIZABLE DRAWER beside the graph rather than a strip above it, which is why every story renders
+ * it next to a stand-in canvas: what these are checking is the split, not just the panel.
+ *
+ * So the states worth looking at come in two groups.
  *
  * THE CONVERSATION: `Empty` → `Building` → `Conversation`. What matters is that a follow-up is a
  * MESSAGE, not a re-description, and that the assistant's summary, its cost and its quick replies
@@ -72,10 +75,21 @@ function Harness({
   const [prompt, setPrompt] = useState(initialPrompt);
   const [provider, setProvider] = useState<ProviderOption["id"] | null>(null);
   return (
-    // 940px: the panel is full-bleed under the canvas top bar, so it is never seen at its own
-    // intrinsic width. `width` narrows it for the phone story — see FromFailedRunPhone for why
-    // that viewport is reachable even though the top bar hides this panel's own button there.
-    <div style={{ width: width ?? 940 }}>
+    // The canvas BODY, in miniature: a flex row of a fixed height, with something standing in for
+    // the graph. The panel is a drawer now (#1090) — it sizes itself and the canvas takes what is
+    // left — so a story that gave it the full width would show precisely the layout the drawer
+    // exists to replace. `position: relative` is load-bearing: below 1024px the same component
+    // renders as a bottom sheet absolutely positioned inside this box.
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "row",
+        position: "relative",
+        width: width ?? 940,
+        height: 620,
+        background: "var(--bg)",
+      }}
+    >
       <AiPromptPanel
         aiPrompt={prompt}
         onPromptChange={setPrompt}
@@ -96,7 +110,21 @@ function Harness({
         providerOptions={PROVIDER_OPTIONS}
         providerHint={null}
         fixNotice={fixNotice}
+        onClose={() => {}}
       />
+      {/* Stands in for the graph. Its visibility IS the feature: the drawer replaced a strip that
+          pushed the canvas off-screen exactly while nodes were streaming onto it. */}
+      <div
+        style={{
+          flex: 1,
+          display: "grid",
+          placeItems: "center",
+          fontSize: "var(--text-xs)",
+          color: "var(--ink-3)",
+        }}
+      >
+        the canvas stays visible, and keeps its full height
+      </div>
     </div>
   );
 }

@@ -47,8 +47,16 @@ export type BuildPhase = "idle" | "streaming" | "ready";
  * `panel` — the canvas: a full-width strip under the top bar, above a canvas that stays live and
  * editable. It must claim only the height it needs (the canvas below it is the point), so the
  * thread scrolls inside a cap rather than the column filling the viewport.
+ * `drawer` — the canvas again, but BESIDE the graph instead of above it (#1090). The container is
+ * a resizable pane that owns a fixed width and the full column height, so this fills it: the thread
+ * takes the leftover space, exactly as on the page. The capped-thread rule belongs to `panel`
+ * alone — it exists because a strip steals height from the canvas, which a side pane does not.
+ *
+ * `page` is the odd one out, and the two canvas variants share their COPY: a draft is already on
+ * the canvas in both, so `embedded` below means "rendered against a live canvas", while the layout
+ * branches ask for the specific variant.
  */
-export type ConversationVariant = "page" | "panel";
+export type ConversationVariant = "page" | "panel" | "drawer";
 
 /**
  * Composer bounds. One line to start; grows with the content up to a cap, because a `?fix=`
@@ -202,7 +210,11 @@ export function ConversationPanel({
   };
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
-  const embedded = variant === "panel";
+  // "Rendered against a live canvas" — true for both canvas variants, and what the COPY branches
+  // below key on (the draft is already on the canvas either way). Layout branches ask for the
+  // specific variant instead, because a strip and a side pane want opposite things.
+  const embedded = variant !== "page";
+  const drawer = variant === "drawer";
   const showIntro = phase === "idle" && messages.length === 0;
   const streaming = phase === "streaming";
   const ready = phase === "ready";
@@ -226,10 +238,15 @@ export function ConversationPanel({
   const lastMsgId = messages[messages.length - 1]?.id;
 
   // Keep the thread pinned to the newest message / plan line.
+  //
+  // NOT while the intro is showing: nothing has arrived, so there is no "newest" to follow, and in
+  // a short container (the ≤1024 sheet) this scrolled the empty state past its own heading — the
+  // panel opened mid-sentence. Pinning is for a conversation, and the intro is not one yet.
   useEffect(() => {
+    if (showIntro) return;
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [messages, typing, plan, error]);
+  }, [messages, typing, plan, error, showIntro]);
 
   /**
    * Grow the composer to its content, up to a cap.
@@ -312,24 +329,45 @@ export function ConversationPanel({
    * inside the cap, and everything below it (banner, composer) keeps its natural height however
    * long the conversation gets. Shorter on a phone, where the same strip is a much bigger share of
    * the screen.
+   *
+   * The DRAWER takes the page's rule, not the strip's. Its container is a resizable pane with a
+   * height the user chose, so the thread filling it costs the canvas nothing — capping it there
+   * would strand the conversation in the top third of a pane with empty space beneath it.
    */
-  const threadBox = embedded
-    ? { flex: "none" as const, maxHeight: compact ? 200 : 300 }
-    : { flex: 1 };
+  const threadBox =
+    embedded && !drawer
+      ? { flex: "none" as const, maxHeight: compact ? 200 : 300 }
+      : { flex: 1 };
 
   return (
     <div
       style={{
         width: embedded || compact ? "100%" : 452,
-        flex: "none",
+        // The drawer's container is the sized element (a pane the user dragged) — this fills it.
+        // Everywhere else the column claims its own height and must not stretch.
+        flex: drawer ? "1 1 auto" : "none",
         borderRight: embedded || compact ? "none" : "1px solid var(--line)",
-        borderBottom: embedded || compact ? "1px solid var(--line)" : "none",
+        // The strip's bottom border separates it from the canvas below. The drawer sits BESIDE the
+        // canvas and its container already draws that edge, so a second line here would read as a
+        // stray rule across the bottom of the pane.
+        borderBottom: drawer
+          ? "none"
+          : embedded || compact
+            ? "1px solid var(--line)"
+            : "none",
         background: "var(--panel)",
         display: "flex",
         flexDirection: "column",
         minHeight: 0,
-        // The canvas strip claims only what it needs; the page column fills its half of the screen.
-        height: embedded ? undefined : compact ? "60vh" : "auto",
+        // The canvas strip claims only what it needs; the page column fills its half of the screen;
+        // the drawer takes the pane's height, whatever the user dragged it to.
+        height: drawer
+          ? "100%"
+          : embedded
+            ? undefined
+            : compact
+              ? "60vh"
+              : "auto",
       }}
     >
       {/* `hideIntro` drops the BLOCK, not the state: the placeholder and hint above still read as
