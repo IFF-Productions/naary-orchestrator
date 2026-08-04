@@ -1,6 +1,6 @@
 /**
- * The canvas's "Build with AI" panel — a strip under the top bar that holds the SAME conversation
- * as the Build with AI screen (#1003).
+ * The canvas's "Build with AI" panel — a RESIZABLE DRAWER beside the graph that holds the SAME
+ * conversation as the Build with AI screen (#1003).
  *
  * It was a one-shot form for its whole life: one textarea, one provider `<select>`, one Generate
  * button. Ask for a change, get a graph, and to refine it you retyped the request. Meanwhile the
@@ -13,6 +13,22 @@
  * `?fix=<runId>` disclosure banner, the edit-vs-create chooser, and a header with the build status
  * and "New chat". The thread, composer, plan card, quick replies and provider picker are the
  * shared component's — which is the point, because two components that merely look alike drift.
+ *
+ * WHY A DRAWER AND NOT A STRIP (#1090). It used to sit ABOVE the canvas, full width, sized by its
+ * own content: header + banner + thread + composer. Every one of those grows — a `?fix=` arrival
+ * alone asks for a 200px composer — so on a laptop the conversation covered nearly the whole
+ * viewport and the graph it was editing was pushed off the bottom of the screen. Watching nodes
+ * appear as they stream is the point of building on the canvas rather than on /app/build-ai, and
+ * the strip made exactly that impossible.
+ *
+ * Beside the graph, the two no longer compete for the same axis: the drawer takes width the canvas
+ * gives up, the canvas keeps its full height, and the user sets the split by dragging — so someone
+ * mid-conversation can widen it to read, then narrow it to watch. The size is remembered
+ * (`useResizablePane`), because a split you must re-drag every visit is one you stop using.
+ *
+ * On ≤1024 there is no width to give up, so the same conversation becomes a BOTTOM SHEET over the
+ * canvas — resized on the vertical axis by the same hook, and overlaid rather than stacked so the
+ * graph keeps its own height instead of being squeezed into a third of the screen.
  */
 import { Icon, Spinner } from "../../components";
 import { BELOW_RAIL_QUERY, useMediaQuery } from "../../lib/useMediaQuery";
@@ -28,6 +44,41 @@ import type {
 } from "../app/build-ai/providers";
 import type { AiMode } from "./useAiBuilder";
 import { blockedReason, type FixStage } from "./useFixFromRun";
+import { useResizablePane } from "./useResizablePane";
+
+/**
+ * Drawer bounds.
+ *
+ * The minimum is a readability floor, not a token budget: below ~320px the composer, the two mode
+ * chips and the provider picker start wrapping onto their own lines, and the thread turns into a
+ * column of two-word lines. The maximum is a share of the viewport rather than a constant — the
+ * drawer exists to leave the canvas visible, so it may never be the whole window on any screen.
+ */
+const DRAWER_DEFAULT_W = 400;
+const DRAWER_MIN_W = 320;
+const DRAWER_MAX_FRACTION = 0.55;
+/** localStorage keys — one per axis, because the two layouts are different splits, not one value
+ *  in two units. Someone who narrows the phone sheet has not asked for a narrow desktop drawer. */
+const DRAWER_W_KEY = "naary.canvas.ai.drawerWidth";
+const SHEET_H_KEY = "naary.canvas.ai.sheetHeight";
+const SHEET_MIN_H = 220;
+const SHEET_MAX_FRACTION = 0.85;
+const SHEET_DEFAULT_FRACTION = 0.5;
+
+/** Viewport-relative caps, resolved at clamp time so a window resize can't strand the pane wider
+ *  than the screen. Guarded for a zero-size test environment. */
+function maxDrawerWidth(): number {
+  const w = typeof window === "undefined" ? 0 : window.innerWidth;
+  return Math.max(DRAWER_MIN_W, Math.round((w || 1280) * DRAWER_MAX_FRACTION));
+}
+function maxSheetHeight(): number {
+  const h = typeof window === "undefined" ? 0 : window.innerHeight;
+  return Math.max(SHEET_MIN_H, Math.round((h || 800) * SHEET_MAX_FRACTION));
+}
+function defaultSheetHeight(): number {
+  const h = typeof window === "undefined" ? 0 : window.innerHeight;
+  return Math.max(SHEET_MIN_H, Math.round((h || 800) * SHEET_DEFAULT_FRACTION));
+}
 
 /** What the panel says when the prompt below was written FROM a failed run (`?fix=<runId>`). */
 export interface FixNotice {
@@ -256,10 +307,15 @@ function ModeChooser({
 function PanelHeader({
   phase,
   onReset,
+  onClose,
   compact,
 }: {
   phase: BuildPhase;
   onReset: () => void;
+  /** Close the drawer. The top bar's toggle still does this, but a drawer whose only dismissal is
+   *  a button in a different region is one people close by reloading the page — and on the phone
+   *  sheet that top-bar control is behind the overflow menu. */
+  onClose: () => void;
   compact: boolean;
 }) {
   const pill =
@@ -326,27 +382,94 @@ function PanelHeader({
         />
         {pill.text}
       </span>
-      <button
-        type="button"
-        onClick={onReset}
-        aria-label="New chat"
-        title="New chat"
+      <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+        {(
+          [
+            ["plus", "New chat", onReset],
+            ["x", "Close AI", onClose],
+          ] as const
+        ).map(([icon, label, onClick]) => (
+          <button
+            key={label}
+            type="button"
+            onClick={onClick}
+            aria-label={label}
+            title={label}
+            style={{
+              width: compact ? 44 : 30,
+              height: compact ? 44 : 30,
+              borderRadius: "var(--radius-md)",
+              border: "1px solid var(--line-2)",
+              background: "var(--card)",
+              color: "var(--ink-2)",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <Icon name={icon} size={14} strokeWidth={1.9} />
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The drag handle between the drawer and the canvas.
+ *
+ * Thin line, fat hitbox: the visible rule is 1–2px so it reads as an edge rather than a widget,
+ * while the element itself is wide/tall enough to grab — 44px on touch, per the same rule every
+ * other control on this screen follows. The hit area is transparent, so the drawer looks like it
+ * simply ends where the canvas begins.
+ *
+ * Keyboard resizing, focus ring and the ARIA separator semantics come from `useResizablePane`; the
+ * only thing this renders is the surface.
+ */
+function ResizeHandle({
+  separatorProps,
+  dragging,
+  axis,
+  compact,
+}: {
+  separatorProps: ReturnType<typeof useResizablePane>["separatorProps"];
+  dragging: boolean;
+  axis: "x" | "y";
+  compact: boolean;
+}) {
+  const thickness = compact ? 44 : 10;
+  const { style, ...rest } = separatorProps;
+  return (
+    <div
+      {...rest}
+      className="naary-pane-handle"
+      data-dragging={dragging ? "true" : undefined}
+      style={{
+        ...style,
+        flex: "none",
+        width: axis === "x" ? thickness : "100%",
+        height: axis === "x" ? "100%" : thickness,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        // The pane's own edge line lives HERE rather than as a border on the drawer, so the
+        // hover/drag highlight lands on the same pixels the user is aiming at.
+        background: "transparent",
+      }}
+    >
+      <span
+        aria-hidden
+        className="naary-pane-handle-line"
         style={{
-          marginLeft: "auto",
-          width: compact ? 44 : 30,
-          height: compact ? 44 : 30,
-          borderRadius: "var(--radius-md)",
-          border: "1px solid var(--line-2)",
-          background: "var(--card)",
-          color: "var(--ink-2)",
-          cursor: "pointer",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
+          // On the vertical split this is the edge itself; on the sheet it is a grab pill, the
+          // shape a bottom sheet is expected to have.
+          width: axis === "x" ? 2 : 44,
+          height: axis === "x" ? "100%" : 4,
+          borderRadius: axis === "x" ? 0 : "var(--radius-pill)",
+          background: dragging ? "var(--brand)" : "var(--line-2)",
         }}
-      >
-        <Icon name="plus" size={14} strokeWidth={1.9} />
-      </button>
+      />
     </div>
   );
 }
@@ -371,6 +494,8 @@ export function AiPromptPanel({
   providerOptions,
   providerHint,
   fixNotice,
+  onClose,
+  onResized,
 }: {
   /** The composer draft — CONTROLLED, because `?fix=` writes into it. */
   aiPrompt: string;
@@ -398,21 +523,73 @@ export function AiPromptPanel({
   providerHint: string | null;
   /** Set when the user arrived from a failed run (`?fix=`); null otherwise. */
   fixNotice?: FixNotice | null;
+  /** Dismiss the drawer — the same toggle the top bar's "Close AI" runs. */
+  onClose: () => void;
+  /**
+   * The drawer settled at a new size (drag released, or a keyboard adjustment).
+   *
+   * The canvas re-frames its graph here. React Flow keeps its transform across a container resize,
+   * so widening the drawer pushes the right-hand side of the graph out of view and leaves it
+   * there — which is the bug this whole change is about, reappearing one drag later.
+   */
+  onResized?: () => void;
 }) {
   const compact = useMediaQuery(BELOW_RAIL_QUERY);
   const editing = aiMode === "edit" && canEdit;
   const writing = fixIsWriting(fixNotice);
 
-  return (
-    <div
-      style={{
-        borderBottom: "1px solid var(--line)",
-        background: "var(--surface)",
-      }}
-    >
-      <PanelHeader phase={phase} onReset={onReset} compact={compact} />
+  // Two layouts, two splits (see the file header): a width the canvas gives up on desktop, a
+  // height the sheet takes over the canvas below ~1024. One hook, opposite axes — and opposite
+  // drag signs, because the desktop handle is on the drawer's RIGHT edge (drag right to widen)
+  // while the sheet's is on its TOP edge (drag up to grow).
+  const pane = useResizablePane(
+    compact
+      ? {
+          storageKey: SHEET_H_KEY,
+          axis: "y",
+          edge: "start",
+          initial: defaultSheetHeight(),
+          min: SHEET_MIN_H,
+          max: maxSheetHeight,
+          label: "Resize the AI panel",
+          onCommit: onResized,
+        }
+      : {
+          storageKey: DRAWER_W_KEY,
+          axis: "x",
+          edge: "end",
+          initial: DRAWER_DEFAULT_W,
+          min: DRAWER_MIN_W,
+          max: maxDrawerWidth,
+          label: "Resize the AI panel",
+          onCommit: onResized,
+        },
+  );
+
+  /**
+   * How much height to reserve for a `?fix=` description before it lands.
+   *
+   * As a strip this was a flat 200px and it cost the canvas 200px of screen. In a pane it costs
+   * the THREAD instead — and on the phone sheet, a 200px composer inside a ~380px sheet leaves the
+   * conversation about one line. So the reservation is a share of the sheet the user chose, which
+   * keeps the arriving description readable (still ~6 lines at the minimum sheet height) without
+   * swallowing the panel it arrived in. The desktop drawer is full-column-height, where the
+   * original 200px was never the problem.
+   */
+  const fixComposerMin = compact
+    ? Math.max(90, Math.min(160, Math.round(pane.size * 0.34)))
+    : 200;
+
+  const conversation = (
+    <>
+      <PanelHeader
+        phase={phase}
+        onReset={onReset}
+        onClose={onClose}
+        compact={compact}
+      />
       <ConversationPanel
-        variant="panel"
+        variant="drawer"
         compact={compact}
         phase={phase}
         messages={messages}
@@ -441,8 +618,10 @@ export function AiPromptPanel({
            via `fixIsWriting` covering every waiting stage. That was merely tidy while
            `loading-canvas` was unreachable; #1007 made it a real state a user sits in, so the
            arrival is now a genuine sequence (loading-canvas → reading-run → done) and anything
-           sized per-stage would resize the panel twice underneath someone mid-read. */
-        composerMinHeight={fixNotice ? (compact ? 130 : 200) : undefined}
+           sized per-stage would resize the panel twice underneath someone mid-read.
+
+           Sized against the PANE now rather than flat — see `fixComposerMin`. */
+        composerMinHeight={fixNotice ? fixComposerMin : undefined}
         /* Which workflow this changes, in the shape the shared panel expects. `baseVersion` is null
            because the canvas's own Save owns versioning and this panel renders no save button of
            its own — see `showAccept`. */
@@ -486,6 +665,75 @@ export function AiPromptPanel({
         staleWarning={null}
         resumables={null}
       />
-    </div>
+    </>
+  );
+
+  // ≤1024: a bottom SHEET below the canvas, in the column rather than floating over it.
+  //
+  // Overlaying was tried first and is wrong for one concrete reason: React Flow measures its
+  // CONTAINER, so a sheet that covers the bottom half of an unchanged container leaves the graph
+  // centred behind it — the screenshot showed the nodes sitting under the sheet's top edge. A flex
+  // item takes real space, so the fit is computed against the area the user can actually see.
+  //
+  // `order: 1` rather than a second render site: this component is written once, before the stage
+  // in the JSX (where the desktop drawer belongs, left of the canvas), and the order property is
+  // what moves it below the stage when the row becomes a column.
+  if (compact) {
+    return (
+      <aside
+        aria-label="Build with AI"
+        style={{
+          order: 1,
+          flex: "none",
+          height: pane.size,
+          display: "flex",
+          flexDirection: "column",
+          minHeight: 0,
+          background: "var(--surface)",
+          borderTop: "1px solid var(--line)",
+        }}
+      >
+        <ResizeHandle
+          separatorProps={pane.separatorProps}
+          dragging={pane.dragging}
+          axis="y"
+          compact={compact}
+        />
+        {conversation}
+      </aside>
+    );
+  }
+
+  return (
+    <aside
+      aria-label="Build with AI"
+      style={{
+        width: pane.size,
+        flex: "none",
+        display: "flex",
+        flexDirection: "row",
+        minWidth: 0,
+        background: "var(--surface)",
+        borderRight: "1px solid var(--line)",
+      }}
+    >
+      <div
+        style={{
+          flex: 1,
+          minWidth: 0,
+          display: "flex",
+          flexDirection: "column",
+          minHeight: 0,
+        }}
+      >
+        {conversation}
+      </div>
+      <ResizeHandle
+        separatorProps={pane.separatorProps}
+        dragging={pane.dragging}
+        axis="x"
+        compact={compact}
+      />
+    </aside>
   );
 }

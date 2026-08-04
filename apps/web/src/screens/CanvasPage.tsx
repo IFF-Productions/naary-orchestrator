@@ -279,6 +279,53 @@ export function CanvasPage() {
     onEditApplied: () => setShowReview(true),
   });
 
+  /**
+   * Re-frame the graph when the AI drawer opens or closes (#1090).
+   *
+   * The drawer takes ~400px of the canvas's WIDTH, and React Flow keeps its transform across a
+   * container resize — content stays anchored to the container's left edge, so opening the drawer
+   * silently pushes the right-hand side of the graph out of view. On a wide graph that means the
+   * nodes a user opened the drawer to talk ABOUT are the ones that disappear.
+   *
+   * Fired on open/close and when a DRAG SETTLES (never per pointer move — that would be an
+   * animation fighting the drag). The delay lets React Flow measure the new container before it is
+   * asked to fit to it. Verified by screenshot: without the drag-end fit, widening the drawer left
+   * the far end of the graph clipped behind the inspector.
+   */
+  const refitTimer = useRef<number | null>(null);
+  const refitCanvas = useCallback(() => {
+    // Supersede a pending fit rather than stacking one on top of it — a toggle immediately
+    // followed by a drag would otherwise run two, and the one that lands last is not necessarily
+    // the one that measured the layout the user ended up with.
+    if (refitTimer.current !== null) window.clearTimeout(refitTimer.current);
+    // 200ms, not 90: React Flow re-measures its container through a ResizeObserver, and at 90ms
+    // it was still fitting to the PRE-resize width — the screenshot showed the graph re-framed but
+    // shifted, with the first node clipped off the left edge. The wait is invisible next to the
+    // fit's own 220ms animation.
+    refitTimer.current = window.setTimeout(
+      () =>
+        rfRef.current?.fitView({
+          duration: 220,
+          padding: 0.2,
+          // React Flow's default floor is 0.5, and a wide drawer next to an open inspector can
+          // leave the canvas ~300px on a laptop — at which point "fit" silently gave up and
+          // clipped the first node instead. Letting it zoom further out keeps the promise the
+          // refit is making; the user can zoom back in, but they cannot un-hide a node.
+          minZoom: 0.2,
+        }),
+      200,
+    );
+  }, []);
+  // Own the timer. Two toggles in quick succession would otherwise queue two fits, and whichever
+  // landed last would win regardless of which layout it measured; an unmount mid-wait would fire
+  // into a dead instance. Cleared before rescheduling and on the way out.
+  useEffect(() => {
+    refitCanvas();
+    return () => {
+      if (refitTimer.current !== null) window.clearTimeout(refitTimer.current);
+    };
+  }, [showAi, refitCanvas]);
+
   // Turn `?fix=<runId>` into a prefilled first MESSAGE in the AI panel's composer. Prefills only —
   // the user reads what the model will be told about their run and presses Send themselves. That
   // is why it is a draft rather than an auto-sent turn: in a conversation the obvious alternative
@@ -1369,60 +1416,16 @@ export function CanvasPage() {
         />
       )}
 
-      {showAi && (
-        <AiPromptPanel
-          aiPrompt={aiPrompt}
-          onPromptChange={setAiPrompt}
-          aiMode={aiMode}
-          onModeChange={setAiMode}
-          canEdit={canEdit}
-          workflowName={name}
-          messages={aiMessages}
-          phase={aiPhase}
-          typing={aiTyping}
-          plan={aiPlan}
-          error={aiError}
-          onSend={(text) => void sendAiMessage(text)}
-          onReset={resetAiChat}
-          // The accept quick reply ("Looks good — save it") runs the canvas's OWN save, so the chip
-          // does exactly what the top bar's Save does — one save path, not a second one.
-          onAccept={() => void saveOnly()}
-          provider={aiProvider}
-          onProvider={chooseAiProvider}
-          providerOptions={aiProviderOptions}
-          providerHint={aiProviderHint}
-          // Present only when the user arrived from a failed run (?fix=). Says which run this
-          // describes, whose outputs are about to be sent, and — when the run executed an older
-          // version — that the fix is being applied to a graph that has since moved on.
-          fixNotice={
-            fixRunId
-              ? {
-                  runId: fixRunId,
-                  drift: fixFromRun.drift,
-                  includedNodeIds: fixFromRun.includedNodeIds,
-                  error: fixFromRun.error,
-                  // Reading the run takes a moment and the canvas load takes another — the panel
-                  // reports both rather than sitting empty until they finish.
-                  stage: fixFromRun.stage,
-                  // Both are only read when the stage is `blocked`, and they are what tells its
-                  // three situations apart: the workflow couldn't be OPENED, a workflow is here
-                  // and doesn't COMPILE, or there is nothing on the canvas at all. Different
-                  // problems, and each of the other two sentences is plainly false about this one.
-                  canvasLoadFailed: canvasLoad === "failed",
-                  canvasError: error ?? null,
-                }
-              : null
-          }
-        />
-      )}
-
       {showInput && (
         <RunInputPanel runInput={runInput} onChange={setRunInput} />
       )}
 
-      {/* BODY: desktop = 60px icon rail · canvas · 492px inspector dock (a flex ROW).
+      {/* BODY: desktop = 60px icon rail · AI drawer · canvas · 492px inspector dock (a flex ROW).
           ≤1024 (stacked) = a flex COLUMN: the rail is hidden, the graph is a capped
-          pan/scroll viewport on top, and the dock is a full-width panel below it. */}
+          pan/scroll viewport on top, the dock is a full-width panel below it, and the AI
+          conversation is a resizable bottom sheet — a real flex item at the END of the column
+          (via `order: 1`), not an overlay, so React Flow measures a container that matches what
+          the user can actually see. */}
       <div
         style={{
           display: "flex",
@@ -1437,6 +1440,62 @@ export function CanvasPage() {
           <CategoryRail
             onAdd={addEntry}
             onOpenCatalog={() => setCatalogOpen(true)}
+          />
+        )}
+
+        {/* Build with AI — a resizable drawer BESIDE the graph (#1090). It used to be a strip
+            above the body, which grew with the conversation until the canvas it was editing was
+            off-screen; watching nodes stream in is the whole reason to build here rather than on
+            /app/build-ai. Written here, before the stage, because that is where the desktop drawer
+            belongs; on ≤1024 the component gives itself `order: 1` and lands below the stage as a
+            bottom sheet, so there is one render site rather than two. */}
+        {showAi && (
+          <AiPromptPanel
+            aiPrompt={aiPrompt}
+            onPromptChange={setAiPrompt}
+            aiMode={aiMode}
+            onModeChange={setAiMode}
+            canEdit={canEdit}
+            workflowName={name}
+            messages={aiMessages}
+            phase={aiPhase}
+            typing={aiTyping}
+            plan={aiPlan}
+            error={aiError}
+            onSend={(text) => void sendAiMessage(text)}
+            onReset={resetAiChat}
+            // The accept quick reply ("Looks good — save it") runs the canvas's OWN save, so the chip
+            // does exactly what the top bar's Save does — one save path, not a second one.
+            onAccept={() => void saveOnly()}
+            provider={aiProvider}
+            onProvider={chooseAiProvider}
+            providerOptions={aiProviderOptions}
+            providerHint={aiProviderHint}
+            // Present only when the user arrived from a failed run (?fix=). Says which run this
+            // describes, whose outputs are about to be sent, and — when the run executed an older
+            // version — that the fix is being applied to a graph that has since moved on.
+            fixNotice={
+              fixRunId
+                ? {
+                    runId: fixRunId,
+                    drift: fixFromRun.drift,
+                    includedNodeIds: fixFromRun.includedNodeIds,
+                    error: fixFromRun.error,
+                    // Reading the run takes a moment and the canvas load takes another — the panel
+                    // reports both rather than sitting empty until they finish.
+                    stage: fixFromRun.stage,
+                    // Both are only read when the stage is `blocked`, and they are what tells its
+                    // three situations apart: the workflow couldn't be OPENED, a workflow is here
+                    // and doesn't COMPILE, or there is nothing on the canvas at all. Different
+                    // problems, and each of the other two sentences is plainly false about this one.
+                    canvasLoadFailed: canvasLoad === "failed",
+                    canvasError: error ?? null,
+                  }
+                : null
+            }
+            onClose={() => setShowAi(false)}
+            // Re-frame the graph once the drag settles — see refitCanvas.
+            onResized={refitCanvas}
           />
         )}
 

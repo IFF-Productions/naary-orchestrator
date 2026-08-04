@@ -125,12 +125,8 @@
    text fallbacks). Selects/checkboxes/numbers are not drop targets. */
 body.naary-dragging .naary-drop-scope .cm-editor,
 body.naary-dragging .naary-drop-scope textarea,
-body.naary-dragging
-  .naary-drop-scope
-  input:not([type]):not([readonly]),
-body.naary-dragging
-  .naary-drop-scope
-  input[type="text"]:not([readonly]) {
+body.naary-dragging .naary-drop-scope input:not([type]):not([readonly]),
+body.naary-dragging .naary-drop-scope input[type="text"]:not([readonly]) {
   border-color: var(--brand) !important;
   box-shadow: 0 0 0 3px var(--brand-soft);
   transition:
@@ -235,12 +231,14 @@ body.naary-dragging
   height: 8px;
   border-radius: 50%;
   background: var(--state-running, #3b82f6);
-  box-shadow: 0 0 0 0 color-mix(in srgb, var(--state-running, #3b82f6) 60%, transparent);
+  box-shadow: 0 0 0 0
+    color-mix(in srgb, var(--state-running, #3b82f6) 60%, transparent);
   animation: naaryWatchPulse 1.6s ease-out infinite;
 }
 @keyframes naaryWatchPulse {
   0% {
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--state-running, #3b82f6) 55%, transparent);
+    box-shadow: 0 0 0 0
+      color-mix(in srgb, var(--state-running, #3b82f6) 55%, transparent);
   }
   100% {
     box-shadow: 0 0 0 7px transparent;
@@ -325,4 +323,19 @@ body.naary-dragging
   border-color: var(--brand);
   outline: none;
   background: var(--card);
+}
+
+/* Resizable pane handle (the AI drawer's edge — see canvas/useResizablePane.ts).
+   The hit area is transparent and oversized; only the thin line inside it lights up, so the
+   drawer reads as ending where the canvas begins rather than as a widget between them. */
+.naary-pane-handle:hover .naary-pane-handle-line,
+.naary-pane-handle[data-dragging="true"] .naary-pane-handle-line {
+  background: var(--brand);
+}
+.naary-pane-handle-line {
+  transition: background 0.12s ease;
+}
+.naary-pane-handle:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: -2px;
 }

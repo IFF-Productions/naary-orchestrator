@@ -4,9 +4,12 @@
  * whole request, and nothing on screen remembered what had already been asked for.
  *
  * It is now the SAME conversation as the Build with AI screen (#1003) — the identical
- * `ConversationPanel`, in its `panel` variant, with the canvas-specific parts passed in: the
- * `?fix=` disclosure banner, the edit-vs-create chooser, and a status header. So the states worth
- * looking at come in two groups.
+ * `ConversationPanel`, in its `drawer` variant, with the canvas-specific parts passed in: the
+ * `?fix=` disclosure banner, the edit-vs-create chooser, and a status header. Since #1090 it is a
+ * RESIZABLE DRAWER beside the graph rather than a strip above it, which is why every story renders
+ * it next to a stand-in canvas: what these are checking is the split, not just the panel.
+ *
+ * So the states worth looking at come in two groups.
  *
  * THE CONVERSATION: `Empty` → `Building` → `Conversation`. What matters is that a follow-up is a
  * MESSAGE, not a re-description, and that the assistant's summary, its cost and its quick replies
@@ -21,6 +24,7 @@ import { buildFixInstruction, type GraphDef, type NodeDef } from "@naary/dsl";
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import { useState } from "react";
 import { SAVE_OPTION } from "../../lib/api/builder";
+import { BELOW_RAIL_QUERY, useMediaQuery } from "../../lib/useMediaQuery";
 import type { BuildPhase, ChatMsg } from "../app/build-ai/ConversationPanel";
 import { planFromStream } from "../app/build-ai/model";
 import type { ProviderOption } from "../app/build-ai/providers";
@@ -71,11 +75,29 @@ function Harness({
   const [mode, setMode] = useState<AiMode>(initialMode);
   const [prompt, setPrompt] = useState(initialPrompt);
   const [provider, setProvider] = useState<ProviderOption["id"] | null>(null);
+  // The same query CanvasPage uses for `stacked` — the harness has to switch axis where the real
+  // body does, or the compact stories are decorative rather than representative.
+  const compact = useMediaQuery(BELOW_RAIL_QUERY);
   return (
-    // 940px: the panel is full-bleed under the canvas top bar, so it is never seen at its own
-    // intrinsic width. `width` narrows it for the phone story — see FromFailedRunPhone for why
-    // that viewport is reachable even though the top bar hides this panel's own button there.
-    <div style={{ width: width ?? 940 }}>
+    // The canvas BODY, in miniature: a flex container of a fixed height, with something standing
+    // in for the graph. The panel is a drawer now (#1090) — it sizes itself and the canvas takes
+    // what is left — so a story that gave it the full width would show precisely the layout the
+    // drawer exists to replace.
+    //
+    // The DIRECTION has to match the real body, not just look similar. Below 1024px CanvasPage
+    // switches to a column and the panel gives itself `order: 1` to land below the stage; in a row
+    // that same order would put it to the RIGHT of the canvas, and the compact stories would show
+    // a layout that does not exist.
+    <div
+      style={{
+        display: "flex",
+        flexDirection: compact ? "column" : "row",
+        position: "relative",
+        width: width ?? 940,
+        height: 620,
+        background: "var(--bg)",
+      }}
+    >
       <AiPromptPanel
         aiPrompt={prompt}
         onPromptChange={setPrompt}
@@ -96,7 +118,21 @@ function Harness({
         providerOptions={PROVIDER_OPTIONS}
         providerHint={null}
         fixNotice={fixNotice}
+        onClose={() => {}}
       />
+      {/* Stands in for the graph. Its visibility IS the feature: the drawer replaced a strip that
+          pushed the canvas off-screen exactly while nodes were streaming onto it. */}
+      <div
+        style={{
+          flex: 1,
+          display: "grid",
+          placeItems: "center",
+          fontSize: "var(--text-xs)",
+          color: "var(--ink-3)",
+        }}
+      >
+        the canvas stays visible, and keeps its full height
+      </div>
     </div>
   );
 }
