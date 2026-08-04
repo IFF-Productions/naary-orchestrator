@@ -77,6 +77,7 @@ import type {
   SendEmailNodeConfig,
   SetNodeConfig,
   SqlExecNodeConfig,
+  KafkaPublishNodeConfig,
   SqlQueryNodeConfig,
   StartNodeConfig,
   StopAndErrorNodeConfig,
@@ -478,6 +479,20 @@ const CONFIG_SCHEMAS = {
     headers: z.record(z.string(), z.string()).optional(),
     argumentBindings: z.record(bindingKey, argBinding).optional(),
     failOnErrors: z.boolean().optional(),
+    timeoutMs: z.number().optional(),
+    costUsd: z.number().optional(),
+  }),
+  kafkaPublish: z.object({
+    connectionId: z.string(),
+    topic: z.string(),
+    value: z.unknown(),
+    key: z.string().optional(),
+    headers: z.record(z.string(), z.string()).optional(),
+    correlationId: z.string().optional(),
+    replyTopic: z.string().optional(),
+    // -1 is the DEFAULT (all in-sync replicas). 0 is expressible but never implied — a publish
+    // nobody acknowledges cannot be distinguished from one that failed.
+    acks: z.union([z.literal(-1), z.literal(0), z.literal(1)]).optional(),
     timeoutMs: z.number().optional(),
     costUsd: z.number().optional(),
   }),
@@ -971,6 +986,7 @@ export type McpToolConfig = z.infer<typeof CONFIG_SCHEMAS.mcpTool>;
 export type IntegrationConfig = z.infer<typeof CONFIG_SCHEMAS.integration>;
 export type HttpRequestConfig = z.infer<typeof CONFIG_SCHEMAS.httpRequest>;
 export type GraphQLConfig = z.infer<typeof CONFIG_SCHEMAS.graphQL>;
+export type KafkaPublishConfig = z.infer<typeof CONFIG_SCHEMAS.kafkaPublish>;
 export type SqlQueryConfig = z.infer<typeof CONFIG_SCHEMAS.sqlQuery>;
 export type SqlExecConfig = z.infer<typeof CONFIG_SCHEMAS.sqlExec>;
 export type RssReadConfig = z.infer<typeof CONFIG_SCHEMAS.rssRead>;
@@ -1045,6 +1061,7 @@ const _configParity: {
   integration: Exact<IntegrationConfig, IntegrationNodeConfig>;
   httpRequest: Exact<HttpRequestConfig, HttpRequestNodeConfig>;
   graphQL: Exact<GraphQLConfig, GraphQLNodeConfig>;
+  kafkaPublish: Exact<KafkaPublishConfig, KafkaPublishNodeConfig>;
   sqlQuery: Exact<SqlQueryConfig, SqlQueryNodeConfig>;
   sqlExec: Exact<SqlExecConfig, SqlExecNodeConfig>;
   firestoreQuery: Exact<FirestoreQueryConfig, FirestoreQueryNodeConfig>;
@@ -1104,6 +1121,7 @@ const _configParity: {
   integration: true,
   httpRequest: true,
   graphQL: true,
+  kafkaPublish: true,
   sqlQuery: true,
   sqlExec: true,
   firestoreQuery: true,

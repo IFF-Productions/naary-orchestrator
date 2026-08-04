@@ -19,6 +19,7 @@ export type NodeType =
   | "integration" // native provider action (GitHub/Jira/…) via a catalog + connection
   | "httpRequest" // calls a plain HTTP/REST endpoint; output is {status,headers,body}
   | "graphQL" // POSTs a GraphQL query/mutation; output is {data,errors,httpStatus}
+  | "kafkaPublish" // produces one message to a Kafka topic; output is {topic,partition,offset}
   | "sqlQuery" // runs a read-only query against a tenant DB; output is {rows,rowCount}
   | "sqlExec" // runs a WRITE (INSERT/UPDATE/DELETE) in a txn; output is {rowsAffected}
   | "firestoreQuery" // reads Cloud Firestore (get/list/query); output is {documents,count,truncated}

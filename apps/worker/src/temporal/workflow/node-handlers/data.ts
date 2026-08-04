@@ -19,6 +19,7 @@ import {
   callPoll,
   callHttpRequest,
   callGraphQL,
+  callKafkaPublish,
   callSqlQuery,
   callSqlExec,
   callFirestoreQuery,
@@ -100,6 +101,39 @@ export const handleGraphQL: NodeHandler = async ({
     errors: result.errors,
     httpStatus: result.httpStatus,
   } satisfies NodeOutputMap["graphQL"];
+  return { costUsd: result.costUsd };
+};
+
+export const handleKafkaPublish: NodeHandler = async ({
+  cfg,
+  ctx,
+  node,
+  metaFor,
+}) => {
+  // Everything determinable is resolved HERE (template substitution already happened upstream);
+  // the brokers, credentials and socket live in the activity. `value` is passed through as-is —
+  // the activity decides string-vs-JSON, so the workflow never has to serialize and stays
+  // byte-identical on replay.
+  const kafkaCfg = asNodeConfig(cfg, "kafkaPublish");
+  const result = await callKafkaPublish(
+    {
+      connectionId: kafkaCfg.connectionId,
+      topic: kafkaCfg.topic,
+      value: kafkaCfg.value,
+      key: kafkaCfg.key,
+      headers: kafkaCfg.headers,
+      correlationId: kafkaCfg.correlationId,
+      replyTopic: kafkaCfg.replyTopic,
+      acks: kafkaCfg.acks,
+      timeoutMs: kafkaCfg.timeoutMs,
+      costUsd: kafkaCfg.costUsd,
+    },
+    ctx.__input,
+    metaFor(node.id),
+  );
+  // {topic, partition, offset} — the message's identity, so a downstream node can correlate a
+  // reply without a lookup table.
+  ctx[node.id] = result.output satisfies NodeOutputMap["kafkaPublish"];
   return { costUsd: result.costUsd };
 };
 

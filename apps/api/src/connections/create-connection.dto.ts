@@ -22,6 +22,7 @@ const NON_URL_TYPES = [
   "signing",
   "smtp",
   "firestore",
+  "kafka",
 ];
 
 /**
@@ -64,6 +65,9 @@ export class CreateConnectionDto implements CreateConnectionInput {
       "mssql",
       "mysql",
       "firestore",
+      "kafka",
+      "kafka",
+      "kafka",
       "signing",
       "smtp",
     ],
@@ -78,6 +82,8 @@ export class CreateConnectionDto implements CreateConnectionInput {
     "mssql",
     "mysql",
     "firestore",
+    "kafka",
+    "kafka",
     "signing",
     "smtp",
   ])

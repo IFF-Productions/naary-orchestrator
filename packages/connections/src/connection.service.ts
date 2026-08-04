@@ -10,6 +10,7 @@ export type ConnectionType =
   | "mssql"
   | "mysql"
   | "firestore"
+  | "kafka"
   | "signing"
   | "smtp";
 export type AuthMode =
@@ -257,6 +258,71 @@ export async function resolveDbConnection(
   );
   if (!dsn) throw new MissingConnectionTokenError(connectionId);
   return { engine: conn.type as DbEngine, dsn };
+}
+
+/**
+ * A Kafka connection's broker list + credentials (#1086 slice 1).
+ *
+ * Stored as ONE encrypted JSON blob under the connection's secret, the same shape Firestore uses
+ * for its service-account JSON. Kafka has no standard DSN — brokers, SASL mechanism, username,
+ * password and TLS are independent knobs — so inventing a URL format here would be a parser we
+ * would then have to keep bug-compatible with ourselves forever.
+ */
+export interface KafkaConnectionConfig {
+  /** `host:port` list. At least one; the client discovers the rest of the cluster. */
+  brokers: string[];
+  ssl?: boolean;
+  sasl?: {
+    mechanism: "plain" | "scram-sha-256" | "scram-sha-512";
+    username: string;
+    password: string;
+  };
+  /** Sent to the broker for quota/logging attribution. */
+  clientId?: string;
+}
+
+/**
+ * Resolve a `kafka` connection's brokers + credentials. Same shape and invariants as
+ * {@link resolveDbConnection}: read here, used IN-ACTIVITY only, never returned to a caller
+ * boundary, never logged, never in workflow history (Tier-1 §4).
+ */
+export async function resolveKafkaConnection(
+  tenantId: string,
+  connectionId: string,
+  store: SecretStore = new SecretStore(),
+): Promise<KafkaConnectionConfig> {
+  const conn = await getPrisma().connection.findFirst({
+    where: { id: connectionId, tenantId },
+    select: { type: true, environmentId: true },
+  });
+  if (!conn) throw new Error(`Unknown connection '${connectionId}'`);
+  if (conn.type !== "kafka") {
+    throw new Error(`Connection '${connectionId}' is not a Kafka connection`);
+  }
+  const raw = await store.get(
+    tenantId,
+    conn.environmentId,
+    connectionSecretKey(connectionId),
+  );
+  if (!raw) throw new MissingConnectionTokenError(connectionId);
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    // Deliberately does not echo `raw` — it is the credential. The operator knows which
+    // connection they just saved; they do not need it read back to them to fix the JSON.
+    throw new Error(
+      `Connection '${connectionId}' has a malformed Kafka configuration (expected JSON).`,
+    );
+  }
+  const cfg = parsed as KafkaConnectionConfig;
+  if (!Array.isArray(cfg?.brokers) || cfg.brokers.length === 0) {
+    throw new Error(
+      `Connection '${connectionId}' has no Kafka brokers configured.`,
+    );
+  }
+  return cfg;
 }
 
 /**
