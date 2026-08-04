@@ -8,12 +8,17 @@ import {
   type OnModuleDestroy,
   type OnModuleInit,
 } from "@nestjs/common";
-import type {
-  Client,
-  Connection,
-  ScheduleOptionsAction,
+import {
+  ScheduleOverlapPolicy,
+  type Client,
+  type Connection,
+  type ScheduleOptionsAction,
 } from "@temporalio/client";
-import { RUN_GRAPH_WORKFLOW, TASK_QUEUE } from "@naary/contracts";
+import {
+  KAFKA_DRAIN_WORKFLOW,
+  RUN_GRAPH_WORKFLOW,
+  TASK_QUEUE,
+} from "@naary/contracts";
 import { getPrisma } from "@naary/db";
 import type { GraphDef } from "@naary/dsl";
 import { getBudget } from "@naary/usage";
@@ -266,6 +271,121 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
+  /**
+   * Keep a `kafkaTrigger` graph's interval Schedule in sync (#1086 slice 2). Mirror of
+   * syncPollSchedule, with two deliberate differences.
+   *
+   * 1. The action starts `kafkaDrain`, NOT `runGraph`. A poll trigger's firing IS the run; a Kafka
+   *    firing is a drain that may produce zero runs or fifty, each with its own message-derived id.
+   * 2. `overlap: SKIP` is set EXPLICITLY, and it is load-bearing rather than tidy. Two concurrent
+   *    drains are two members of the same consumer group — which triggers a rebalance, and which
+   *    makes the commit impossible: `admin.setOffsets` is refused while the group has a live
+   *    member ("The consumer group must have no running instances"). That was verified against a
+   *    real broker before this was built, not assumed from the docs.
+   *
+   * Same invariants as the poll path otherwise: delete-then-create so the schedule always reflects
+   * the latest graph, re-paused when the workflow is inactive in this env, best-effort for the
+   * caller. NOT part of the legacy-id reconcile: kafka ids have always contained the env segment,
+   * so `reconcileLegacyScheduleIds`'s filter can never match one — don't "fix" that later.
+   */
+  async syncKafkaSchedule(
+    tenantId: string,
+    environmentId: string,
+    workflowKey: string,
+    graph: GraphDef,
+  ): Promise<void> {
+    const start = graph.nodes.find((n) => n.id === graph.startNodeId);
+    if (!start || start.type !== "kafkaTrigger") return;
+    const cfg = (start.config ?? {}) as {
+      connectionId?: string;
+      topic?: string;
+      groupId?: string;
+      intervalSeconds?: number;
+      maxMessages?: number;
+      maxWaitMs?: number;
+      fromBeginning?: boolean;
+    };
+    // A drain with no connection/topic/group cannot do anything but fail every interval forever.
+    // Refusing to create the schedule is the quiet, correct answer — the save-gate already
+    // requires these, so reaching here means the graph was written straight to the DB.
+    if (
+      !cfg.connectionId?.trim() ||
+      !cfg.topic?.trim() ||
+      !cfg.groupId?.trim()
+    ) {
+      return;
+    }
+    // 10s floor rather than the poll path's 30s: latency IS the cost of the scheduled-drain
+    // design, and a broker poll is far cheaper than an HTTP fetch of someone else's site.
+    const everySeconds = Math.max(
+      10,
+      Math.floor(Number(cfg.intervalSeconds) || 30),
+    );
+    const snapshot = await this.graphs.getLatest(
+      tenantId,
+      environmentId,
+      workflowKey,
+    );
+    if (!snapshot) return;
+    const id = `kafka-${tenantId}-${environmentId}-${workflowKey}`;
+
+    await this.deleteHandleQuiet(id);
+    const budget = await getBudget(tenantId);
+    await this.client.schedule.create({
+      scheduleId: id,
+      spec: { intervals: [{ every: everySeconds * 1000 }] },
+      // See the docstring: two overlapping drains break the commit outright.
+      policies: { overlap: ScheduleOverlapPolicy.SKIP },
+      action: {
+        type: "startWorkflow",
+        workflowType: KAFKA_DRAIN_WORKFLOW,
+        taskQueue: TASK_QUEUE,
+        // Temporal appends the scheduled time, so each drain is its own execution.
+        workflowId: `kafkadrain-${tenantId}-${environmentId}-${workflowKey}`,
+        args: [
+          {
+            tenantId,
+            environmentId,
+            workflowKey,
+            graph: snapshot.graph,
+            graphContentHash: snapshot.contentHash,
+            graphVersion: snapshot.version,
+            connectionId: cfg.connectionId,
+            topic: cfg.topic,
+            groupId: cfg.groupId,
+            maxMessages: cfg.maxMessages,
+            maxWaitMs: cfg.maxWaitMs,
+            fromBeginning: cfg.fromBeginning,
+            perExecutionCapUsd: budget?.perExecutionCapUsd,
+            maxStepsPerRun: budget?.maxStepsPerRun ?? DEFAULT_MAX_STEPS_PER_RUN,
+          },
+        ],
+        memo: {
+          graphContentHash: snapshot.contentHash,
+          graphVersion: snapshot.version,
+        },
+      },
+    });
+    const paused = !(await this.graphs.isActive(
+      tenantId,
+      environmentId,
+      workflowKey,
+    ));
+    if (paused) await this.pauseHandle(id, true);
+    await getPrisma().schedule.upsert({
+      where: { id },
+      create: {
+        id,
+        tenantId,
+        environmentId,
+        workflowKey,
+        cron: `every ${everySeconds}s`,
+        paused,
+      },
+      update: { cron: `every ${everySeconds}s`, paused },
+    });
+  }
+
   /** The env's schedules, enriched with the next fire time from Temporal. */
   async list(tenantId: string, environmentId: string): Promise<ScheduleView[]> {
     const rows = await getPrisma().schedule.findMany({
@@ -319,6 +439,7 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
     for (const id of [
       `poll-${tenantId}-${environmentId}-${workflowKey}`,
       `cron-${tenantId}-${environmentId}-${workflowKey}`,
+      `kafka-${tenantId}-${environmentId}-${workflowKey}`,
     ]) {
       await this.deleteHandleQuiet(id);
     }

@@ -21,6 +21,11 @@ export const TASK_QUEUE_HEAVY = "orchestrator-heavy";
 /** Workflow type name — lets the client start runGraph by name if desired. */
 export const RUN_GRAPH_WORKFLOW = "runGraph";
 
+/** Workflow type name for the Kafka scheduled drain (#1086 slice 2) — what a kafkaTrigger
+ *  graph's interval Schedule starts. It is NOT runGraph: the drain launches one runGraph child
+ *  per message, so the schedule's action targets this instead. */
+export const KAFKA_DRAIN_WORKFLOW = "kafkaDrain";
+
 /** Workflow type name for the durable per-session chat workflow (design §2.1b, option A). */
 export const CHAT_SESSION_WORKFLOW = "chatSession";
 

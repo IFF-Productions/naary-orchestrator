@@ -30,6 +30,7 @@
     "@naary/temporal-config": "workspace:*",
     "@naary/usage": "workspace:*",
     "@temporalio/activity": "^1.21.1",
+    "@temporalio/common": "^1.21.1",
     "@temporalio/worker": "^1.21.1",
     "@temporalio/workflow": "^1.21.1",
     "ai": "7.0.40",

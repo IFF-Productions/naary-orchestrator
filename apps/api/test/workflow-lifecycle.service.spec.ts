@@ -21,6 +21,7 @@ const graphs = {
 const schedules = {
   syncPollSchedule: vi.fn(),
   syncCronSchedule: vi.fn(),
+  syncKafkaSchedule: vi.fn(),
   teardownForWorkflow: vi.fn(),
 };
 
@@ -31,6 +32,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   schedules.syncPollSchedule.mockResolvedValue(undefined);
   schedules.syncCronSchedule.mockResolvedValue(undefined);
+  schedules.syncKafkaSchedule.mockResolvedValue(undefined);
   schedules.teardownForWorkflow.mockResolvedValue(undefined);
   svc = new WorkflowLifecycleService(graphs as never, schedules as never);
 });
@@ -90,6 +92,7 @@ describe("saveWorkflow", () => {
     graphs.upsert.mockResolvedValue({ version: 1, contentHash: "h" });
     schedules.syncPollSchedule.mockRejectedValue(new Error("temporal down"));
     schedules.syncCronSchedule.mockRejectedValue(new Error("temporal down"));
+    schedules.syncKafkaSchedule.mockRejectedValue(new Error("temporal down"));
 
     await expect(
       svc.saveWorkflow("t-1", "env-1", "k", "K", GRAPH),

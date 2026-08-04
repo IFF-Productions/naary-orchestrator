@@ -349,6 +349,9 @@ importers:
       '@temporalio/activity':
         specifier: ^1.21.1
         version: 1.21.1
+      '@temporalio/common':
+        specifier: ^1.21.1
+        version: 1.21.1
       '@temporalio/worker':
         specifier: ^1.21.1
         version: 1.21.1(esbuild@0.28.1)(lightningcss@1.33.0)(postcss@8.5.23)(tslib@2.8.1)

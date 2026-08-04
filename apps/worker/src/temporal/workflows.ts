@@ -24,3 +24,8 @@ export {
   EVAL_CASE_TIMEOUT_MS,
 } from "./workflow/eval-run";
 export type { EvalRunInput, EvalRunResult } from "./workflow/eval-run";
+// Kafka scheduled drain (#1086 slice 2): one run per message, started as ABANDONed children with
+// a workflowId derived from (topic, partition, offset) so a redelivery is deduped by Temporal.
+// Registered by the name "kafkaDrain".
+export { kafkaDrain, kafkaRunId } from "./workflow/kafka-drain";
+export type { KafkaDrainInput, KafkaDrainResult } from "./workflow/kafka-drain";
