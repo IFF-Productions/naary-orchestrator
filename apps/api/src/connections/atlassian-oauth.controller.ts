@@ -11,6 +11,7 @@ import {
 import { ApiBearerAuth, ApiOperation, ApiResponse } from "@nestjs/swagger";
 import {
   ConnectionService,
+  atlassianOAuthConfig,
   completeAtlassianConsent,
   startAtlassianConsent,
 } from "@naary/connections";
@@ -18,9 +19,11 @@ import type { Response } from "express";
 import { Public } from "../auth/public.decorator";
 import { ApiEndpoint } from "../swagger/api-decorators";
 import { connectReturnUrl } from "./connect-return";
-import { OAuthStartResponse } from "./connection.response";
+import {
+  AtlassianOAuthConfigResponse,
+  OAuthStartResponse,
+} from "./connection.response";
 import { atlassianOauthRedirectUri } from "../config";
-import { atlassianOAuthConfig } from "@naary/connections";
 
 /**
  * Atlassian OAuth 2.0 3LO connect flow (docs/design/APP-AUTH.md §3b). Parallel to
@@ -54,6 +57,7 @@ export class AtlassianOAuthController {
   @ApiEndpoint({
     summary:
       "Atlassian 3LO setup values (callback URL + whether the app is configured)",
+    ok: AtlassianOAuthConfigResponse,
   })
   @Get("tenants/:id/connections/atlassian/oauth/config")
   oauthConfig(@Param("id") _tenantId: string): {

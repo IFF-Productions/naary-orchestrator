@@ -560,7 +560,13 @@ export function AtlassianAppForm({ tenant }: { tenant: string }) {
               onClick={() => {
                 void navigator.clipboard
                   ?.writeText(setup.redirectUri)
-                  .then(() => setCopied(true))
+                  .then(() => {
+                    setCopied(true);
+                    // Revert, so a SECOND click confirms too. A label stuck on "Copied" stops
+                    // being feedback and becomes decoration — and someone re-copying after
+                    // editing the Atlassian app gets no signal that anything happened.
+                    window.setTimeout(() => setCopied(false), 2000);
+                  })
                   // Clipboard access can be denied; the field is selectable either way, so a
                   // failure must not look like the value is wrong.
                   .catch(() => undefined);
