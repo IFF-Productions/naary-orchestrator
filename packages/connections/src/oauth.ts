@@ -426,6 +426,27 @@ export interface DiscoveredMetadata {
 }
 
 /**
+ * What a non-2xx on a discovery document actually tells the user.
+ *
+ * The first version said "this server doesn't advertise OAuth" for every status, which is true of a
+ * 404 and false of the rest: a 500 means the server may advertise OAuth perfectly well and be
+ * having a bad minute, and a 401/403 means the document exists but is gated — a configuration
+ * mistake on their side, with a specific fix. Three different next actions, so three sentences.
+ */
+function describeDiscoveryStatus(status: number): string {
+  if (status === 404 || status === 410) {
+    return "this server doesn't advertise OAuth";
+  }
+  if (status === 401 || status === 403) {
+    return "the metadata document is access-controlled; it has to be publicly readable";
+  }
+  if (status >= 500) {
+    return "the server failed to serve its own metadata — this may be temporary";
+  }
+  return "that isn't a usable metadata response";
+}
+
+/**
  * Fetch one discovery document, insisting it actually IS one.
  *
  * `.json()` on a 404 was the hole: a server that answers HTML gets a parse error (fine), but one
@@ -444,16 +465,21 @@ async function readDiscoveryDoc(
     res = await fetchFn(url);
   } catch (e) {
     if (!opts.required) return null;
+    // Never reached it at all — DNS, TLS, a reset. Their side, and possibly momentary.
     throw new OAuthDiscoveryError(
       origin,
       `it could not be reached (${(e as Error).message})`,
+      true,
     );
   }
   if (!res.ok) {
     if (!opts.required) return null;
     throw new OAuthDiscoveryError(
       origin,
-      `${url} answered ${res.status} — this server doesn't advertise OAuth`,
+      `${url} answered ${res.status} — ${describeDiscoveryStatus(res.status)}`,
+      // A 5xx is the server's problem and may pass; everything else is a settled answer.
+      res.status >= 500,
+      res.status,
     );
   }
   try {

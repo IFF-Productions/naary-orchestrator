@@ -1,4 +1,5 @@
 import {
+  BadGatewayException,
   BadRequestException,
   Controller,
   Get,
@@ -93,7 +94,13 @@ export class OAuthController {
       // NAARY-API-4) because a 404'd discovery document became the string "undefined" and the
       // egress guard, last to touch it, got the blame.
       if (e instanceof OAuthDiscoveryError) {
-        throw new BadRequestException(e.message);
+        // 502 when the failure is THEIRS and may pass (a 5xx, a reset): "we couldn't reach them"
+        // and "you asked for the wrong thing" are different sentences, and only one of them is
+        // worth retrying. A 400 on an upstream outage tells the user to change a request that was
+        // fine.
+        throw e.transient
+          ? new BadGatewayException(e.message)
+          : new BadRequestException(e.message);
       }
       throw e;
     }

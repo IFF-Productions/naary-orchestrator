@@ -514,3 +514,61 @@ describe("discoverOAuthMetadata — failing honestly (Sentry NAARY-API-4)", () =
     expect(meta.tokenEndpoint).toBe("https://mcp.example.com/token");
   });
 });
+
+/**
+ * The message has to match the STATUS, not merely beat the old one.
+ *
+ * Review caught this: the first version appended "this server doesn't advertise OAuth" to every
+ * non-2xx. True of a 404; false of a 500 (the server may advertise it fine and be down) and of a
+ * 401 (the document exists but is gated). Three different next actions for the reader, so three
+ * sentences — plus `transient`, so the API can answer an upstream outage with a 502 instead of
+ * blaming the caller for a request that was correct.
+ */
+describe("discoverOAuthMetadata — the status decides the sentence", () => {
+  const status = (code: number) =>
+    ({
+      ok: false,
+      status: code,
+      json: async () => ({}),
+    }) as unknown as Response;
+
+  const discoverWith = (code: number) =>
+    discoverOAuthMetadata(
+      "https://mcp.example.com",
+      (async () => status(code)) as never,
+      assertEgress as never,
+    ).catch((e) => e);
+
+  it("404 is definitive: the server doesn't do OAuth, and retrying won't change that", async () => {
+    const err = await discoverWith(404);
+    expect(err.message).toContain("doesn't advertise OAuth");
+    expect(err.transient).toBe(false);
+  });
+
+  it("500 is THEIR outage — not the caller's mistake, and possibly momentary", async () => {
+    const err = await discoverWith(500);
+    expect(err.message).toContain("may be temporary");
+    // The bit the API turns into a 502 rather than a 400.
+    expect(err.transient).toBe(true);
+    expect(err.upstreamStatus).toBe(500);
+    expect(err.message).not.toContain("doesn't advertise OAuth");
+  });
+
+  it("401 means the document is gated — a fixable misconfiguration, named as one", async () => {
+    const err = await discoverWith(401);
+    expect(err.message).toContain("publicly readable");
+    expect(err.transient).toBe(false);
+  });
+
+  it("an unreachable server is transient too — a reset is not a verdict", async () => {
+    const err = await discoverOAuthMetadata(
+      "https://mcp.example.com",
+      (async () => {
+        throw new Error("ECONNRESET");
+      }) as never,
+      assertEgress as never,
+    ).catch((e) => e);
+    expect(err).toBeInstanceOf(OAuthDiscoveryError);
+    expect(err.transient).toBe(true);
+  });
+});
