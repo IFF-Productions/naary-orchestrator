@@ -64,7 +64,12 @@ export class OAuthController {
         "Atlassian connections use their own consent flow — POST /tenants/:id/connections/atlassian/oauth/start.",
       );
     }
-    if (!conn.serverUrl?.trim()) {
+    // Trimmed ONCE and then used — not tested for emptiness and passed raw. `startConsent` stores
+    // this verbatim as the state's `resource` and puts it in the authorize URL, so surrounding
+    // whitespace on an existing row would survive the guard and then break consent somewhere that
+    // names neither the value nor this endpoint.
+    const serverUrl = conn.serverUrl?.trim();
+    if (!serverUrl) {
       throw new BadRequestException(
         "This connection has no server URL, so there is nothing to discover OAuth metadata from.",
       );
@@ -76,7 +81,7 @@ export class OAuthController {
       tenantId,
       environmentId: conn.environmentId,
       connectionId,
-      serverUrl: conn.serverUrl,
+      serverUrl,
       redirectUri,
     });
   }

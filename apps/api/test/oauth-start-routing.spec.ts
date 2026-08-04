@@ -102,6 +102,21 @@ describe("POST /connections/:id/oauth/start", () => {
     );
   });
 
+  it("trims the server URL rather than passing the row's whitespace through", async () => {
+    // `startConsent` stores this verbatim as the state's `resource` AND puts it in the authorize
+    // URL, so a stray space on an existing row would pass the emptiness guard and then break
+    // consent somewhere that names neither the value nor this endpoint.
+    const ctl = controllerFor({
+      type: "custom",
+      environmentId: "e1",
+      serverUrl: "  https://mcp.example.com  ",
+    });
+    await ctl.start("t1", "c1");
+    expect(startConsent).toHaveBeenCalledWith(
+      expect.objectContaining({ serverUrl: "https://mcp.example.com" }),
+    );
+  });
+
   it("a missing connection is still a 404, not a 400", async () => {
     const err = await failure(controllerFor(null).start("t1", "nope"));
     expect(err.getStatus()).toBe(404);
