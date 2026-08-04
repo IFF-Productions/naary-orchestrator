@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Controller,
   Get,
   Logger,
@@ -48,6 +49,26 @@ export class OAuthController {
   ): Promise<{ authorizeUrl: string }> {
     const conn = await this.connections.getById(tenantId, connectionId);
     if (!conn) throw new NotFoundException("Unknown connection");
+    // This route is DISCOVERY-based consent: `.well-known` metadata + dynamic client registration
+    // against the connection's own serverUrl. That is right for an arbitrary MCP server and
+    // impossible for a provider with a fixed platform app, which has its own route (Atlassian's
+    // `/connections/atlassian/oauth/start`).
+    //
+    // Sent here anyway, this used to reach `discoverOAuthMetadata` with an *.atlassian.net URL (or
+    // an empty one) and die inside a fetch/URL parse — a 500 that says nothing, on the one screen
+    // someone is already stuck on. The SPA no longer misroutes it (#1085), but an endpoint whose
+    // failure mode for a wrong-typed connection is a 500 will be found again by an older tab, a
+    // cached bundle or a script; answering with the actual reason costs one branch.
+    if (conn.type === "atlassian") {
+      throw new BadRequestException(
+        "Atlassian connections use their own consent flow — POST /tenants/:id/connections/atlassian/oauth/start.",
+      );
+    }
+    if (!conn.serverUrl?.trim()) {
+      throw new BadRequestException(
+        "This connection has no server URL, so there is nothing to discover OAuth metadata from.",
+      );
+    }
     const redirectUri = oauthRedirectUri();
     // Consent stores the refresh token in the connection's OWN env (Slice 5) — the callback is
     // @Public and can't send X-Environment-Id, so the env rides in the (encoded) state.
