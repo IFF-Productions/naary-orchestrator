@@ -8,6 +8,7 @@ import {
 import { getPrisma } from "@naary/db";
 import type { Principal } from "../auth/tenant.decorator";
 import { AuditService } from "../audit/audit.service";
+import { ApiTokenService } from "../auth/api-token.service";
 import { CliRefreshTokenService } from "../auth/cli-refresh-token.service";
 import { appBaseUrl } from "../connections/connect-return";
 import {
@@ -87,6 +88,9 @@ export class MembersService {
     /** #1117 — offboarding must kill the user's CLI rotation families (see
      *  {@link revokeCliSessions}). From the @Global AuthModule. */
     private readonly cliSessions: CliRefreshTokenService,
+    /** …and the LIVE access token those families already minted (#1118's documented residual).
+     *  Same module, same method — see {@link revokeCliSessions}. */
+    private readonly apiTokens: ApiTokenService,
   ) {}
 
   /**
@@ -353,12 +357,13 @@ export class MembersService {
     // window, not a single-process nicety. Tenant-wide because a removal also changes what
     // the group's REMAINING subjects resolve to.
     this.permissions.invalidateTenant(tenantId);
-    // …and their CLI rotation families (#1117). A `CliRefreshToken` is keyed to a userId with a
-    // 90-day absolute cap, so it OUTLIVED the Membership just deleted: a removed user kept
-    // rotating for up to a quarter, collecting a fresh 12h owner-stamped `nry_` token each time,
-    // which is precisely what "revocation is immediate" above claimed did not happen. The two
-    // in-memory invalidations run first because they are synchronous and free; this one is a DB
-    // round-trip and no cache depends on it.
+    // …and their CLI session — both halves (#1117 + #1118's residual). A `CliRefreshToken` is
+    // keyed to a userId with a 90-day absolute cap, so it OUTLIVED the Membership just deleted: a
+    // removed user kept rotating for up to a quarter, collecting a fresh 12h owner-stamped `nry_`
+    // token each time, which is precisely what "revocation is immediate" above claimed did not
+    // happen. The `nry_` token already in their hand is deleted too, now that `ApiToken.userId`
+    // says whose it is. The two in-memory invalidations run first because they are synchronous and
+    // free; this one is a DB round-trip and no cache depends on it.
     await this.revokeCliSessions(tenantId, caller, userId, "removed");
 
     // Everything past this point is REPORTING. The removal has committed; findHeldApprovals
@@ -378,14 +383,28 @@ export class MembersService {
   }
 
   /**
-   * Kill the user's CLI rotation families in this workspace (#1117) — the offboarding half of
-   * "revocation is immediate", for both {@link removeMember} and a demotion in
-   * {@link changeRole}.
+   * Kill the user's CLI session in this workspace (#1117) — the offboarding half of "revocation is
+   * immediate", for both {@link removeMember} and a demotion in {@link changeRole}.
    *
-   * ONE PATH. It delegates to `CliRefreshTokenService.revokeUserSessions`, which resolves the
-   * user's live families and revokes each through the same `revokeFamily` reuse detection uses —
-   * there is deliberately no second `cliRefreshToken.updateMany` in this file. Tenant-scoped, so
-   * a consultant removed from one workspace keeps their CLI session in the others.
+   * BOTH HALVES OF THE CREDENTIAL, because a CLI session is two rows:
+   *  1. the rotation FAMILIES (`CliRefreshTokenService.revokeUserSessions`) — the 90-day half.
+   *     Revoking it means the session can mint nothing new.
+   *  2. the LIVE ACCESS TOKEN it already minted (`ApiTokenService.revokeUserCliTokens`) — the 12h
+   *     half, and the residual #1118 left open with no way to close it: `ApiToken` had no owner
+   *     column, so the row could not be attributed to this user and deleting by the `naary CLI`
+   *     label would have signed out everyone else in the workspace. `ApiToken.userId` (written at
+   *     `/auth/cli/exchange` and `/auth/cli/refresh`, NULL on every Settings/CI token) is what
+   *     makes this deletion attributable.
+   *
+   * ORDER IS LOAD-BEARING: families FIRST. If the second call fails we have still closed the
+   * 90-day window and left only a ≤12h one that cannot renew itself — the reverse ordering would
+   * fail the other way round, deleting one token while the family keeps issuing replacements.
+   *
+   * ONE PATH EACH. It delegates rather than issuing its own writes — `revokeUserSessions` resolves
+   * the user's live families and revokes each through the same `revokeFamily` reuse detection uses,
+   * and `revokeUserCliTokens` owns the only read of `ApiToken.userId`. There is deliberately no
+   * `cliRefreshToken.updateMany` and no `apiToken.deleteMany` in this file. Both are tenant-scoped,
+   * so a consultant removed from one workspace keeps their CLI session in the others.
    *
    * NON-FATAL, DELIBERATELY, and it is the ordering that earns it. Both callers have already
    * COMMITTED their write when they get here, so throwing would report a failure for a removal
@@ -398,11 +417,12 @@ export class MembersService {
    *
    * A failure is therefore not swallowed quietly: it logs at ERROR **and** writes an AuditEvent,
    * because the workspace-visible record is the only surface a directory-sync caller leaves
-   * behind, and "the family is still live" is exactly the state someone must be able to find
-   * later. Retrying is a re-run of the same change — re-applying the removal, or the demotion.
-   * The audit write is itself fire-and-forget — an audit
-   * row must never be the reason a completed removal reports an error, same as
-   * {@link recordStranded}.
+   * behind, and "their CLI session may still work" is exactly the state someone must be able to
+   * find later. The message does NOT name which half failed, because the catch cannot tell — and
+   * either way the operator action is the same: re-apply the change, which re-runs both. Both
+   * calls are idempotent, so a retry over an already-revoked family or an already-deleted token is
+   * a no-op. The audit write is itself fire-and-forget — an audit row must never be the reason a
+   * completed removal reports an error, same as {@link recordStranded}.
    */
   private async revokeCliSessions(
     tenantId: string,
@@ -415,17 +435,21 @@ export class MembersService {
         tenantId,
         userId,
       );
-      if (families > 0) {
+      // The 12h half. AFTER the families (see the docstring) and inside the same try, so a
+      // failure here is reported and audited exactly like a failed family revoke.
+      const access = await this.apiTokens.revokeUserCliTokens(tenantId, userId);
+      if (families > 0 || access > 0) {
         this.logger.log(
           `Revoked ${families} CLI refresh famil${families === 1 ? "y" : "ies"} ` +
-            `(${tokens} live token(s)) for a ${verb} member of tenant=${tenantId}`,
+            `(${tokens} live token(s)) and deleted ${access} live CLI access token(s) ` +
+            `for a ${verb} member of tenant=${tenantId}`,
         );
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       this.logger.error(
         `CLI session revocation FAILED for a ${verb} member of tenant=${tenantId}: ${message}. ` +
-          `Their CLI refresh family is still live — re-apply the change to retry.`,
+          `Their CLI session may still work — re-apply the change to retry.`,
       );
       void this.audit
         .record({

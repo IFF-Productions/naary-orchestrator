@@ -52,6 +52,13 @@ function matches(row: Row, where: Row | undefined): boolean {
         return a === b;
       }
       if ("in" in c && Array.isArray(c.in)) return c.in.includes(row[k]);
+      // `label: { startsWith: "naary CLI" }` — the CLI-token filter on the access-token delete.
+      if ("startsWith" in (c as Row)) {
+        const want = (c as { startsWith: unknown }).startsWith;
+        return typeof row[k] === "string" && typeof want === "string"
+          ? (row[k] as string).startsWith(want)
+          : false;
+      }
       // A relation filter: recurse into the nested row the fixture carries.
       const nested = row[k];
       if (nested && typeof nested === "object") {
@@ -187,11 +194,21 @@ const db = {
     rotatedAt: null,
     revokedAt: null,
   }),
+  // #1118's residual — the 12h `nry_` access token a CLI session is actually holding. Same
+  // unique (`tokenHash`) the real `verify()` looks up by, so the de-provision test below can end
+  // at a real 401 rather than at a row count.
+  apiToken: table([], [["id"], ["tokenHash"]], {
+    lastUsedAt: null,
+    expiresAt: null,
+    environmentId: null,
+    userId: null,
+  }),
   $transaction: vi.fn(async (ops: Promise<unknown>[]) => Promise.all(ops)),
 };
 
 vi.mock("@naary/db", () => ({ getPrisma: () => db }));
 
+import { ApiTokenService } from "../src/auth/api-token.service";
 import { CliRefreshTokenService } from "../src/auth/cli-refresh-token.service";
 import { NO_HELD_APPROVALS } from "../src/executions/executions.approval-holds";
 import { MembersService } from "../src/members/members.service";
@@ -214,6 +231,10 @@ const audit = {
  *  rotation families, and that only means anything if a later rotate() is refused. */
 const cliSessions = new CliRefreshTokenService();
 
+/** REAL for the same reason (#1118's residual): the de-provision must also delete the live `nry_`
+ *  ACCESS token, and that only means anything if a later `verify()` returns null. */
+const apiTokens = new ApiTokenService();
+
 const members = new MembersService(
   memberships as never,
   mailer as never,
@@ -221,6 +242,7 @@ const members = new MembersService(
   executions as never,
   audit as never,
   cliSessions,
+  apiTokens,
 );
 const users = new ScimUsersService();
 const provisioning = new ScimProvisioningService(
@@ -254,6 +276,7 @@ function seed(): void {
     db.scimIdentity,
     db.tenantSettings,
     db.cliRefreshToken,
+    db.apiToken,
   ]) {
     t.rows.length = 0;
     for (const fn of Object.values(t)) {
@@ -452,6 +475,47 @@ describe("de-provisioning routes through MembersService.removeMember", () => {
     ).not.toHaveLength(0);
     // Tenant B never asked for this and must be untouched.
     expect((await cliSessions.rotate(inB.refreshToken)).ok).toBe(true);
+  });
+
+  /**
+   * #1118's residual, on the same unwatched path. Killing the family only stops the session
+   * getting a NEW token; the one already in the terminated employee's `~/.naary/config.json`
+   * authenticated for up to 12 more hours. This ends at `verify()` — the single resolution path
+   * REST, /api/v1 and MCP all go through — so it asserts the token is REJECTED.
+   *
+   * The negative half uses this file's trap again, plus the one that actually discriminates: an
+   * UNOWNED CLI-labelled token (what every pre-migration row, and every row an old image mints
+   * mid-rollout, looks like) must survive, because a delete scoped by label alone would take it.
+   */
+  it("deletes the subject's live CLI ACCESS token — and no one else's", async () => {
+    const mine = await apiTokens.mint(
+      "tenant-A",
+      "naary CLI — laptop",
+      new Date(Date.now() + 12 * 60 * 60 * 1000),
+      "uid-shared-a",
+    );
+    const theirs = await apiTokens.mint(
+      "tenant-B",
+      "naary CLI — laptop",
+      new Date(Date.now() + 12 * 60 * 60 * 1000),
+      "uid-shared-b",
+    );
+    // Pre-migration / old-image row: CLI label, NO owner. Same workspace as the removal.
+    const legacy = await apiTokens.mint("tenant-A", "naary CLI — oldhost");
+    // A workspace capability, not a person's session.
+    const ci = await apiTokens.mint("tenant-A", "ci");
+    for (const t of [mine, theirs, legacy, ci]) {
+      expect(await apiTokens.verify(t.token)).not.toBeNull();
+    }
+
+    const aId = await idFor("tenant-A", "shared@x.example");
+    await provisioning.deprovision(CONN_A, aId);
+
+    expect(await apiTokens.verify(mine.token)).toBeNull();
+    // …and nothing else moved.
+    expect(await apiTokens.verify(theirs.token)).not.toBeNull();
+    expect(await apiTokens.verify(legacy.token)).not.toBeNull();
+    expect(await apiTokens.verify(ci.token)).not.toBeNull();
   });
 
   it("scopes the group delete by tenant, never by uid alone", async () => {

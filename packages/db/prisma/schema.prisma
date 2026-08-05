@@ -35,12 +35,40 @@ model ApiToken {
   // one path, so every surface inherits expiry. Evaluated server-side; the client's clock is never
   // consulted. Nullable and expand-only, so the migration is safe under a rolling deploy.
   expiresAt  DateTime?
+  // The Firebase uid this token was minted FOR (#1078 slice 3 / #1117 follow-up). Set ONLY by the
+  // CLI handshake — `/auth/cli/exchange` and `/auth/cli/refresh` — so a CLI access token is
+  // attributable to the human whose browser approved it, and offboarding can delete it instead of
+  // waiting out its 12h `expiresAt`.
+  //
+  // NULL for everything else, permanently and by design: a Settings- or CI-minted token is a
+  // WORKSPACE capability, not a person's session, and it has always survived member removal. NULL
+  // also covers every token minted before this column existed — there is nothing to backfill it
+  // TO, so there is no backfill.
+  //
+  // NOT a relation and NOT a foreign key: `Membership` is the (userId, tenantId) authority and a
+  // removal DELETES it, which would either block this delete or null the column out from under
+  // the revocation that needs it. A bare uid, scoped by `tenantId` at every read, is the right
+  // shape — the same one `CliRefreshToken.userId` and `GroupMember.userId` use.
+  //
+  // Deliberately NOT returned by `ApiTokenService.verify()`: if it reached the AuthGuard's `nry_`
+  // branch as `principal.userId`, a CLI token would satisfy `CliAuthController.assertMayApprove`
+  // and could approve a login that mints another CLI token — self-replication. It is a
+  // REVOCATION key, never an identity.
+  userId     String?
 
   // Group membership as an RBAC subject (RBAC-GROUPS.md §4a): a restricted token's grants
   // resolve through these joins. Deleting the token cascades its rows.
   groupMemberships GroupTokenMember[]
 
+  // Kept DELIBERATELY, even though the composite below subsumes it as a prefix. Dropping an index
+  // is a separate change with its own blast radius (this is the index every tenant-scoped token
+  // read has planned against since the table existed), and it does not belong in an expand-only
+  // migration whose whole claim is that the old image is unaffected.
   @@index([tenantId])
+  // The offboarding read: "this user's CLI tokens in THIS workspace". Tenant-first so it is also a
+  // usable prefix for the plain `tenantId` lookups; rows with a NULL userId are simply never
+  // matched by it, which is the point.
+  @@index([tenantId, userId])
 }
 
 // A rotating CLI refresh token (design #1078 §4, slice 2).

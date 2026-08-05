@@ -10,8 +10,9 @@ import { MembersService } from "./members.service";
   // Temporal client, and this is a read of paused-run state. AuditService arrives from the
   // @Global AuditModule (members-di.spec.ts pins both).
   //
-  // AuthModule for CliRefreshTokenService (#1117), which offboarding uses to kill the user's CLI
-  // rotation families. It is @Global, so the import line is not strictly required in the app's
+  // AuthModule for CliRefreshTokenService (#1117) and ApiTokenService (#1118's residual), which
+  // offboarding uses to kill the user's CLI rotation families AND delete the live access token
+  // they already minted. It is @Global, so the import line is not strictly required in the app's
   // graph — it is here so the dependency is VISIBLE and so any module graph that includes
   // MembersModule (members-di.spec.ts) resolves it. No cycle: AuthModule has no imports of its
   // own, and Nest instantiates it once, so its APP_GUARD is not registered twice.

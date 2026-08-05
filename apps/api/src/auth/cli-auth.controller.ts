@@ -217,6 +217,11 @@ export class CliAuthController {
       claim.tenantId,
       claim.label,
       new Date(),
+      // The uid of the human who approved this login in a browser (`CliAuthRequestService.claim`
+      // types it non-nullable on the approved branch, and `approve` only ever writes it from a
+      // guard-resolved principal). Stamping it here is what makes the minted token revocable by
+      // `MembersService` — see ApiTokenService.revokeUserCliTokens.
+      claim.userId,
     );
     const refresh = await this.refreshTokens.issue(
       claim.tenantId,
@@ -248,14 +253,21 @@ export class CliAuthController {
    * owners `AuthGuard` still backfills lazily (auth.guard.ts) can have NO Membership row at the
    * instant they refresh; a fail-closed read here would lock exactly them out of the CLI.
    *
-   * TWO RESIDUALS, both bounded and neither a rotation problem:
-   *  - the ACCESS token already minted. It is an `nry_` ApiToken with a 12h `expiresAt` and no
-   *    `userId` column, so it cannot be attributed to the removed user and is not deleted; it
-   *    stops working when it expires. Closing that window needs an owner column on ApiToken,
-   *    written at exchange + refresh — a schema change, deliberately not smuggled in here.
-   *  - a user offboarded by a path that does not delete a Membership. There is none today:
-   *    `removeMember` is the only `membership.deleteMany` in the codebase, and SCIM
-   *    de-provisioning routes through it.
+   * THE ACCESS TOKEN IS NOW REVOKED TOO. That was the first of the two residuals this comment
+   * used to list, and it is closed: `ApiToken.userId` is the nullable owner column #1118 spelled
+   * out, stamped by BOTH token-minting paths — the exchange above and `mintAccessToken` below, so
+   * a refreshed session does not launder an owned token into an unowned one — and read by
+   * `ApiTokenService.revokeUserCliTokens`, which `MembersService` calls alongside
+   * `revokeUserSessions`. A removed member's live `nry_` token is deleted, not merely starved of
+   * successors, so `verify()` 401s it on the next request instead of at the 12h mark.
+   *
+   * It is NOT surfaced as identity: `verify()` deliberately does not return `userId`, because a
+   * principal carrying one would satisfy `assertMayApprove` and let a CLI token approve a login
+   * that mints another CLI token. The column revokes; it never authorizes.
+   *
+   * ONE RESIDUAL, bounded and not a rotation problem: a user offboarded by a path that does not
+   * delete a Membership. There is none today — `removeMember` is the only `membership.deleteMany`
+   * in the codebase, and SCIM de-provisioning routes through it.
    *
    * #1078 §5's Settings surface ("list CLI sessions… with a revoke that kills the family") and
    * slice 4's `naary logout` are still outstanding — both are callers of the same
@@ -288,6 +300,10 @@ export class CliAuthController {
       // and these are exactly the rows that would otherwise pile up, two per day per session.
       `${CLI_TOKEN_LABEL_STEM} session`,
       now,
+      // The owner IS carried on the refresh row (a family never spans users), so a refreshed
+      // session stays as revocable as the one the exchange minted. Without this the very first
+      // refresh would launder an owned token into an unowned one.
+      rotated.userId,
     );
     return {
       status: "authorized",
@@ -310,9 +326,13 @@ export class CliAuthController {
     tenantId: string,
     label: string,
     now: Date,
+    /** The uid this session belongs to. REQUIRED here (unlike on `mint`, where it is optional so
+     *  Settings/CI tokens stay unowned): every token this method produces is a person's CLI
+     *  session, and one minted without an owner is one member removal cannot revoke. */
+    userId: string,
   ): Promise<{ token: string; expiresAt: Date }> {
     const expiresAt = new Date(now.getTime() + CLI_ACCESS_TOKEN_TTL_MS);
-    const minted = await this.tokens.mint(tenantId, label, expiresAt);
+    const minted = await this.tokens.mint(tenantId, label, expiresAt, userId);
     await this.tokens
       .pruneExpiredCliTokens(tenantId, now)
       .catch((err) =>
