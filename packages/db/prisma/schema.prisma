@@ -90,6 +90,11 @@ model CliRefreshToken {
   // Rotation lineage. Every successor of the token minted at login carries the SAME familyId, so
   // reuse detection can kill the lineage rather than only the leaked copy.
   familyId  String
+  // Device hint for the Settings session list (#1078 §5): the `naary CLI — <sanitized hostname>`
+  // label the handshake built, copied here at login and INHERITED by every successor. Nullable
+  // because rows minted before this column existed have none — the UI degrades to "Unknown device"
+  // rather than pretending. It is a DISPLAY string only; nothing authenticates on it.
+  label     String?
   createdAt DateTime  @default(now())
   // Absolute cap (90 days), set once at login and INHERITED unchanged by every successor —
   // re-deriving it on each rotation would make "90-day absolute" unbounded.

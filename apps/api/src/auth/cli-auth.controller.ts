@@ -223,9 +223,13 @@ export class CliAuthController {
       // `MembersService` — see ApiTokenService.revokeUserCliTokens.
       claim.userId,
     );
+    // The device label rides along onto the refresh family, which is what Settings groups and names
+    // its session rows by (#1078 §5) — a session with no device hint is one nobody revokes.
     const refresh = await this.refreshTokens.issue(
       claim.tenantId,
       claim.userId,
+      new Date(),
+      claim.label,
     );
     return {
       status: "authorized",
@@ -269,9 +273,9 @@ export class CliAuthController {
    * delete a Membership. There is none today — `removeMember` is the only `membership.deleteMany`
    * in the codebase, and SCIM de-provisioning routes through it.
    *
-   * #1078 §5's Settings surface ("list CLI sessions… with a revoke that kills the family") and
-   * slice 4's `naary logout` are still outstanding — both are callers of the same
-   * `revokeFamily`/`revokeUserSessions` pair, not new mechanism.
+   * #1078 §5's Settings surface ("list CLI sessions… with a revoke that kills the family") now
+   * exists as `CliSessionsController`, and slice 4's `naary logout` is still outstanding — both are
+   * callers of the same `revokeFamily`/`revokeUserSessions` pair, not new mechanism.
    */
   @Public()
   @Throttle({ default: { limit: 30, ttl: 60_000 } })
@@ -294,11 +298,13 @@ export class CliAuthController {
     const now = new Date();
     const access = await this.mintAccessToken(
       rotated.tenantId,
-      // The original device label is not carried on the refresh row, so a refreshed session shows
-      // as a CLI session without the hostname rather than borrowing another device's name. It
-      // still starts with CLI_TOKEN_LABEL_STEM, which is what the expired-token sweep matches —
-      // and these are exactly the rows that would otherwise pile up, two per day per session.
-      `${CLI_TOKEN_LABEL_STEM} session`,
+      // The family's OWN device label (#1078 §5 put it on the refresh row), so a refreshed session
+      // keeps the name of the machine that logged in instead of degrading to an anonymous row on
+      // its first refresh. A family minted before that column existed has none and falls back —
+      // never to another device's name. Either way it starts with CLI_TOKEN_LABEL_STEM, which is
+      // what the expired-token sweep matches; these are exactly the rows that would otherwise pile
+      // up, two per day per session.
+      rotated.label ?? `${CLI_TOKEN_LABEL_STEM} session`,
       now,
       // The owner IS carried on the refresh row (a family never spans users), so a refreshed
       // session stays as revocable as the one the exchange minted. Without this the very first

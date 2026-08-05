@@ -718,6 +718,25 @@ export interface ApiTokenRow {
   groupCount: number;
 }
 
+/**
+ * One CLI session (`GET /cli-sessions`) — a rotation FAMILY, not a token (#1078 §5).
+ *
+ * The server groups by family before it answers, so this is one entry per DEVICE however many
+ * times that device has refreshed. Only the caller's own sessions in the active workspace are
+ * ever returned, and nothing here is a credential: `familyId` is an opaque handle.
+ */
+export interface CliSession {
+  familyId: string;
+  /** `naary CLI — <hostname>`, or null for a session created before device labels existed. */
+  label: string | null;
+  /** ISO — when the human signed in (the family's FIRST token, not its newest). */
+  createdAt: string;
+  /** ISO — newest activity in the family, i.e. its last token refresh (~12h granularity). */
+  lastUsedAt: string;
+  /** ISO — the 90-day absolute cap. The session ends here however much it is used. */
+  expiresAt: string;
+}
+
 /** A freshly minted token — `token` is the plaintext, shown once. */
 export interface MintedToken {
   id: string;

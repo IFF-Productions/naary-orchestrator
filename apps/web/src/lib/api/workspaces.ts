@@ -6,6 +6,7 @@ import { http } from "./http";
 import type {
   ApiTokenRow,
   AuditEvent,
+  CliSession,
   DashboardItem,
   Member,
   MemberRemoval,
@@ -84,6 +85,19 @@ export const workspacesApi = {
   },
   revokeApiToken(id: string): Promise<void> {
     return http(`/tokens/${encodeURIComponent(id)}`, { method: "DELETE" });
+  },
+  // --- CLI sessions (#1078 §5). MY sessions in this workspace, one row per device. ---
+  // Deliberately no userId parameter: the server scopes to the authenticated principal, so there
+  // is nothing here for a client to point at somebody else.
+  listCliSessions(): Promise<CliSession[]> {
+    return http("/cli-sessions");
+  },
+  // Revokes the whole rotation family, which is what signs the device out. 404 (HttpError.status)
+  // when the family is already gone — or is not the caller's.
+  revokeCliSession(familyId: string): Promise<{ revoked: boolean }> {
+    return http(`/cli-sessions/${encodeURIComponent(familyId)}`, {
+      method: "DELETE",
+    });
   },
   // --- Team (RBAC U1: Membership-backed members + pending invitations) ---
   // Active members ∪ pending invitations; rows discriminate on `status`.
