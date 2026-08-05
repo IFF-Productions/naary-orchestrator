@@ -29,6 +29,12 @@ model ApiToken {
   environment   Environment? @relation(fields: [environmentId], references: [id], onDelete: SetNull)
   createdAt  DateTime  @default(now())
   lastUsedAt DateTime?
+  // Absolute expiry (design #1078 §3, slice 1). NULL = non-expiring — today's behaviour, and the
+  // value every existing + Settings-minted + CI token keeps, so nothing is forced to rotate.
+  // Enforced ONLY in ApiTokenService.verify(): REST, /api/v1 and MCP all authenticate through that
+  // one path, so every surface inherits expiry. Evaluated server-side; the client's clock is never
+  // consulted. Nullable and expand-only, so the migration is safe under a rolling deploy.
+  expiresAt  DateTime?
 
   // Group membership as an RBAC subject (RBAC-GROUPS.md §4a): a restricted token's grants
   // resolve through these joins. Deleting the token cascades its rows.

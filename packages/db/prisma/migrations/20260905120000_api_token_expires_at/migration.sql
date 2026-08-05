@@ -1,0 +1,11 @@
+-- #1078 §3 (slice 1): an absolute expiry for `nry_` API tokens, so a CLI-issued token can be
+-- short-lived instead of living forever.
+--
+-- NULLABLE with NO default, on purpose. NULL means "non-expiring", which is exactly what every
+-- pre-existing token is: Settings-created and CI tokens keep working unchanged and nothing is
+-- forced to rotate. No backfill — reading NULL on an old row is the correct answer, not a gap.
+--
+-- EXPAND-ONLY, safe under a rolling deploy (docker-rollout): the old API image does not select the
+-- column and keeps authenticating tokens exactly as it does today, while the new image sees NULL on
+-- every existing row and therefore also lets them through. Old and new can run side by side.
+ALTER TABLE "ApiToken" ADD COLUMN "expiresAt" TIMESTAMP(3);
