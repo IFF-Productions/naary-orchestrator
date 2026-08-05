@@ -337,7 +337,10 @@ teaches everyone to re-run CI without reading. A *known* deprecation is a writte
 what the migration costs and the issue that owns it; a **new** one fails until someone writes those
 two sentences. `sentry.list_issues` is the single entry — its successor moves the project from a
 path segment to a `project` query parameter, which accepts slugs, so the *input* half is a
-`retiredFields` chore (#944). The **response shapes have now been compared** (#1109), and the entry
+`retiredFields` chore (#944). The **response shapes have now been compared** — against Sentry's own
+`openapi-derefed.json` (`getsentry/sentry-api-schema`, the document already pinned as `sentry`'s
+`SOURCES` entry), which declares *both* operations, so it is a like-for-like vendor comparison; #1109
+is where the working is written up, not what makes it true. The entry
 is kept for two named reasons rather than for want of a diff: `annotations` is declared `array of
 string` on ours and `array of {displayName, url}` on the successor — `required` on both, and the
 only blocking field, since 0 of our 25 properties disappear and 21 are added — so a saved

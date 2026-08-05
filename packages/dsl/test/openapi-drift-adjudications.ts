@@ -228,7 +228,11 @@ export const ACKNOWLEDGED_DEPRECATED: { action: string; why: string }[] = [
       "Sentry flags `GET /projects/{org}/{project}/issues/` deprecated in its own document, in " +
       "favour of the org-scoped `listOrganizationIssues` — the same family #946 moved `get_issue` " +
       "and `update_issue` to, leaving this one behind. The two response shapes HAVE now been " +
-      "compared, field by field, in the one document that declares both (#1109): 0 of the 25 " +
+      "compared, field by field. AUTHORITY for what follows is Sentry's own document — " +
+      "`getsentry/sentry-api-schema` -> `openapi-derefed.json`, the same one pinned as `sentry`'s " +
+      "SOURCES entry — which declares BOTH operations, so this is a like-for-like vendor " +
+      "comparison rather than two sources stitched together; the working is WRITTEN UP in issue " +
+      "#1109, which is a record of the comparison and not evidence for it. Result: 0 of the 25 " +
       "project-scoped properties disappear and 21 are added, but `annotations` is declared " +
       "`array of string` on ours and `array of {displayName, url}` on the successor — `required` on " +
       "both, so neither side is the spec being vague. A saved `body[0].annotations[0]` would go " +
