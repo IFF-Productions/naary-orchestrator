@@ -106,7 +106,10 @@ export function catalogConnectPrefill(
       : (provider.baseUrl ?? ""),
     serverUrlHint: hostFromConnection
       ? provider.defaultBaseUrl
-        ? `Your ${provider.label} region's host — this IS the address every call goes to. Blank falls back to ${provider.defaultBaseUrl}.`
+        ? // Not "blank falls back to …": this form REQUIRES an https Server URL to submit, so the
+          // fallback is never the thing that happens here. It is prefilled instead, and the only
+          // useful sentence is the one that tells you when to change it.
+          `Your ${provider.label} region's host — this IS the address every call goes to. Prefilled with ${provider.defaultBaseUrl}; change it if that is not your region.`
         : `Your own ${provider.label} host — this IS the address every call goes to.`
       : provider.baseUrl
         ? `Prefilled from the catalog. ${provider.label} calls go to this host regardless, so it is only a label here.`
