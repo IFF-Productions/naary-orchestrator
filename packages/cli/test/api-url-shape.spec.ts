@@ -1,7 +1,7 @@
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { ApiClient, ApiError, buildUrl } from "../src/client";
+import { ApiClient, ApiError, buildRootUrl, buildUrl } from "../src/client";
 import { DEFAULT_API_URL } from "../src/config";
 
 /**
@@ -22,6 +22,12 @@ import { DEFAULT_API_URL } from "../src/config";
 function dispatch(pathname: string): { status: number; body: string } {
   if (pathname === "/v1/runs") {
     return { status: 200, body: JSON.stringify({ items: [{ id: "r1" }] }) };
+  }
+  // `naary auth`'s handshake is NOT under /v1 — `@Controller("auth/cli")` in
+  // cli-auth.controller.ts. It travels through the same `/api` proxy segment and nothing else,
+  // which is why it needs its own builder rather than `buildUrl`'s `/api/v1`.
+  if (pathname === "/auth/cli/start") {
+    return { status: 201, body: JSON.stringify({ userCode: "PQ4M-TWZ9" }) };
   }
   return { status: 404, body: JSON.stringify({ message: "Cannot GET" }) };
 }
@@ -90,6 +96,19 @@ describe("the /api/v1 prefix only resolves behind a stripping proxy", () => {
     // The route the API *does* serve, proving the fixture is not simply serving nothing.
     const res = await fetch(`${apiOrigin}/v1/runs`);
     expect(res.status).toBe(200);
+  });
+
+  it("reaches the auth handshake, which lives OUTSIDE /v1, through the same proxy", async () => {
+    // The composed URL is `${origin}/api/auth/cli/start` — one `/api` segment, no `/v1`. Building
+    // it with `buildUrl` would produce `/api/v1/auth/cli/start`, which this fixture 404s exactly
+    // as the real deployment does.
+    const url = buildRootUrl(webOrigin, "/auth/cli/start");
+    expect(url).toBe(`${webOrigin}/api/auth/cli/start`);
+    const res = await fetch(url, { method: "POST" });
+    expect(res.status).toBe(201);
+
+    const wrong = await fetch(buildUrl(webOrigin, "/auth/cli/start"));
+    expect(wrong.status).toBe(404);
   });
 
   it("ships a default that lands on the local web origin, not the API port", () => {

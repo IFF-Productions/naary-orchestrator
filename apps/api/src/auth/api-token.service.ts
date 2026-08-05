@@ -148,6 +148,24 @@ export class ApiTokenService {
     return res.count;
   }
 
+  /**
+   * Delete the row for a PRESENTED plaintext token (#1078 slice 4, `naary auth logout`).
+   *
+   * Unauthenticated by design, like the rest of the CLI handshake, and safe for the same reason:
+   * presenting the token is proof of holding it, and the only thing this can destroy is the
+   * caller's own credential. It exists because a logout that revokes the refresh family but leaves
+   * the 12-hour access token live is not a logout for twelve hours.
+   *
+   * Not tenant-scoped, unlike `revoke()`: there is no authenticated principal here, so the token
+   * hash IS the scope — a unique index, matching at most one row.
+   */
+  async revokeByToken(token: string): Promise<boolean> {
+    const res = await getPrisma().apiToken.deleteMany({
+      where: { tokenHash: hashToken(token) },
+    });
+    return res.count > 0;
+  }
+
   /** Revoke a tenant's token by id (tenant-scoped). Returns true if a row was removed. */
   async revoke(tenantId: string, id: string): Promise<boolean> {
     const res = await getPrisma().apiToken.deleteMany({

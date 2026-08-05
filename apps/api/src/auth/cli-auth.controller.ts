@@ -22,6 +22,7 @@ import {
   CliAuthDecisionResponse,
   CliAuthExchangeDto,
   CliAuthExchangeResponse,
+  CliAuthLogoutDto,
   CliAuthRefreshDto,
   CliAuthStartDto,
   CliAuthStartResponse,
@@ -319,6 +320,37 @@ export class CliAuthController {
       refreshTokenExpiresAt: rotated.expiresAt.toISOString(),
       tenantId: rotated.tenantId,
     };
+  }
+
+  /**
+   * End a CLI session (#1078 slice 4 — "`naary logout` (revokes the family)").
+   *
+   * Revokes the rotation family the presented refresh token belongs to AND deletes the presented
+   * access token, because a logout that leaves a live 12-hour bearer behind is only a logout
+   * tomorrow. Both are the caller's own credentials, which is what makes an unauthenticated route
+   * safe here: the token IS the authorization, exactly as on exchange and refresh.
+   *
+   * ALWAYS 204, whatever was found. An unknown token, a spent token and a real one are one answer
+   * on purpose — the same discipline the exchange's single `invalid_grant` follows. A "revoked 1
+   * family" vs "revoked 0" distinction would tell an anonymous caller that a token it holds is
+   * live, which is the one bit this flow spends most of its effort not disclosing. It also makes
+   * the route idempotent, so a CLI that retries after a network blip is not an error case.
+   */
+  @Public()
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  @ApiEndpoint({
+    summary:
+      "End a CLI session: revoke the refresh family and the access token.",
+  })
+  @HttpCode(204)
+  @Post("logout")
+  async logout(@Body() body: CliAuthLogoutDto): Promise<void> {
+    if (body.refreshToken) {
+      const killed = await this.refreshTokens.revokeByToken(body.refreshToken);
+      // No token material, and no family id for a token that matched nothing.
+      this.logger.log(`CLI logout: revoked ${killed} refresh token(s)`);
+    }
+    if (body.accessToken) await this.tokens.revokeByToken(body.accessToken);
   }
 
   /** Mint the short-lived `nry_` access token, then sweep the tenant's DEAD CLI tokens.

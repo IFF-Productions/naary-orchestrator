@@ -544,24 +544,21 @@
         ]
       }
     },
-    "/cli-sessions": {
-      "get": {
-        "operationId": "CliSessionsController_list",
+    "/auth/cli/logout": {
+      "post": {
+        "operationId": "CliAuthController_logout",
         "parameters": [],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/CliSessionView"
-                  }
-                }
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CliAuthLogoutDto"
               }
             }
-          },
+          }
+        },
+        "responses": {
           "400": {
             "description": "Validation error / malformed request.",
             "content": {
@@ -603,100 +600,9 @@
             }
           }
         },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "List my active CLI sessions",
+        "summary": "End a CLI session: revoke the refresh family and the access token.",
         "tags": [
-          "cli-sessions"
-        ]
-      }
-    },
-    "/cli-sessions/{familyId}": {
-      "delete": {
-        "operationId": "CliSessionsController_revoke",
-        "parameters": [
-          {
-            "name": "familyId",
-            "required": true,
-            "in": "path",
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CliSessionRevokedResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "Validation error / malformed request.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "Missing or invalid credentials (bearer token).",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Authenticated but not permitted for this workspace.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "Resource not found.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "Unexpected server error.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ],
-        "summary": "Revoke one of my CLI sessions",
-        "tags": [
-          "cli-sessions"
+          "cli-auth"
         ]
       }
     },
@@ -18267,51 +18173,18 @@
           "refreshToken"
         ]
       },
-      "CliSessionView": {
+      "CliAuthLogoutDto": {
         "type": "object",
         "properties": {
-          "familyId": {
+          "refreshToken": {
             "type": "string",
-            "description": "Opaque handle for the rotation family. The id DELETE takes; not a credential."
+            "description": "The current `nryr_` refresh token. Its whole rotation family is revoked."
           },
-          "label": {
+          "accessToken": {
             "type": "string",
-            "nullable": true,
-            "example": "naary CLI — hassans-macbook",
-            "description": "Device hint from the login handshake, or null for a session created before labels existed."
-          },
-          "createdAt": {
-            "type": "string",
-            "description": "ISO time the human signed in (the FIRST token of the family)."
-          },
-          "lastUsedAt": {
-            "type": "string",
-            "description": "ISO time of the newest activity in the family — in practice its last token refresh."
-          },
-          "expiresAt": {
-            "type": "string",
-            "description": "ISO 90-day absolute expiry. The session dies here regardless of use."
+            "description": "The current `nry_` access token. Deleted, so the session ends now rather than in 12 hours."
           }
-        },
-        "required": [
-          "familyId",
-          "label",
-          "createdAt",
-          "lastUsedAt",
-          "expiresAt"
-        ]
-      },
-      "CliSessionRevokedResponse": {
-        "type": "object",
-        "properties": {
-          "revoked": {
-            "type": "boolean",
-            "example": true
-          }
-        },
-        "required": [
-          "revoked"
-        ]
+        }
       },
       "GroupMemberResponse": {
         "type": "object",
