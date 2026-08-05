@@ -15,6 +15,10 @@
     "/v1/customers": {
       "post": {
         "operationId": "PostCustomers",
+        "x-security": [
+          "basicAuth",
+          "bearerAuth"
+        ],
         "requestBody": {
           "required": false,
           "content": {
@@ -53,6 +57,10 @@
     "/v1/customers/{customer}": {
       "get": {
         "operationId": "GetCustomersCustomer",
+        "x-security": [
+          "basicAuth",
+          "bearerAuth"
+        ],
         "parameters": [
           {
             "name": "customer",
@@ -80,6 +88,10 @@
     "/v1/payment_intents": {
       "post": {
         "operationId": "PostPaymentIntents",
+        "x-security": [
+          "basicAuth",
+          "bearerAuth"
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -138,6 +150,10 @@
     "/v1/charges": {
       "get": {
         "operationId": "GetCharges",
+        "x-security": [
+          "basicAuth",
+          "bearerAuth"
+        ],
         "parameters": [
           {
             "name": "created",
@@ -195,6 +211,10 @@
     "/v1/refunds": {
       "post": {
         "operationId": "PostRefunds",
+        "x-security": [
+          "basicAuth",
+          "bearerAuth"
+        ],
         "requestBody": {
           "required": false,
           "content": {

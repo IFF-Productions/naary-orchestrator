@@ -127,8 +127,12 @@ export const WEBFLOW: IntegrationProvider = {
       //
       // The action stays, because for an OAuth connection it is a legitimate read; only the probe
       // moved, to `list_sites`. That one is demonstrated WITH a site token by the same Webflow
-      // page: `curl --request GET --url https://api.webflow.com/v2/sites --header 'authorization:
-      // Bearer YOUR_API_TOKEN'` … "Replace YOUR_API_TOKEN with the site token you generated."
+      // page, whose "Using a site token" example calls `GET https://api.webflow.com/v2/sites`
+      // sending an `authorization` header whose value is `Bearer YOUR_API_TOKEN`, under the
+      // sentence "Replace YOUR_API_TOKEN with the site token you generated". (Spelled out in prose
+      // rather than pasted as a one-line curl: a header-and-credential pair on a single line is
+      // what secret-masking renderers replace with `******`, which is how this comment first
+      // reached review contradicting its own next sentence.)
       //
       // Note the pinned spec cannot adjudicate this and must not be read as if it could: Webflow
       // declares `security: [{OAuth2: […]}]` on 112 of its 117 operations, including the CMS reads

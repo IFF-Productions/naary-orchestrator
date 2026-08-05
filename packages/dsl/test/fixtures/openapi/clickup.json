@@ -15,6 +15,9 @@
     "/v2/list/{list_id}/task": {
       "post": {
         "operationId": "CreateTask",
+        "x-security": [
+          "Authorization_Token"
+        ],
         "parameters": [
           {
             "name": "list_id",
@@ -60,6 +63,9 @@
       },
       "get": {
         "operationId": "GetTasks",
+        "x-security": [
+          "Authorization_Token"
+        ],
         "parameters": [
           {
             "name": "list_id",
@@ -187,6 +193,9 @@
     "/v2/task/{task_id}": {
       "get": {
         "operationId": "GetTask",
+        "x-security": [
+          "Authorization_Token"
+        ],
         "parameters": [
           {
             "name": "task_id",
@@ -222,6 +231,9 @@
       },
       "put": {
         "operationId": "UpdateTask",
+        "x-security": [
+          "Authorization_Token"
+        ],
         "parameters": [
           {
             "name": "task_id",
@@ -272,6 +284,9 @@
     "/v2/task/{task_id}/comment": {
       "post": {
         "operationId": "CreateTaskComment",
+        "x-security": [
+          "Authorization_Token"
+        ],
         "parameters": [
           {
             "name": "task_id",
@@ -312,7 +327,10 @@
     },
     "/v2/user": {
       "get": {
-        "operationId": "GetAuthorizedUser"
+        "operationId": "GetAuthorizedUser",
+        "x-security": [
+          "Authorization_Token"
+        ]
       }
     }
   }

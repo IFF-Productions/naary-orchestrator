@@ -15,6 +15,9 @@
     "/v3/mail/send": {
       "post": {
         "operationId": "SendMail",
+        "x-security": [
+          "BearerAuth"
+        ],
         "parameters": [
           {
             "name": "Content-Encoding",
@@ -97,6 +100,9 @@
     "/v3/marketing/contacts": {
       "put": {
         "operationId": "UpdateContact",
+        "x-security": [
+          "BearerAuth"
+        ],
         "requestBody": {
           "required": false,
           "content": {
@@ -138,6 +144,9 @@
     "/v3/templates": {
       "get": {
         "operationId": "ListTemplate",
+        "x-security": [
+          "BearerAuth"
+        ],
         "parameters": [
           {
             "name": "generations",

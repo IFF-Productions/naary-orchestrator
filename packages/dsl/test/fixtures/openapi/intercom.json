@@ -15,6 +15,9 @@
     "/contacts/{contact_id}": {
       "get": {
         "operationId": "ShowContact",
+        "x-security": [
+          "bearerAuth"
+        ],
         "parameters": [
           {
             "name": "Intercom-Version",
@@ -61,6 +64,9 @@
     "/contacts": {
       "post": {
         "operationId": "CreateContact",
+        "x-security": [
+          "bearerAuth"
+        ],
         "parameters": [
           {
             "name": "Intercom-Version",
@@ -120,6 +126,9 @@
     "/contacts/{contact_id}/notes": {
       "post": {
         "operationId": "createNote",
+        "x-security": [
+          "bearerAuth"
+        ],
         "parameters": [
           {
             "name": "Intercom-Version",
@@ -177,6 +186,9 @@
     "/messages": {
       "post": {
         "operationId": "createMessage",
+        "x-security": [
+          "bearerAuth"
+        ],
         "parameters": [
           {
             "name": "Intercom-Version",
@@ -234,6 +246,9 @@
     "/me": {
       "get": {
         "operationId": "identifyAdmin",
+        "x-security": [
+          "bearerAuth"
+        ],
         "parameters": [
           {
             "name": "Intercom-Version",

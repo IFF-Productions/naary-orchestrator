@@ -15,6 +15,9 @@
     "/incidents": {
       "post": {
         "operationId": "createIncident",
+        "x-security": [
+          "api_key"
+        ],
         "parameters": [
           {
             "name": "Accept",
@@ -91,6 +94,9 @@
       },
       "get": {
         "operationId": "listIncidents",
+        "x-security": [
+          "api_key"
+        ],
         "parameters": [
           {
             "name": "Accept",
@@ -183,6 +189,9 @@
     "/incidents/{id}": {
       "get": {
         "operationId": "getIncident",
+        "x-security": [
+          "api_key"
+        ],
         "parameters": [
           {
             "name": "Accept",
@@ -208,6 +217,9 @@
       },
       "put": {
         "operationId": "updateIncident",
+        "x-security": [
+          "api_key"
+        ],
         "parameters": [
           {
             "name": "Accept",
@@ -268,6 +280,9 @@
     "/incidents/{id}/notes": {
       "post": {
         "operationId": "createIncidentNote",
+        "x-security": [
+          "api_key"
+        ],
         "parameters": [
           {
             "name": "Accept",

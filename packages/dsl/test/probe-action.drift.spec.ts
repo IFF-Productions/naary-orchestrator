@@ -126,9 +126,13 @@ function loadFixtures(): Map<string, Fixture> {
 const fixtures = loadFixtures();
 
 /**
- * The security schemes an operation accepts, or `null` when the fixture records no restriction —
- * which means the operation declared no `security` override of its own and therefore inherits the
- * document's default. `null` is the LEAST restrictive answer, never the most.
+ * The security schemes an operation accepts, as the fixture RESOLVED them (operation level, else the
+ * document default — see `securitySchemeNames` in the extractor). Three answers, and the difference
+ * between the last two is the whole point:
+ *
+ *   `["A","B"]` — it accepts these.
+ *   `[]`        — declared and empty: explicitly public, no credential required.
+ *   `null`      — the document was silent at BOTH levels. UNKNOWN, never "unrestricted".
  */
 const schemesOf = (
   op: Record<string, unknown> | undefined,
@@ -141,19 +145,33 @@ const schemesOf = (
  * Is the probe restricted to a NARROWER set of schemes than an action it vouches for?
  *
  * Returns the offending scheme names — a credential that satisfies `action` and not `probe` would
- * be reported broken while working. Exported shape kept tiny on purpose: this is compared per
- * (probe, action) pair so the failure message can name which action disagrees.
+ * be reported broken while working. Compared per (probe, action) pair so the failure message can
+ * name which action disagrees.
+ *
+ * ## Absent is UNKNOWN here, never "unrestricted"
+ *
+ * The first version of this returned `[]` the moment the probe had no `x-security`, on the reasoning
+ * that an operation declaring nothing "inherits the default, and nothing is narrower than that".
+ * That is not the OpenAPI rule: an omitted operation-level `security` inherits the DOCUMENT default,
+ * which can be *more* restrictive than what a sibling declares for itself — so the silence could hide
+ * exactly the #1111 shape this function exists to find. The fix is upstream, in the extractor, which
+ * now resolves that fallback and records the effective schemes; `null` here therefore means the
+ * document was silent at BOTH levels, which is genuinely unknowable and is reported as nothing
+ * rather than as agreement.
  */
 function narrowerThan(
   probe: Record<string, unknown> | undefined,
   action: Record<string, unknown> | undefined,
 ): string[] {
   const probeSchemes = schemesOf(probe);
-  if (probeSchemes === null) return []; // inherits the default — nothing is narrower than that
   const actionSchemes = schemesOf(action);
-  // The action inherits the default while the probe restricts itself: every scheme the document
-  // allows for the action is a scheme the probe may refuse. Report it as the unknown it is.
-  if (actionSchemes === null) return ["(the document default)"];
+  // The document says nothing about one side or the other. No verdict is available — and a check
+  // that cannot see must say nothing rather than say "fine". The coverage line below is where that
+  // gap is made visible instead.
+  if (probeSchemes === null || actionSchemes === null) return [];
+  // The ACTION needs no credential at all (`security: []`). That is not evidence about credentials,
+  // so a probe requiring one is not "narrower" than it in any sense a user would feel.
+  if (actionSchemes.length === 0) return [];
   return actionSchemes.filter((s) => !probeSchemes.includes(s));
 }
 
@@ -430,14 +448,38 @@ describe("narrowerThan — the auth-mode comparison", () => {
     ).toEqual([]);
   });
 
-  it("is silent when the probe declares no restriction of its own", () => {
-    // No `x-security` = the operation inherits the document default = nothing is narrower than it.
+  // The three tests below pin ABSENCE, and they are the ones the first version of this file got
+  // wrong. `x-security` is now RESOLVED by the extractor (operation level, else the document
+  // default), so a missing key means the document was silent at both levels — unknown, not public.
+  // A verdict invented from that silence is how a probe restricted by the document default would
+  // have passed while rejecting working connections.
+  it("says nothing when the document is silent about the probe", () => {
     expect(narrowerThan({}, { "x-security": ["OAuth2"] })).toEqual([]);
   });
 
-  it("flags a probe that restricts itself while the action inherits the default", () => {
-    expect(narrowerThan({ "x-security": ["OAuth2"] }, {})).toEqual([
-      "(the document default)",
-    ]);
+  it("says nothing when the document is silent about the action", () => {
+    // Previously reported "(the document default)" — a finding manufactured out of not knowing.
+    expect(narrowerThan({ "x-security": ["OAuth2"] }, {})).toEqual([]);
+  });
+
+  it("says nothing when the ACTION is explicitly public", () => {
+    // `security: []` on the action: it needs no credential at all, so it is no evidence about one.
+    // Distinct from absence — which is why the extractor must keep the empty array rather than
+    // dropping it.
+    expect(
+      narrowerThan({ "x-security": ["OAuth2"] }, { "x-security": [] }),
+    ).toEqual([]);
+  });
+
+  it("still flags a narrower probe when the ACTION inherits a wider document default", () => {
+    // The case the old "absent ⇒ unrestricted" branch could not see, now visible because the
+    // extractor resolves the fallback: the action's `["ApiKey","OAuth2"]` here IS the document
+    // default, copied down at extraction time.
+    expect(
+      narrowerThan(
+        { "x-security": ["OAuth2"] },
+        { "x-security": ["ApiKey", "OAuth2"] },
+      ),
+    ).toEqual(["ApiKey"]);
   });
 });

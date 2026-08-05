@@ -15,6 +15,9 @@
     "/lists/{list_id}/members": {
       "post": {
         "operationId": "postListsIdMembers",
+        "x-security": [
+          "basicAuth"
+        ],
         "parameters": [
           {
             "name": "list_id",
@@ -59,6 +62,9 @@
       },
       "get": {
         "operationId": "getListsIdMembers",
+        "x-security": [
+          "basicAuth"
+        ],
         "parameters": [
           {
             "name": "fields",
@@ -166,6 +172,9 @@
     "/lists/{list_id}/members/{subscriber_hash}": {
       "get": {
         "operationId": "getListsIdMembersId",
+        "x-security": [
+          "basicAuth"
+        ],
         "parameters": [
           {
             "name": "fields",
@@ -191,6 +200,9 @@
       },
       "patch": {
         "operationId": "patchListsIdMembersId",
+        "x-security": [
+          "basicAuth"
+        ],
         "parameters": [
           {
             "name": "list_id",
@@ -237,6 +249,9 @@
     "/campaigns": {
       "post": {
         "operationId": "postCampaigns",
+        "x-security": [
+          "basicAuth"
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -263,7 +278,10 @@
     },
     "/ping": {
       "get": {
-        "operationId": "getPing"
+        "operationId": "getPing",
+        "x-security": [
+          "basicAuth"
+        ]
       }
     }
   }
