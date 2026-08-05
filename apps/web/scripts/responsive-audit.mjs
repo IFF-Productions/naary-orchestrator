@@ -42,7 +42,7 @@
  * `needY`, the clearance required to grow on that ONE axis. Read those to decide a real fix; read
  * `safe` to decide whether a blanket CSS rule is possible.
  *
- * That directional read and the inert/off-viewport filter below landed TOGETHER, and the effect
+ * That directional read and the inert/horizontally-off-viewport filter below landed TOGETHER, and the effect
  * quoted here is their JOINT effect — measured on the built app at 390x844, the approvals screen
  * went from 19 small / 11 unsafe to 16 small / 5 unsafe. Deliberately not split between the two:
  * both probe edits were in the same run, and attributing the whole delta to either one would be
@@ -147,8 +147,16 @@ const PROBE = `(() => {
   // still laid out. Counting them measures phantoms AND poisons every real control's
   // nearest-neighbour, because the off-screen panel is a dense stack of links. On the built app
   // at 390x844 the drawer-OPEN reading of the approvals screen fell from 19 small targets to 6
-  // once inert subtrees and boxes wholly outside the viewport were dropped — see the header for
+  // once inert subtrees and horizontally-off-viewport boxes were dropped — see the header for
   // why that number is quoted jointly with the directional change rather than split (#1076).
+  //
+  // HORIZONTAL ONLY, and that asymmetry is deliberate — the same one the \`offscreen\` section
+  // below already documents. \`styles/global.css\` clamps the root with \`overflow-x: hidden\`, so a
+  // box past either side edge is behind a hard wall and no gesture reaches it. Vertically the
+  // page SCROLLS, so a control below the fold is perfectly reachable and is a real target.
+  // Measured before adding this: of 75 sub-44px targets across ten screens, 4 sit below the fold
+  // — Integrations' "Add connection" buttons at y 923..1365 — and a \`bottom > 0 && top < VH\`
+  // clause would silently drop all four. Excluding them would hide defects, not phantoms.
   const usable = (el) => {
     if (el.closest('[inert]')) return false;
     const r = el.getBoundingClientRect();

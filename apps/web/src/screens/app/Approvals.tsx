@@ -368,6 +368,10 @@ export function Approvals() {
         <Checkbox
           checked={allSelected}
           hitArea={stacked ? 44 : undefined}
+          // Nothing visible names this one — it stands alone at the head of the filter row, and
+          // the wrapper's `title` is a tooltip, not an accessible name. Measured unnamed before
+          // this. The string tracks the tooltip so the two never drift apart.
+          ariaLabel={allSelected ? "Clear selection" : "Select all approvals"}
           onChange={(v) => {
             if (batchBusy) return;
             setSelected(v ? new Set(visibleIds) : new Set());

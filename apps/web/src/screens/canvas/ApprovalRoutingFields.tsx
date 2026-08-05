@@ -237,6 +237,9 @@ export function ApprovalRoutingFields({ c }: { c: ConfigSectionCtx }) {
                 >
                   <Checkbox
                     checked={checked}
+                    // The wrapping `<label>` does NOT name this: implicit labelling reaches form
+                    // controls, not a `<button role="checkbox">`. Point at the group name.
+                    ariaLabelledBy={`approver-group-${g.id}`}
                     onChange={() =>
                       patchApprovers({
                         ...approvers,
@@ -246,7 +249,7 @@ export function ApprovalRoutingFields({ c }: { c: ConfigSectionCtx }) {
                       })
                     }
                   />
-                  <span>{g.name}</span>
+                  <span id={`approver-group-${g.id}`}>{g.name}</span>
                   <span
                     style={{
                       marginLeft: "auto",

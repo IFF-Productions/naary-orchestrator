@@ -133,6 +133,52 @@ describe("touch targets — tight clusters (#1076)", () => {
     expect(functionBody(forms, "Checkbox")).not.toMatch(/::(after|before)/);
   });
 
+  it("Checkbox forwards an accessible name", () => {
+    // `role="checkbox"` on a <button> takes its name from aria-labelledby / aria-label / content
+    // only — and the content is a decorative tick. Measured on the built approvals screen: 4 of 4
+    // had NO accessible name, including the select-all this PR promoted to a 44x44 control.
+    // The prop TYPES live in the signature, which `functionBody` starts after — so they're
+    // matched against the file and the forwarding against the body.
+    expect(forms).toMatch(/ariaLabel\?: string/);
+    expect(forms).toMatch(/ariaLabelledBy\?: string/);
+    const body = functionBody(forms, "Checkbox");
+    // BOTH branches — the 18px one is the default and most call sites use it.
+    expect(body.match(/aria-label=\{ariaLabel\}/g)?.length).toBe(2);
+    expect(body.match(/aria-labelledby=\{ariaLabelledBy\}/g)?.length).toBe(2);
+  });
+
+  it("every Checkbox call site names its control", () => {
+    // A wrapping <label> does NOT name a <button role="checkbox">, and a labelled ancestor row
+    // names the ROW, not its separately focusable child — the two traps that left all four
+    // unnamed. `aria-labelledby` at the sites that have visible text beside the box, so the two
+    // cannot drift; a literal label only where nothing visible names it.
+    const sites: [string, string][] = [
+      ["screens/app/Approvals.tsx", "ariaLabel="],
+      ["screens/app/approvals/QueueRow.tsx", "ariaLabelledBy="],
+      ["screens/app/Workflows.tsx", "ariaLabelledBy="],
+      ["screens/app/WorkflowTagsDialog.tsx", "ariaLabelledBy="],
+      ["screens/app/groups/GrantEditor.tsx", "ariaLabelledBy="],
+      ["screens/canvas/ApprovalRoutingFields.tsx", "ariaLabelledBy="],
+    ];
+    for (const [file, prop] of sites) expect(read(file), file).toContain(prop);
+    // The standalone one is the only place a literal string is right: nothing visible names it.
+    expect(approvals).toMatch(
+      /ariaLabel=\{allSelected \? "Clear selection" : "Select all approvals"\}/,
+    );
+    // Every id an `ariaLabelledBy` points at must be rendered by the same file.
+    for (const [file] of sites) {
+      const src = read(file);
+      for (const m of src.matchAll(/ariaLabelledBy=\{`([^`]+)`\}/g)) {
+        const tmpl = m[1].replace(/\$\{[^}]+\}/g, "");
+        expect(src, `${file}: no id= for ${m[1]}`).toContain(`id={\`${tmpl}`);
+      }
+    }
+    // ...and the one non-template id (QueueRow builds it into a const first).
+    expect(read("screens/app/approvals/QueueRow.tsx")).toMatch(
+      /id=\{titleId\}/,
+    );
+  });
+
   it("Approvals passes hitArea only in the touch range", () => {
     expect(approvals).toMatch(/hitArea=\{stacked \? 44 : undefined\}/);
     expect(approvals).toMatch(/BELOW_DRAWER_QUERY/);
@@ -175,11 +221,24 @@ describe("responsive-audit harness (#1076)", () => {
     "utf8",
   );
 
-  it("drops inert and off-viewport controls before measuring neighbours", () => {
+  it("drops inert and HORIZONTALLY off-viewport controls before measuring neighbours", () => {
     // A closed drawer is only TRANSLATED away; its dense link stack became the "nearest
-    // neighbour" of every real control. 19 unsafe -> 4 on the approvals screen once dropped.
+    // neighbour" of every real control. Dropping it took the approvals screen's drawer-open
+    // reading from 19 small targets to 6.
     expect(harness).toMatch(/el\.closest\('\[inert\]'\)/);
     expect(harness).toMatch(/r\.right > 0 && r\.left < VW/);
+  });
+
+  it("does NOT filter vertically — below the fold is reachable, off to the side is not", () => {
+    // `global.css` clamps the root with `overflow-x: hidden`, so a box past a side edge is behind
+    // a hard wall; vertically the page scrolls. Measured: of 75 sub-44px targets across ten
+    // screens, 4 sit below the fold (Integrations' "Add connection", y 923..1365) and a vertical
+    // clause would drop all four — hiding real defects rather than phantoms. This asserts the
+    // absence, because "we forgot the other axis" and "we ruled it out" look identical in a diff.
+    expect(harness).not.toMatch(/r\.bottom > 0 && r\.top < VH/);
+    expect(harness).toMatch(
+      /HORIZONTAL ONLY, and that asymmetry is deliberate/,
+    );
   });
 
   it("reports the neighbour's AXIS alongside the isotropic `safe` flag", () => {

@@ -27,6 +27,9 @@ export function QueueRow({
   onToggleCheck: () => void;
 }) {
   const tone = toneColors(waiting.tone);
+  // Names the batch checkbox from the visible title below. Keyed on the gate's own identity
+  // (workflow + node) rather than an index, so it stays stable as the queue re-sorts.
+  const titleId = `approval-title-${item.workflowId}-${item.nodeId}`;
   return (
     <div
       role="button"
@@ -64,6 +67,11 @@ export function QueueRow({
       >
         <Checkbox
           checked={checked}
+          // Points at the row's visible title rather than repeating it: the batch box and that
+          // heading are the same words, and a duplicated string is one that drifts. The row's own
+          // `aria-label` does NOT reach this box — that names the ROW, and this is a separately
+          // focusable child of it, which is why all three measured unnamed.
+          ariaLabelledBy={titleId}
           onChange={() => {
             if (!disabled) onToggleCheck();
           }}
@@ -90,6 +98,7 @@ export function QueueRow({
 
       <span style={{ flex: 1, minWidth: 0 }}>
         <span
+          id={titleId}
           style={{
             display: "block",
             fontSize: "var(--text-body)",
