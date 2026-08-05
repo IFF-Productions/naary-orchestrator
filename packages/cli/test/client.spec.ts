@@ -9,8 +9,11 @@ import {
 } from "../src/client";
 import type { ResolvedConfig } from "../src/config";
 
+// A bare web origin — the only shape `apiUrl` may take, since the client appends the `/api/v1`
+// proxy path itself (see the API_PREFIX comment in client.ts). Fixtures here used to say
+// `http://localhost:3000`, the API's own port, which pinned a composed URL nothing serves.
 const cfg = (over: Partial<ResolvedConfig> = {}): ResolvedConfig => ({
-  apiUrl: "http://localhost:3000",
+  apiUrl: "https://naary.example",
   token: "nry_test",
   ...over,
 });
@@ -38,11 +41,11 @@ function fakeFetch(
 
 describe("buildUrl", () => {
   it("prefixes /api/v1 and normalizes slashes", () => {
-    expect(buildUrl("http://localhost:3000", "/runs")).toBe(
-      "http://localhost:3000/api/v1/runs",
+    expect(buildUrl("https://naary.example", "/runs")).toBe(
+      "https://naary.example/api/v1/runs",
     );
-    expect(buildUrl("http://localhost:3000/", "runs")).toBe(
-      "http://localhost:3000/api/v1/runs",
+    expect(buildUrl("https://naary.example/", "runs")).toBe(
+      "https://naary.example/api/v1/runs",
     );
   });
   it("appends query params, skipping undefined/empty", () => {
@@ -78,7 +81,7 @@ describe("ApiClient.request", () => {
       query: { limit: 3 },
     });
     expect(out).toEqual({ runId: "r1" });
-    expect(calls[0].url).toBe("http://localhost:3000/api/v1/runs?limit=3");
+    expect(calls[0].url).toBe("https://naary.example/api/v1/runs?limit=3");
     expect(calls[0].init.headers.Authorization).toBe("Bearer nry_test");
     expect(calls[0].init.headers["X-Environment-Id"]).toBe("sandbox");
   });

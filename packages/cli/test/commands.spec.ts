@@ -18,7 +18,7 @@ function makeCtx(handler: (path: string, opts: any) => unknown) {
     io: { out: (l) => out.push(l), err: (l) => err.push(l) },
     makeClient: (flags) => ({
       client,
-      config: { apiUrl: "http://localhost:3000", token: "nry_x", ...flags },
+      config: { apiUrl: "https://naary.example", token: "nry_x", ...flags },
     }),
   };
   return { ctx, out, err, requests };
