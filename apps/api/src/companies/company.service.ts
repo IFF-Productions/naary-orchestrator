@@ -489,6 +489,18 @@ export class CompanyService {
    * `Membership` table — the uid-carrying authority for who a user is (NOT the inert `Member`
    * directory table, which has no uid). Case-insensitive match, newest row wins.
    *
+   * THE LOOKUP IS COMPANY-SCOPED (#1075 decision 3, LDAP-DIRECTORY.md §5 / SAML-SSO.md:136).
+   * It used to resolve an email across the ENTIRE INSTANCE with `orderBy: createdAt desc`, so
+   * whichever workspace most recently created a `Membership` for that address won — including
+   * a workspace with no relationship to this company. That was contained while every
+   * Membership was written by a human invite; SCIM makes bulk membership creation routine and
+   * automatic, so "newest row wins" becomes easy to hit BY ACCIDENT: an IdP provisioning
+   * `finance@acme.example` into its own workspace could hand a stranger's uid to a company
+   * owner adding the colleague they actually meant. Restricting the candidate set to the
+   * company's OWN workspaces (`TenantSettings.companyId`) makes that unreachable — the target
+   * must already be someone this company can see. `orderBy` is kept for the multi-workspace
+   * case, but it now only ever picks between rows for the same person inside this company.
+   *
    * LAST-OWNER GUARD: re-adding the final owner as "admin" is a demote — refused (409). A
    * company must keep at least one owner or it becomes unadministerable.
    */
@@ -504,14 +516,26 @@ export class CompanyService {
     }
     const clean = (email ?? "").trim();
     if (!clean) throw new BadRequestException("Email is required.");
-    const account = await getPrisma().membership.findFirst({
-      where: { email: { equals: clean, mode: "insensitive" } },
-      orderBy: { createdAt: "desc" },
-      select: { userId: true },
+    // The company's own workspaces — the ONLY place an email may resolve from (see above).
+    const workspaces = await getPrisma().tenantSettings.findMany({
+      where: { companyId },
+      select: { tenantId: true },
     });
+    const tenantIds = workspaces.map((w) => w.tenantId);
+    const account =
+      tenantIds.length === 0
+        ? null
+        : await getPrisma().membership.findFirst({
+            where: {
+              email: { equals: clean, mode: "insensitive" },
+              tenantId: { in: tenantIds },
+            },
+            orderBy: { createdAt: "desc" },
+            select: { userId: true },
+          });
     if (!account) {
       throw new NotFoundException(
-        "No account with that email — they must sign in first.",
+        "No account with that email in this company's workspaces — they must sign in to one of them first.",
       );
     }
     if (role !== "owner") {

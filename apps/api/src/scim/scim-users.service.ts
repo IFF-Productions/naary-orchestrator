@@ -29,7 +29,7 @@ interface Subject {
  * and `alice@a.example` from forking into two stable ids for one human — which an IdP would
  * read as two users and try to reconcile forever.
  */
-const canonical = (email: string): string => email.trim().toLowerCase();
+export const canonical = (email: string): string => email.trim().toLowerCase();
 
 /**
  * The SCIM read surface (#1075 slice 1).
@@ -134,6 +134,27 @@ export class ScimUsersService {
     return this.render(identity, subject);
   }
 
+  /**
+   * Render the subject at `email` as a SCIM User, materialising its stable id (#1075 slice 2).
+   *
+   * This is what a WRITE returns: a POST knows the email it just provisioned but not the
+   * resource id the IdP is about to store, and that id has to come from the same
+   * `(tenantId, email)` upsert a read would use — otherwise the create response and the next
+   * reconcile GET would disagree about what this subject's id is.
+   *
+   * 404s when nothing is there: a caller that provisioned nothing must not receive a rendered
+   * resource, and a ScimIdentity row is not by itself a directory subject.
+   */
+  async renderByEmail(
+    tenantId: string,
+    email: string,
+    externalId?: string,
+  ): Promise<ScimUser> {
+    const subject = await this.subjectFor(tenantId, canonical(email));
+    if (!subject) throw ScimError.notFound();
+    return this.resolveIdentity(tenantId, subject, externalId);
+  }
+
   /** The live state behind an identity row: a Membership (active) or a pending Invitation. */
   private async subjectFor(
     tenantId: string,
@@ -187,11 +208,19 @@ export class ScimUsersService {
   private async resolveIdentity(
     tenantId: string,
     subject: Subject,
+    /** Only a write supplies this — a read never invents an `externalId` the IdP did not send,
+     *  and never CLEARS one it sent earlier (hence the conditional spread, not `?? null`). */
+    externalId?: string,
   ): Promise<ScimUser> {
     const identity = await getPrisma().scimIdentity.upsert({
       where: { tenantId_email: { tenantId, email: subject.email } },
-      create: { tenantId, email: subject.email, userId: subject.userId },
-      update: { userId: subject.userId },
+      create: {
+        tenantId,
+        email: subject.email,
+        userId: subject.userId,
+        ...(externalId ? { externalId } : {}),
+      },
+      update: { userId: subject.userId, ...(externalId ? { externalId } : {}) },
     });
     return this.render(identity, subject);
   }

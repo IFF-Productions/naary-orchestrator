@@ -1,8 +1,26 @@
-import { Controller, Get, Param, Query, UseGuards } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  Param,
+  Post,
+  Query,
+  Res,
+  UseGuards,
+} from "@nestjs/common";
 import { ApiExcludeController } from "@nestjs/swagger";
 import { Throttle } from "@nestjs/throttler";
+import type { Response } from "express";
 import { Public } from "../auth/public.decorator";
-import { ScimTenant, ScimGuard } from "./scim.guard";
+import { ScimProvisioningService } from "./scim-provisioning.service";
+import {
+  ScimConnectionCtx,
+  ScimTenant,
+  ScimGuard,
+  type ScimWriteContext,
+} from "./scim.guard";
 import { ScimUsersService } from "./scim-users.service";
 import type { ScimListResponse, ScimUser } from "./scim-user.response";
 
@@ -13,6 +31,16 @@ import type { ScimListResponse, ScimUser } from "./scim-user.response";
 const SERVICE_PROVIDER_CONFIG = {
   schemas: ["urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig"],
   documentationUri: "https://github.com/IFF-Productions/naary-orchestrator",
+  /**
+   * STILL FALSE IN SLICE 2, WHICH DOES SUPPORT CREATE AND DELETE.
+   *
+   * PATCH's dominant use here is `active: false` — the soft de-provision — and `Membership`
+   * has no deactivated state to put a subject into (see ScimProvisioningService's docstring
+   * for the two candidate answers and why picking one is a product decision). Advertising
+   * `patch: true` and then 400ing the operation every IdP would send is strictly worse than
+   * this: an IdP configured to DELETE on de-provision works completely, and one configured to
+   * deactivate is told up front rather than discovering it one retry loop at a time.
+   */
   patch: { supported: false },
   bulk: { supported: false, maxOperations: 0, maxPayloadSize: 0 },
   // The one filter production we implement — see scim-filter.ts.
@@ -32,19 +60,18 @@ const SERVICE_PROVIDER_CONFIG = {
 } as const;
 
 /**
- * SCIM 2.0 — READ ONLY (#1075 slice 1, design LDAP-DIRECTORY.md §3.1).
+ * SCIM 2.0 — reads (slice 1) + provisioning/de-provisioning (slice 2). #1075, design
+ * LDAP-DIRECTORY.md §3.1.
  *
  * `@Public()` for the same reason the SAML ACS is: the caller is a machine presenting its own
  * credential, not a Naary user, so the global AuthGuard has nothing to do here. Authentication
  * happens in {@link ScimGuard}, which runs after it and attaches a tenant WITHOUT attaching a
  * principal.
  *
- * DELIBERATELY NO WRITES IN THIS SLICE. No POST/PUT/PATCH/DELETE, no /Groups, no /Schemas,
- * no /ResourceTypes. This slice exists to prove the credential model and tenant scoping, and
- * a read-only surface means a misconfigured IdP pointed at it can do nothing but read its own
- * workspace — de-provisioning is destructive and arrives deliberately, in slice 2.
+ * WHAT SLICE 2 ADDS: `POST /Users` (provision) and `DELETE /Users/{id}` (de-provision).
+ * Still no PUT, no PATCH, no /Groups, no /Schemas, no /ResourceTypes.
  *
- * ── FOR WHOEVER BUILDS SLICE 2, READ THIS BEFORE YOU WRITE A DELETE ─────────────────────
+ * ── THE RULE SLICE 1 WROTE HERE, NOW HONOURED ───────────────────────────────────────────
  * The de-provision path MUST route through `MembersService.removeMember`. It is the only
  * removal path that deletes the `GroupMember` rows alongside the `Membership`, invalidates
  * BOTH the membership cache and the tenant's permission cache, reports `strandedApprovals`,
@@ -53,6 +80,12 @@ const SERVICE_PROVIDER_CONFIG = {
  * would keep cached grants past their TTL, silently regain their old groups if re-added, and
  * strand a paused compliance gate with nobody able to decide it and no record that it
  * happened. That is not a refactor to do later; it is the contract of this feature.
+ *
+ * It has a twin that slice 1 did not name: a subject who never signed in has NO Membership,
+ * only a pending Invitation, and de-provisioning must revoke that too via
+ * `MembersService.revokeInvitation` — otherwise accept-on-login re-provisions them at their
+ * next sign-in. Both live in {@link ScimProvisioningService.deprovision}; nothing in this
+ * controller may take a shortcut past it.
  * ────────────────────────────────────────────────────────────────────────────────────────
  *
  * Excluded from the OpenAPI document: SCIM is a published external standard with its own
@@ -64,7 +97,10 @@ const SERVICE_PROVIDER_CONFIG = {
 @UseGuards(ScimGuard)
 @Controller("scim/v2")
 export class ScimController {
-  constructor(private readonly users: ScimUsersService) {}
+  constructor(
+    private readonly users: ScimUsersService,
+    private readonly provisioning: ScimProvisioningService,
+  ) {}
 
   /** Unauthenticated-looking but still guarded: an IdP sends its bearer here too, and gating
    *  it keeps our capability list from being a public fingerprint of the deployment. */
@@ -96,5 +132,44 @@ export class ScimController {
     @Param("id") id: string,
   ): Promise<ScimUser> {
     return this.users.get(tenantId, id);
+  }
+
+  /**
+   * Provision a subject (RFC 7644 §3.3). Creates a pending Invitation — see
+   * {@link ScimProvisioningService.provision} for why it cannot be a Membership.
+   *
+   * The `Location` header is set from the resource we just rendered rather than from anything
+   * the payload said, so an IdP that follows it lands on this connection's own tenant-scoped
+   * id and no other.
+   */
+  @Throttle({ default: { limit: 60, ttl: 60_000 } })
+  @Post("Users")
+  async create(
+    @ScimConnectionCtx() ctx: ScimWriteContext,
+    @Body() body: unknown,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<ScimUser> {
+    const user = await this.provisioning.provision(ctx, body);
+    res.setHeader("Location", user.meta.location);
+    return user;
+  }
+
+  /**
+   * De-provision a subject (RFC 7644 §3.6). 204 on success, and a 204 here is a PROMISE that
+   * the membership and any pending invitation are gone — {@link
+   * ScimProvisioningService.deprovision} asserts that rather than trusting a return value.
+   *
+   * Rate-limited like the other write: a de-provisioning storm from a misconfigured IdP is the
+   * failure mode this endpoint has, and the limit bounds how much of one lands per minute
+   * without breaking a legitimate bulk sync.
+   */
+  @Throttle({ default: { limit: 60, ttl: 60_000 } })
+  @Delete("Users/:id")
+  @HttpCode(204)
+  remove(
+    @ScimConnectionCtx() ctx: ScimWriteContext,
+    @Param("id") id: string,
+  ): Promise<void> {
+    return this.provisioning.deprovision(ctx, id);
   }
 }

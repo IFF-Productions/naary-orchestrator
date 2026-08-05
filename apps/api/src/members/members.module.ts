@@ -11,5 +11,9 @@ import { MembersService } from "./members.service";
   imports: [ExecutionsModule],
   controllers: [MembersController],
   providers: [MembersService, MailerService],
+  // Exported for ScimModule (#1075 slice 2): SCIM provisioning/de-provisioning must reuse the
+  // member lifecycle — invite / removeMember / revokeInvitation — rather than write Membership
+  // and Invitation rows itself. Exporting it is what makes that reuse structural.
+  exports: [MembersService],
 })
 export class MembersModule {}

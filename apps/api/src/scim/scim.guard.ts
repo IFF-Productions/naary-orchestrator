@@ -7,14 +7,24 @@ import {
 import { ScimConnectionService } from "./scim-connection.service";
 import { ScimError } from "./scim.errors";
 
+/**
+ * Everything a WRITE handler is allowed to know about its caller (#1075 slice 2).
+ *
+ * All three fields come from the verified `ScimConnection` row and none from the request:
+ * `tenantId` is the only workspace this connection may touch, `allowedEmailDomains` is the §5
+ * invariant a provisioning write must satisfy, and `connectionId` is what the AuditEvent names
+ * as the actor — a de-provision with no human behind it must still say WHICH connection did it.
+ */
+export interface ScimWriteContext {
+  connectionId: string;
+  tenantId: string;
+  allowedEmailDomains: string[];
+}
+
 /** What the guard attaches. Note the absence of `principal` — see the guard docstring. */
 export interface ScimRequest {
   headers?: Record<string, string | string[] | undefined>;
-  scim?: {
-    connectionId: string;
-    tenantId: string;
-    allowedEmailDomains: string[];
-  };
+  scim?: ScimWriteContext;
 }
 
 /**
@@ -71,5 +81,22 @@ export const ScimTenant = createParamDecorator(
     const tenantId = req.scim?.tenantId;
     if (!tenantId) throw ScimError.unauthorized();
     return tenantId;
+  },
+);
+
+/**
+ * The whole verified connection, for the WRITE handlers (#1075 slice 2).
+ *
+ * Reads need only the tenant; a write also needs the domain allowlist it must satisfy and the
+ * connection id it will be audited under. Same rule as {@link ScimTenant}: everything here
+ * comes from the token's own row, there is no fallback to anything the request said, and a
+ * missing `req.scim` is a 401 rather than a guessed default.
+ */
+export const ScimConnectionCtx = createParamDecorator(
+  (_data: unknown, ctx: ExecutionContext): ScimWriteContext => {
+    const req = ctx.switchToHttp().getRequest<ScimRequest>();
+    const scim = req.scim;
+    if (!scim?.tenantId || !scim.connectionId) throw ScimError.unauthorized();
+    return scim;
   },
 );
