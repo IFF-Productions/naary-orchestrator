@@ -133,6 +133,37 @@ describe("callMqttPublish", () => {
     expect(connectUrl).not.toContain("broker.example.com");
   });
 
+  it("keeps TLS validation on the HOSTNAME while dialing the pinned address", async () => {
+    // The bug this exists for: pinning rewrites the URL to the IP, which is the point — DNS
+    // rebinding cannot defeat it — but it also removes the name TLS validates against. Without an
+    // explicit servername an `mqtts://` broker with an ordinary hostname certificate either fails
+    // to verify or gets validated against the address. `smtp-pin.ts` documents the same trap.
+    // Missed by the integration spec because Mosquitto there runs plaintext `mqtt://`.
+    vi.spyOn(__mqttDeps, "resolvePinnedHost").mockResolvedValue("203.0.113.7");
+    await callMqttPublish(cfg(), {}, META);
+    expect(connectUrl).toContain("203.0.113.7");
+    expect(connectOptions?.servername).toBe("broker.example.com");
+  });
+
+  it("sets NO servername for a plaintext broker, or for a host that was already an IP", async () => {
+    // Plaintext: there is no TLS handshake to name.
+    vi.spyOn(__mqttDeps, "resolveMqttConnection").mockResolvedValue({
+      url: "mqtt://broker.example.com:1883",
+    });
+    vi.spyOn(__mqttDeps, "resolvePinnedHost").mockResolvedValue("203.0.113.7");
+    await callMqttPublish(cfg(), {}, META);
+    expect(connectOptions?.servername).toBeUndefined();
+
+    // IP literal: nothing was pinned (no DNS), and asserting a servername would be a claim no
+    // certificate can satisfy.
+    vi.spyOn(__mqttDeps, "resolveMqttConnection").mockResolvedValue({
+      url: "mqtts://203.0.113.7:8883",
+    });
+    vi.spyOn(__mqttDeps, "resolvePinnedHost").mockResolvedValue("203.0.113.7");
+    await callMqttPublish(cfg(), {}, META);
+    expect(connectOptions?.servername).toBeUndefined();
+  });
+
   it("NEVER puts the password in the thrown error", async () => {
     publishImpl = async () => {
       throw new Error("Connection refused: Not authorized");

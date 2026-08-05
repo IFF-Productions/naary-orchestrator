@@ -460,6 +460,14 @@ export async function resolveMqttConnection(
       `Connection '${connectionId}' has an MQTT URL that isn't a URL (expected mqtts://host:port).`,
     );
   }
+  // A URL can PARSE with no hostname (`mqtts://:8883`), and the failure then surfaces from inside
+  // the egress guard as an SSRF-shaped error about an empty host — which names neither the
+  // connection nor what is wrong with it.
+  if (!new URL(cfg.url).hostname) {
+    throw new Error(
+      `Connection '${connectionId}' has an MQTT URL with no host (expected mqtts://host:port).`,
+    );
+  }
   if (!["mqtt", "mqtts", "ws", "wss"].includes(scheme)) {
     throw new Error(
       `Connection '${connectionId}' has an unsupported MQTT scheme '${scheme}' (expected mqtt, mqtts, ws or wss).`,

@@ -75,21 +75,28 @@ function makeWorker(): Promise<Worker> {
 function awaitMessage(topic: string, timeoutMs = 15_000): Promise<string> {
   return new Promise((resolve, reject) => {
     const client = mqtt.connect(url, { reconnectPeriod: 0 });
-    const timer = setTimeout(() => {
-      void client.endAsync(true);
-      reject(new Error(`no message on ${topic} within ${timeoutMs}ms`));
-    }, timeoutMs);
-    client.on("error", reject);
+    let timer: NodeJS.Timeout;
+    // ONE teardown, used by every exit — resolve, reject and timeout alike. The first version
+    // cleaned up only on the happy path, so a failed connect or subscribe left the timer scheduled
+    // (holding the event loop open) and the client connected until it fired. That is how an
+    // integration suite turns from "failing" into "hanging", which is much harder to read.
+    const done = (err: Error | null, value?: string) => {
+      clearTimeout(timer);
+      void client.endAsync(true).catch(() => undefined);
+      if (err) reject(err);
+      else resolve(value as string);
+    };
+    timer = setTimeout(
+      () => done(new Error(`no message on ${topic} within ${timeoutMs}ms`)),
+      timeoutMs,
+    );
+    client.on("error", (e) => done(e as Error));
     client.on("connect", () => {
       client.subscribe(topic, { qos: 1 }, (err) => {
-        if (err) reject(err);
+        if (err) done(err);
       });
     });
-    client.on("message", (_t, payload) => {
-      clearTimeout(timer);
-      void client.endAsync(true);
-      resolve(payload.toString());
-    });
+    client.on("message", (_t, payload) => done(null, payload.toString()));
   });
 }
 

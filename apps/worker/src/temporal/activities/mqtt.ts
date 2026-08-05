@@ -124,7 +124,14 @@ export async function callMqttPublish(
   }
 
   // Pin the host BEFORE connecting, so a blocked address fails before any socket is opened.
+  //
+  // And keep the ORIGINAL hostname as the TLS servername. Rewriting the URL to the pinned IP is
+  // the whole point — it is what DNS rebinding cannot defeat — but it also removes the name TLS
+  // validates against, so an `mqtts://` broker with a certificate for its hostname (the ordinary
+  // case) would fail to verify, or worse, be validated against the address. `smtp-pin.ts` documents
+  // exactly this trap for nodemailer; the same one applies here.
   const url = new URL(conn.url);
+  const originalHost = url.hostname;
   try {
     const pinned = await __mqttDeps.resolvePinnedHost(url.hostname);
     url.hostname = pinned;
@@ -132,7 +139,7 @@ export async function callMqttPublish(
     if (e instanceof BlockedEgressError) {
       throw ApplicationFailure.nonRetryable(
         // Names the host so the author can fix it; carries no credential.
-        `MQTT broker '${new URL(conn.url).hostname}' isn't allowed — brokers must be public hosts (private/reserved addresses are blocked).`,
+        `MQTT broker '${originalHost}' isn't allowed — brokers must be public hosts (private/reserved addresses are blocked).`,
         "MQTT_EGRESS_BLOCKED",
       );
     }
@@ -140,6 +147,12 @@ export async function callMqttPublish(
   }
 
   const mqtt = await __mqttDeps.loadMqtt();
+  // Only for the TLS schemes, and never when the configured host was ALREADY an IP literal: there
+  // is no name to validate against there, and asserting one would be a claim the certificate
+  // cannot satisfy. Mirrors smtp-pin's "IP-literal host returned unchanged".
+  const isTls = url.protocol === "mqtts:" || url.protocol === "wss:";
+  const hostWasIp = originalHost === url.hostname;
+  const servername = isTls && !hostWasIp ? originalHost : undefined;
   const timeoutMs = cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const qos = cfg.qos ?? 1;
   const retain = cfg.retain ?? false;
@@ -148,6 +161,8 @@ export async function callMqttPublish(
     username: conn.username,
     password: conn.password,
     ...(conn.clientId ? { clientId: conn.clientId } : {}),
+    // TLS cert validation stays on the NAME even though the socket dials the pinned address.
+    ...(servername ? { servername } : {}),
     // A PUBLISH-only client must not resume anything: `clean: true` tells the broker to discard any
     // session state for this client id. The persistent-session behaviour belongs to the trigger
     // (slice 3b), and inheriting it here would have a publish quietly collect a subscriber's
