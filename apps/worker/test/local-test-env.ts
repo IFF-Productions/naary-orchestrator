@@ -118,8 +118,15 @@ export function isRetryableStartupFailure(error: unknown): boolean {
  */
 const startedAt = new Map<string, number>();
 
-/** A single host-resource reading. Portable (node:os only) — no platform tools, works on the Linux
- *  and Windows runners alike. */
+/**
+ * A single host-resource reading. Portable (node:os only) — no platform tools, works on the Linux
+ * and Windows runners alike.
+ *
+ * HOST-scoped, deliberately. `worker-e2e` runs on a bare GitHub-hosted `ubuntu-latest` with no
+ * `container:` key (ci.yml), so these numbers ARE the runner's. If that job is ever moved into a
+ * memory-limited container, `freemem`/`totalmem` would report the HOST's numbers instead and a
+ * cgroup OOM kill would print as plenty-of-memory — read the cgroup limit here if that day comes.
+ */
 function resourceSnapshot(): string {
   const free = freemem();
   const total = totalmem();

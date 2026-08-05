@@ -1439,6 +1439,14 @@ const WORKER_BACKOFF_MS = [0, 250, 750];
  * application code — and classifying it took a local repro plus a log grep. It is NOT retried: a
  * dead dev server does not come back, so a retry would only spend three attempts to report the same
  * thing, and blanket-retrying would hide the very trend the warning above deliberately logs.
+ *
+ * SCOPE: this covers every spec that builds its worker HERE, which is all the interpreter e2e files
+ * including the one #1101 was reported from. A dozen-odd other specs (`branching`, `chat-session`,
+ * `interpreter-handoff`, `eval-run`, the `usecase-*`/`kafka-*` integration files) still call
+ * `Worker.create` themselves and will surface the raw `TransportError` unclassified. Routing them
+ * through this helper is a worthwhile follow-up, but it is a refactor of fifteen files rather than
+ * part of the diagnosis — so if you are reading a raw "Namespace … could not be described" with no
+ * INFRASTRUCTURE line, check whether that spec is one of them before concluding this is broken.
  */
 export async function makeWorker(
   env: TestWorkflowEnvironment,
