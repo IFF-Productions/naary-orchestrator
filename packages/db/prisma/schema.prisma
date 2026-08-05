@@ -78,6 +78,49 @@ model CliRefreshToken {
   @@index([tenantId, userId])
 }
 
+// One in-flight `naary auth` browser login (design #1078 §2 shape B, slice 3).
+//
+// The device-code handshake in one row: the CLI creates it (`POST /auth/cli/start`), a signed-in
+// browser binds an identity to it (`POST /auth/cli/approve`), and the CLI redeems it exactly once
+// (`POST /auth/cli/exchange`) for an access + refresh token pair. It holds NO credential material
+// after that — it is the handshake, not the session.
+//
+// The security of the whole flow is two columns: `deviceCodeHash` and `consumedAt`.
+model CliAuthRequest {
+  id             String @id @default(uuid())
+  // sha256 hex of the DEVICE code — the 32-byte secret only the CLI process that called /start ever
+  // holds. It is what binds the browser's approval to that one process (§2's "state" role in shape
+  // B), so it is stored hashed exactly like ApiToken/CliRefreshToken and never logged.
+  deviceCodeHash String @unique
+  // The short code the human reads off their terminal and types into the browser. Stored in the
+  // CLEAR on purpose: it is a lookup key, not a credential — knowing it authorizes nothing without
+  // the device code, and it must be findable by exact match. Canonical form is UPPERCASE, no
+  // separators (the CLI displays it hyphenated; the API normalizes on the way in).
+  userCode       String @unique
+  // "naary CLI — <hostname>" (§5). Copied onto the minted ApiToken so a CLI session is identifiable
+  // and revocable in Settings. Caller-supplied hostname, sanitized before it lands here.
+  label          String
+  createdAt      DateTime  @default(now())
+  // Short (10 min). An unredeemed handshake must not sit around waiting to be approved by a user
+  // who has long since forgotten it. Enforced server-side on approve AND on exchange.
+  expiresAt      DateTime
+  // Approval binding, written together in ONE compare-and-set: the identity the exchange will mint
+  // for. Null until a signed-in owner/admin approves. Never rewritten — a second approval of the
+  // same request is refused rather than allowed to rebind it to a different user.
+  approvedAt     DateTime?
+  tenantId       String?
+  userId         String?
+  // Set by an explicit "that wasn't me" in the browser. Terminal, like approval.
+  deniedAt       DateTime?
+  // SINGLE USE. Set by the exchange that mints, as a compare-and-set on NULL — that CAS is the only
+  // thing that makes a device code redeemable exactly once under concurrency. A row with this set
+  // is treated as unknown by the exchange, so a replayed code is indistinguishable from a bogus one.
+  consumedAt     DateTime?
+
+  // Sweeping expired handshakes (a later slice / cron) reads this; nothing on the hot path does.
+  @@index([expiresAt])
+}
+
 model Execution {
   workflowId  String   @id // Temporal workflowId
   tenantId    String

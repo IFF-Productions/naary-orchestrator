@@ -2,6 +2,12 @@ import { createHash, randomBytes } from "node:crypto";
 import { Injectable } from "@nestjs/common";
 import { getPrisma } from "@naary/db";
 
+/** Shared stem of every CLI-minted access-token label (#1078 §5 — "a token indistinguishable from
+ *  four others is a token nobody revokes"). Declared HERE, next to the sweep that matches on it and
+ *  not in the slice-3 handshake file, so this service — the one path REST, /api/v1 and MCP all
+ *  authenticate through — depends on nothing above it. Every CLI token label must start with it. */
+export const CLI_TOKEN_LABEL_STEM = "naary CLI";
+
 /** sha256 hex — the only form of the token persisted; the plaintext is shown once. */
 const hashToken = (token: string): string =>
   createHash("sha256").update(token).digest("hex");
@@ -65,6 +71,33 @@ export class ApiTokenService {
       lastUsedAt: r.lastUsedAt,
       groupCount: r._count.groupMemberships,
     }));
+  }
+
+  /**
+   * Delete this tenant's ALREADY-EXPIRED CLI-minted tokens (#1078 slice 3).
+   *
+   * A CLI session mints a 12-hour access token and refreshes it, so without a sweep a 90-day
+   * refresh family leaves ~180 dead rows in the workspace's token list — and §5's "a token
+   * indistinguishable from four others is a token nobody revokes" stops holding.
+   *
+   * Safe by construction, and narrowly scoped on purpose:
+   *  - only rows PAST `expiresAt`, which `verify()` already refuses, so nothing loses a capability;
+   *  - only rows whose label starts with the CLI stem, so a hand-made token is never touched;
+   *  - `expiresAt: null` (every Settings- and CI-minted token) can't match `lt`, so non-expiring
+   *    tokens are outside this query entirely.
+   */
+  async pruneExpiredCliTokens(
+    tenantId: string,
+    now: Date = new Date(),
+  ): Promise<number> {
+    const res = await getPrisma().apiToken.deleteMany({
+      where: {
+        tenantId,
+        label: { startsWith: CLI_TOKEN_LABEL_STEM },
+        expiresAt: { lt: now },
+      },
+    });
+    return res.count;
   }
 
   /** Revoke a tenant's token by id (tenant-scoped). Returns true if a row was removed. */

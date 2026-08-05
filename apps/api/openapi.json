@@ -184,6 +184,366 @@
         ]
       }
     },
+    "/auth/cli/start": {
+      "post": {
+        "operationId": "CliAuthController_start",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CliAuthStartDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CliAuthStartResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Begin a CLI browser login (device-code handshake).",
+        "tags": [
+          "cli-auth"
+        ]
+      }
+    },
+    "/auth/cli/approve": {
+      "post": {
+        "operationId": "CliAuthController_approve",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CliAuthDecisionDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CliAuthDecisionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Approve a pending CLI login as the signed-in user.",
+        "tags": [
+          "cli-auth"
+        ]
+      }
+    },
+    "/auth/cli/deny": {
+      "post": {
+        "operationId": "CliAuthController_deny",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CliAuthDecisionDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CliAuthDecisionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Refuse a pending CLI login.",
+        "tags": [
+          "cli-auth"
+        ]
+      }
+    },
+    "/auth/cli/exchange": {
+      "post": {
+        "operationId": "CliAuthController_exchange",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CliAuthExchangeDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CliAuthExchangeResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Poll a CLI login and redeem it for tokens (single use).",
+        "tags": [
+          "cli-auth"
+        ]
+      }
+    },
+    "/auth/cli/refresh": {
+      "post": {
+        "operationId": "CliAuthController_refresh",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CliAuthRefreshDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CliAuthExchangeResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "summary": "Rotate a CLI refresh token into a fresh access token.",
+        "tags": [
+          "cli-auth"
+        ]
+      }
+    },
     "/tenants/{id}/groups": {
       "get": {
         "description": "Every group in the workspace with its members, attached API tokens, and grants. Owner/admin only.",
@@ -17607,6 +17967,148 @@
         },
         "required": [
           "flags"
+        ]
+      },
+      "CliAuthStartDto": {
+        "type": "object",
+        "properties": {
+          "hostname": {
+            "type": "string",
+            "example": "hassans-macbook",
+            "description": "Device name shown in Settings as `naary CLI — <hostname>`, so the session is identifiable and revocable. Sanitized server-side."
+          }
+        }
+      },
+      "CliAuthStartResponse": {
+        "type": "object",
+        "properties": {
+          "deviceCode": {
+            "type": "string",
+            "description": "The CLI's secret for this handshake. Hold it in memory, never print it, never put it in a URL."
+          },
+          "userCode": {
+            "type": "string",
+            "example": "PQ4M-TWZ9",
+            "description": "Short code to show the human. They type it into the browser page at `verificationUri`."
+          },
+          "verificationUri": {
+            "type": "string",
+            "example": "https://app.example.com/app/cli-login",
+            "description": "Where the human approves. Server-derived (APP_BASE_URL/CORS_ORIGINS), never from the request. Relative when no public base URL is configured."
+          },
+          "expiresIn": {
+            "type": "number",
+            "example": 600,
+            "description": "Seconds until this handshake expires."
+          },
+          "interval": {
+            "type": "number",
+            "example": 5,
+            "description": "Seconds the CLI should wait between /auth/cli/exchange polls."
+          }
+        },
+        "required": [
+          "deviceCode",
+          "userCode",
+          "verificationUri",
+          "expiresIn",
+          "interval"
+        ]
+      },
+      "CliAuthDecisionDto": {
+        "type": "object",
+        "properties": {
+          "userCode": {
+            "type": "string",
+            "example": "PQ4M-TWZ9",
+            "description": "The code shown in the terminal. Case- and separator-insensitive."
+          }
+        },
+        "required": [
+          "userCode"
+        ]
+      },
+      "CliAuthDecisionResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "example": "approved",
+            "enum": [
+              "approved",
+              "denied"
+            ]
+          },
+          "label": {
+            "type": "string",
+            "example": "naary CLI — hassans-macbook",
+            "description": "Label the minted session will carry in Settings."
+          }
+        },
+        "required": [
+          "status",
+          "label"
+        ]
+      },
+      "CliAuthExchangeDto": {
+        "type": "object",
+        "properties": {
+          "deviceCode": {
+            "type": "string",
+            "description": "The `deviceCode` returned by /auth/cli/start."
+          }
+        },
+        "required": [
+          "deviceCode"
+        ]
+      },
+      "CliAuthExchangeResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "example": "authorized",
+            "enum": [
+              "pending",
+              "denied",
+              "authorized"
+            ]
+          },
+          "accessToken": {
+            "type": "string",
+            "description": "The `nry_` access token. Present only when status=authorized."
+          },
+          "accessTokenExpiresAt": {
+            "type": "string",
+            "description": "ISO expiry of the access token (12 hours)."
+          },
+          "refreshToken": {
+            "type": "string",
+            "description": "The `nryr_` refresh token. Single-use: every refresh returns its successor."
+          },
+          "refreshTokenExpiresAt": {
+            "type": "string",
+            "description": "ISO absolute expiry of the refresh family (90 days)."
+          },
+          "tenantId": {
+            "type": "string",
+            "description": "Workspace the session is bound to."
+          }
+        },
+        "required": [
+          "status"
+        ]
+      },
+      "CliAuthRefreshDto": {
+        "type": "object",
+        "properties": {
+          "refreshToken": {
+            "type": "string",
+            "description": "The current `nryr_` refresh token. Rotated on every use."
+          }
+        },
+        "required": [
+          "refreshToken"
         ]
       },
       "GroupMemberResponse": {
