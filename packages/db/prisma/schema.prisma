@@ -43,6 +43,41 @@ model ApiToken {
   @@index([tenantId])
 }
 
+// A rotating CLI refresh token (design #1078 §4, slice 2).
+//
+// DELIBERATELY NOT a flag on ApiToken. A refresh token is not an API credential — it may call
+// exactly one endpoint. Folding it in would make one verify() answer two different questions, and
+// the failure mode is a refresh token that accidentally authenticates a real request. A separate
+// table makes that impossible rather than merely unlikely.
+//
+// Rotation is single-use: every successful refresh mints a successor and stamps `rotatedAt` on the
+// presented row, so the old value is dead. Presenting an already-rotated row is either the
+// concurrent-CLI race (inside the 60s grace window ⇒ accepted) or a leak (outside it ⇒ the whole
+// `familyId` is revoked). See CliRefreshTokenService for the state machine.
+model CliRefreshToken {
+  id        String @id @default(uuid())
+  tenantId  String
+  userId    String // Firebase uid / Membership.userId — the human this session belongs to
+  tokenHash String @unique // sha256 hex, exactly like ApiToken; the plaintext is never stored
+  // Rotation lineage. Every successor of the token minted at login carries the SAME familyId, so
+  // reuse detection can kill the lineage rather than only the leaked copy.
+  familyId  String
+  createdAt DateTime  @default(now())
+  // Absolute cap (90 days), set once at login and INHERITED unchanged by every successor —
+  // re-deriving it on each rotation would make "90-day absolute" unbounded.
+  expiresAt DateTime
+  // Drives the 30-day idle expiry. NULL on a freshly minted row (idle is measured from createdAt).
+  lastUsedAt DateTime?
+  // Set when this row is superseded; the 60s grace window is measured from here and never slid
+  // forward, so a repeatedly-replayed token cannot keep renewing its own window.
+  rotatedAt  DateTime?
+  // Set by reuse detection (family-wide) or an explicit logout. A revoked row never authenticates.
+  revokedAt  DateTime?
+
+  @@index([familyId])
+  @@index([tenantId, userId])
+}
+
 model Execution {
   workflowId  String   @id // Temporal workflowId
   tenantId    String
