@@ -8,7 +8,7 @@
     "dev": "pnpm run gen:api-types && vite",
     "build": "pnpm run gen:api-types && tsc --noEmit -p tsconfig.json && vite build",
     "preview": "vite preview",
-    "typecheck": "pnpm run gen:api-types && tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.storybook.json",
+    "typecheck": "pnpm run gen:api-types && tsc --noEmit -p tsconfig.test.json && tsc --noEmit -p tsconfig.storybook.json",
     "typecheck:stories": "tsc --noEmit -p tsconfig.storybook.json",
     "test:e2e": "playwright test",
     "gen:api-types": "openapi-typescript ../api/openapi.json -o src/lib/api/schema.d.ts",

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { computeItemsRegions } from "../src/items-region";
 import { validateGraph } from "../src/validate-graph";
-import type { GraphDef, NodeDef } from "../src/types";
+import type { EdgeDef, GraphDef, NodeDef } from "../src/types";
 
 /** Build a graph from a node list + edge pairs. */
 function g(nodes: NodeDef[], edges: [string, string][]): GraphDef {
@@ -320,8 +320,9 @@ describe("computeItemsRegions — fail closed (adversarial)", () => {
 });
 
 // Conditional edge helper (the plain `g()` only makes unconditional edges).
-type CEdge = { from: string; to: string; condition?: object };
-function gc(nodes: NodeDef[], edges: CEdge[]): GraphDef {
+// Use the real EdgeDef: the local `{ condition?: object }` stand-in was not assignable to it,
+// and it also let a malformed condition into a fixture without complaint.
+function gc(nodes: NodeDef[], edges: EdgeDef[]): GraphDef {
   return { startNodeId: nodes[0].id, nodes, edges };
 }
 const eq = (nodeId: string, field: string, value: unknown) => ({

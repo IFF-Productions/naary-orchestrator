@@ -9,7 +9,17 @@ import { nameEventRejection } from "../src/lib/sentry-rejections";
  */
 
 /** A Sentry event as the SDK builds it for a non-Error rejection. */
-const sentryEvent = () => ({
+/**
+ * `nameEventRejection` is generic in the event, so the fixture's own type is what the
+ * assertions see. Declare `tags` here — inferred from the literal alone it was absent, and
+ * every `out.tags` assertion below was a type error.
+ */
+type SentryEventFixture = {
+  exception: { values: { type: string; value: string }[] };
+  tags?: Record<string, unknown>;
+};
+
+const sentryEvent = (): SentryEventFixture => ({
   exception: {
     values: [
       {

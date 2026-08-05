@@ -4,7 +4,7 @@ vi.mock("../src/lib/firebase-lazy", () => ({
   getBearerToken: async () => "t",
 }));
 
-import { http, type HttpError } from "../src/lib/api/http";
+import { http, HttpError } from "../src/lib/api/http";
 
 /**
  * The server's REASON must reach `e.message`.
@@ -28,7 +28,22 @@ function failWith(status: number, body: unknown) {
   );
 }
 
-const err = (p: Promise<unknown>) => p.catch((e) => e as HttpError);
+// Returns the rejection, typed. `p.catch((e) => e as HttpError)` widened back to `unknown`
+// (the resolved branch is still in the union), so every `e.message` read below was a type
+// error — invisible until #1099 put these files under a typechecker.
+//
+// `instanceof` rather than a cast: `as HttpError` would make a rejection of some OTHER type
+// read as `undefined` fields, and `expect(e.serverMessage).toBeUndefined()` below would then
+// PASS on the wrong error. What each test wants to know is that `http()` threw an HttpError.
+const err = async (p: Promise<unknown>): Promise<HttpError> => {
+  try {
+    await p;
+  } catch (e) {
+    if (e instanceof HttpError) return e;
+    throw new Error(`expected an HttpError, got: ${String(e)}`);
+  }
+  throw new Error("expected the request to reject, but it resolved");
+};
 
 describe("http() error message", () => {
   it("leads with the server's reason and keeps the request context", async () => {

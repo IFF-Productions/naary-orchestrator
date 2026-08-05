@@ -123,7 +123,10 @@ describe("ApiClient.request", () => {
     const err = await client
       .request("/runs", { method: "POST" })
       .catch((e) => e);
-    expect(err).toBeInstanceOf(ApiError);
+    // `request` resolves `unknown`, so the rejection value is `unknown` too. Narrow with a
+    // real check rather than a cast: if it is not an ApiError the throw fails the test with
+    // the actual value, which is more informative than `expect(...).toBeInstanceOf` alone.
+    if (!(err instanceof ApiError)) throw err;
     expect(err.status).toBe(422);
     expect(err.message).toContain("workflowKey is required");
   });
@@ -132,6 +135,7 @@ describe("ApiClient.request", () => {
     const { fetch } = fakeFetch({ ok: false, status: 401, body: "" });
     const client = new ApiClient(cfg(), fetch);
     const err = await client.request("/runs").catch((e) => e);
+    if (!(err instanceof ApiError)) throw err;
     expect(err.message).toContain("naary auth status");
   });
 });

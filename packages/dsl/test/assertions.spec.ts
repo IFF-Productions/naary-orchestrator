@@ -232,17 +232,19 @@ describe("llmJudge", () => {
 
 describe("buildPersistableOutcome — the privacy allowlist", () => {
   it("keeps ONLY label/kind/passed/score/error, dropping anything else a caller passes", () => {
-    const o = buildPersistableOutcome({
+    // Extra fields a future refactor might spread in — must not survive. Built as a variable
+    // so the excess properties are actually present at runtime (an object literal passed
+    // inline would be rejected by the excess-property check). The old inline
+    // `...({ ... } as never)` spread did not typecheck at all — `never` cannot be spread.
+    const withExtras = {
       label: "l",
-      kind: "llmJudge",
+      kind: "llmJudge" as const,
       passed: true,
       score: 0.9,
-      // Extra fields a future refactor might spread in — must not survive.
-      ...({
-        reason: "because the OUTPUT said Ada's card was declined",
-        actual: "secret",
-      } as never),
-    });
+      reason: "because the OUTPUT said Ada's card was declined",
+      actual: "secret",
+    };
+    const o = buildPersistableOutcome(withExtras);
     expect(Object.keys(o).sort()).toEqual(["kind", "label", "passed", "score"]);
     expect(JSON.stringify(o)).not.toContain("Ada");
     expect(JSON.stringify(o)).not.toContain("secret");

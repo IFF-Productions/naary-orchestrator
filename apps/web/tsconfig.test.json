@@ -1,0 +1,15 @@
+// Typecheck the web app's SOURCE **and** its `test/` files (97 vitest specs that the root
+// `vitest run` executes but no tsconfig used to include — tsconfig.json's include is
+// `["src", "vite.config.ts"]`).
+//
+// A separate project rather than widening tsconfig.json's include: that config is what
+// `pnpm build` runs before `vite build`, and it is also what the web Docker image typechecks
+// — where only @naary/dsl is prebuilt. Test files import more workspace packages than that,
+// so folding them in would break the image build. Same reasoning as tsconfig.storybook.json.
+//
+// Wired into CI by the `typecheck` script in package.json, which the root `pnpm typecheck`
+// (`tsc -b && pnpm -r run typecheck`) fans out to. See #1099.
+{
+  "extends": "./tsconfig.json",
+  "include": ["src", "test", "vite.config.ts"]
+}

@@ -6,7 +6,8 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsc -b"
+    "build": "tsc -b",
+    "typecheck": "tsc --noEmit -p tsconfig.test.json"
   },
   "dependencies": {
     "@temporalio/workflow": "^1.21.1"

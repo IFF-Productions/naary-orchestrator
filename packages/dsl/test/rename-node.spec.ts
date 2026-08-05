@@ -16,7 +16,9 @@ const graph = (over: Partial<GraphDef> = {}): GraphDef => ({
     { id: "end", type: "end" },
   ],
   edges: [{ from: "start", to: "agent-1a2b" }],
-  ...(over as GraphDef),
+  // Spread the Partial as-is. The old `over as GraphDef` widened every key to "always
+  // present", which made TS flag the three defaults above as dead (TS2783).
+  ...over,
 });
 
 const ok = (r: ReturnType<typeof renameNode>) => {

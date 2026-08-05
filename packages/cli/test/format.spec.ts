@@ -23,10 +23,17 @@ describe("table", () => {
     expect(lines[3]).toContain("r22");
   });
   it("renders blank for missing keys", () => {
-    const out = table([{ a: "x" }], [
-      ["A", "a"],
-      ["B", "b"],
-    ] as Array<[string, "a" | "b"]>);
+    // `b` is declared but absent from the row — that is the case under test. Declaring it
+    // optional on T is what lets the column list stay well-typed; the old `as Array<[string,
+    // "a" | "b"]>` cast was a type error (T inferred as `{ a: string }`, so `"b"` is not
+    // `keyof T`) that nothing checked before #1099.
+    const out = table<{ a: string; b?: string }>(
+      [{ a: "x" }],
+      [
+        ["A", "a"],
+        ["B", "b"],
+      ],
+    );
     expect(out.split("\n")[2].trim()).toBe("x");
   });
 });

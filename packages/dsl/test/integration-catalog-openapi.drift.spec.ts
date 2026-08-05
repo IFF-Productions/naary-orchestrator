@@ -302,12 +302,16 @@ interface PrunedSchema {
  * readOnly while its own docs require `incident.service.id` on every create.
  */
 function resolveBodyPath(schema: unknown, dotted: string): BodyVerdict {
-  let node = schema as PrunedSchema | undefined;
-  if (!node || typeof node !== "object")
+  const root = schema as PrunedSchema | undefined;
+  if (!root || typeof root !== "object")
     return {
       state: "unknowable",
       why: "the operation declares no body schema",
     };
+  // Non-optional from here on. Typed as `PrunedSchema | undefined` it went back to "possibly
+  // undefined" on every loop iteration (the `node = next` reassignment), which also made
+  // `properties`/`next` below implicitly `any` through a circular inference.
+  let node: PrunedSchema = root;
   const segments = dotted.split(".");
   for (const [i, segment] of segments.entries()) {
     const so_far = segments.slice(0, i).join(".");

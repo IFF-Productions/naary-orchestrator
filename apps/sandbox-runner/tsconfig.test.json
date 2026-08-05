@@ -1,0 +1,30 @@
+// Typecheck this app's SOURCE **and** its `test/` files.
+//
+// Why a second project rather than adding `test/**/*.ts` to the sibling tsconfig.json: that
+// file is the BUILD config (`outDir: "dist"`). Keeping its `include` at `src/**` is what
+// mechanically guarantees `dist/` can never gain test files — a stronger guarantee than "we
+// remembered to set rootDir". This project is typecheck-only and emits nothing at all.
+//
+// It runs via this app's `typecheck` script, which the root `pnpm typecheck`
+// (`tsc -b && pnpm -r run typecheck`) fans out to and CI gates on. Before #1099 the test files
+// were checked by NOTHING: the only project that existed stopped at `src/**`, and vitest
+// transpiles specs through swc, which STRIPS types without checking them.
+//
+// NOTE — deliberately NOT like the packages/* siblings, which relax `module`/
+// `moduleResolution`/`lib` to model the ESM runtime vitest actually loads specs in. Those
+// packages can afford it because the root tsconfig.json REFERENCES them, so `tsc -b` still
+// gates their `src` under the strict node16/es2021 build settings. `apps/*` are not in that
+// references list, so this project is the ONLY gate this app's `src` has, and relaxing
+// anything here would quietly weaken it. It typechecks clean as-is, so there is nothing to buy.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "composite": false,
+    "noEmit": true,
+    // The build config pins rootDir to "src"; test/ sits outside it. Safe to widen precisely
+    // because this project emits nothing, so rootDir has no layout consequence.
+    "rootDir": ".",
+    "types": ["node", "vitest/globals"]
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts"]
+}

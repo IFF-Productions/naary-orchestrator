@@ -438,8 +438,13 @@ describe("canvas top bar — desktop tier (#997)", () => {
     // A bias, not a sequence — flexbox shrinks both at once — and expressed by raising the donor
     // rather than lowering the name, so the unfrozen factors cannot sum to under 1 and trip
     // §9.7 3b the way the pill's own factor did.
-    expect(meta).toMatch(/flexShrink: (\d+)/);
-    expect(Number(meta.match(/flexShrink: (\d+)/)[1])).toBeGreaterThan(1);
+    // Capture once and fail on the MATCH, not on what a missing match degrades into: `?.[1]`
+    // would hand `Number(undefined)` → NaN to the comparison below, so "the metadata line
+    // changed shape" would have surfaced as "NaN is not greater than 1" three lines later.
+    const shrink = meta.match(/flexShrink: (\d+)/);
+    if (!shrink)
+      throw new Error(`no \`flexShrink: <n>\` in the metadata line: ${meta}`);
+    expect(Number(shrink[1])).toBeGreaterThan(1);
     // A tooltip that omits the very string that got truncated is not a fallback, so BOTH branches
     // name the key now — the draft one used not to.
     expect(meta.match(/Workflow key: \$\{activeKey\}/g)?.length).toBe(2);

@@ -13,6 +13,7 @@ import {
   resolveGithubAppHeader,
   startGithubAppInstall,
 } from "../src/github-app";
+import type { SecretStore } from "@naary/secrets";
 
 // `jose` is ESM-only; load its decoders once into loose holders (a static import would trip TS7's
 // node16 CJS/ESM guard; vitest runs the test as ESM at runtime).
@@ -207,7 +208,11 @@ function fakeStore() {
     async prunePrefixOlderThan() {
       /* no-op in tests */
     },
-  } as never;
+    // `SecretStore` is a class, so a structural literal can never satisfy it — hence the cast.
+    // It used to be `as never`, which also erased `m` and made every `store.m` read below a
+    // type error that nothing checked (#1099). Intersecting the real `m` back in keeps the
+    // assertions typed while the cast stays confined to the store surface.
+  } as unknown as SecretStore & { m: Map<string, string> };
 }
 
 describe("startGithubAppInstall / completeGithubAppInstall", () => {
