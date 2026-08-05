@@ -92,21 +92,32 @@
 }
 
 /* Touch targets on the wrapped context bar (<= 1024): every icon button in the bar
-   gets a >= 44px hit area (hamburger, theme toggle, notifications, primary CTA). */
+   gets a >= 44px hit area (hamburger, theme toggle, notifications, primary CTA).
+
+   DELIBERATELY ONLY `.btn*` HERE. This block used to also carry
+   `.ctx-bar [role="group"] button, .ctx-bar [aria-haspopup="menu"], .drawer-context button`
+   for the relocated switchers, above a comment claiming "a stylesheet min-height still wins
+   since it isn't in their inline style". That was FALSE and the three selectors were dead.
+
+   Those switchers are `style={{ all: "unset", … }}` buttons. React writes `all: unset` into the
+   element's INLINE style, and the shorthand expands to every longhand — `min-height: unset`
+   included. Inline beats an author stylesheet without `!important`, so the 44px never applied.
+   Measured in the built app at 390x844 (`getComputedStyle`, drawer open):
+
+     environment dropdown ... rect  97.3 x 29.8   computed min-height: auto   (rule claimed 44px)
+     variant "Builder" ...... rect  60.8 x 25.8   computed min-height: auto   (rule claimed 44px)
+     workspace switcher ..... rect 255.0 x 31.7   computed min-height: auto   (rule claimed 44px)
+
+   The rules are gone rather than reworded — a corrected comment over a rule that still cannot win
+   is worse than no rule. Each of those three controls now sets its own `minHeight` inline, which
+   is the pattern the two controls in this bar that DID measure 44px already used (ContextBar's
+   `AvatarMenu` and the approvals pill). #1076. */
 @media (max-width: 1024px) {
   .ctx-bar .btn-icon {
     width: 44px;
     height: 44px;
   }
   .ctx-bar .btn {
-    min-height: 44px;
-  }
-  /* Relocated segmented switchers (environment inline in the bar; variant + workspace
-     in the drawer top) use `all: unset` buttons — a stylesheet min-height still wins
-     since it isn't in their inline style. */
-  .ctx-bar [role="group"] button,
-  .ctx-bar [aria-haspopup="menu"],
-  .drawer-context button {
     min-height: 44px;
   }
 }
@@ -413,6 +424,22 @@
   background: var(--brand);
   border-color: var(--brand);
   color: var(--brand-ink);
+}
+
+/* `Checkbox hitArea` (#1076): the BUTTON is a transparent 44px box and the 18px `.check` inside it
+   is the only thing drawn. global.css puts the focus ring on `:focus-visible` as a `box-shadow`,
+   which on that box renders a 44px SQUARE halo around a small rounded tile — measured
+   `box-shadow: … 0 0 0 3px` at `border-radius: 0`, and it reads as a second control rather than as
+   focus. Move the ring onto the tile, where it matches the 18px branch exactly.
+
+   Both selectors are needed: suppressing the button's own ring without re-homing it would leave
+   the enlarged control with NO visible focus at all — the regression this whole change exists to
+   avoid, on the one control it exists to improve. */
+.check-hit:focus-visible {
+  box-shadow: none;
+}
+.check-hit:focus-visible .check {
+  box-shadow: var(--focus-ring);
 }
 .radio {
   width: 18px;

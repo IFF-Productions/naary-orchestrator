@@ -7,7 +7,11 @@ import {
 import { useNavigate } from "react-router-dom";
 import { Button, HScroll, Icon, Skeleton, StatusPill } from "../../components";
 import { api, type RunSummary, UnauthorizedError } from "../../lib/api";
-import { PHONE_QUERY, useMediaQuery } from "../../lib/useMediaQuery";
+import {
+  BELOW_DRAWER_QUERY,
+  PHONE_QUERY,
+  useMediaQuery,
+} from "../../lib/useMediaQuery";
 import { isTerminal, runStatusUi } from "../../lib/run-status";
 import { useMode } from "../../mode";
 import { RerunMenu, VersionBadge } from "./RerunMenu";
@@ -29,6 +33,12 @@ export function Runs() {
   const simple = mode === "simple";
   // On phone the 8-column grid can't fit — each run renders as a stacked card instead.
   const phone = useMediaQuery(PHONE_QUERY);
+  // Touch range for hit AREAS specifically. `phone` (<= 640) drives this screen's LAYOUT (rows
+  // become cards), but a 44px target is a finger, not a layout — and every other touch fix in
+  // the app is gated at <= 1024. Gating these on `phone` would leave the filter chips at 25px on
+  // a tablet while the context bar beside them is 44px. <= 640 is a subset of <= 1024, so the
+  // 390x844 measurements in the comments below hold unchanged. #1076
+  const touch = useMediaQuery(BELOW_DRAWER_QUERY);
   const [runs, setRuns] = useState<RunSummary[] | null>(null);
   // The search box drives a SERVER-side search over the run's contained data (trigger input) plus
   // its id/workflow (#463). `query` is the live input; `debouncedQuery` is what's sent (see effect
@@ -566,6 +576,14 @@ export function Runs() {
                   transition: "background 140ms ease, color 140ms ease",
                   flex: "none",
                   whiteSpace: "nowrap",
+                  // Measured 25px tall at 390x844, in a row whose chips sit 2px apart. HEIGHT is
+                  // the only dimension that can be grown here: the chips are horizontal
+                  // neighbours, so growing DOWN cannot reach them, while widening "All" (39px,
+                  // the only chip under 44) into a 2px gap is exactly the overlap this is
+                  // avoiding. It stays 39px wide deliberately — 39x44 is a usable target, and
+                  // this strip is an `HScroll`, so the row grows taller and still scrolls. #1076
+                  minHeight: touch ? 44 : undefined,
+                  boxSizing: "border-box",
                 }}
               >
                 {f.label}
@@ -580,14 +598,18 @@ export function Runs() {
           className="input-wrap"
           style={{
             width: phone ? "100%" : 260,
-            height: 34,
+            // The wrap is the visible box; the `<input>` inside it is what a finger lands on, and
+            // that measured 315 x 32 at 390x844. 44 + the wrap's 2px of border/inset = 46. The
+            // filter strip above sits 15px away in NORMAL FLOW, so this pushes the card below it
+            // down rather than growing into anything. #1076
+            height: touch ? 46 : 34,
             padding: "0 11px",
           }}
         >
           <Icon name="search" size={14} style={{ color: "var(--ink-3)" }} />
           <input
             className="bare mono"
-            style={{ height: 32, fontSize: "var(--text-xs)" }}
+            style={{ height: touch ? 44 : 32, fontSize: "var(--text-xs)" }}
             placeholder={
               simple
                 ? "search runs by data or id…"

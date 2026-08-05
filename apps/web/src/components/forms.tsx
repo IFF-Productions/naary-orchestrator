@@ -169,22 +169,78 @@ export function Switch({
 }
 
 /* ---------------- Checkbox ---------------- */
+/**
+ * An 18px check tile. `hitArea` grows the TAP TARGET without growing the tile: the button becomes
+ * a transparent box of that size and the 18px `.check` moves inside it as presentation.
+ *
+ * Why the tile has to move inside rather than the button just getting padding: `.check` draws the
+ * visual with its own `border` + `background`, so padding the button would inflate the drawn box
+ * too. And why real layout rather than a `::after` overlay — an overlay's size is invisible to
+ * `getBoundingClientRect`, so an overlay that overlapped its neighbour would measure identical to
+ * one that didn't, and the neighbour-spacing audit (`scripts/responsive-audit.mjs`) could never
+ * catch it. A laid-out box pushes its siblings instead, which makes overlap impossible and keeps
+ * the measurement honest. See the #1076 note at the call site in `Approvals.tsx` for the
+ * measured 11px that forced this.
+ *
+ * The inner tile is `aria-hidden` presentation: the button keeps `role="checkbox"`, so this stays
+ * ONE control (a nested interactive element is the bug #511's Settings fix was about).
+ */
 export function Checkbox({
   checked,
   onChange,
+  hitArea,
 }: {
   checked: boolean;
   onChange?: (v: boolean) => void;
+  /** Square hit-area size in px. Omit for the default, where the 18px tile IS the target. */
+  hitArea?: number;
 }) {
+  const cls = `check${checked ? " checked" : ""}`;
+  if (hitArea === undefined) {
+    return (
+      <button
+        type="button"
+        role="checkbox"
+        aria-checked={checked}
+        className={cls}
+        onClick={() => onChange?.(!checked)}
+      >
+        <Icon name="check" size={12} strokeWidth={3} />
+      </button>
+    );
+  }
   return (
     <button
       type="button"
       role="checkbox"
       aria-checked={checked}
-      className={`check${checked ? " checked" : ""}`}
+      // Moves global.css's `:focus-visible` ring off this transparent box and onto the tile —
+      // see the `.check-hit` rules in components.css.
+      className="check-hit"
       onClick={() => onChange?.(!checked)}
+      style={{
+        // NOT `all: "unset"`. That shorthand expands to `outline-style: none` as an INLINE
+        // declaration, which beats the UA's `:focus-visible` ring — the class-based branch above
+        // never reset `outline`, so reaching for `all` here would have silently removed the focus
+        // ring from a control this change exists to make more accessible. (Same cascade fact that
+        // made the `min-height` rules in components.css dead, pointing the other way.) So only
+        // the properties that actually need resetting are named.
+        boxSizing: "border-box",
+        background: "none",
+        border: "none",
+        padding: 0,
+        cursor: "pointer",
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        width: hitArea,
+        height: hitArea,
+        flex: "none",
+      }}
     >
-      <Icon name="check" size={12} strokeWidth={3} />
+      <span className={cls} aria-hidden>
+        <Icon name="check" size={12} strokeWidth={3} />
+      </span>
     </button>
   );
 }

@@ -5,6 +5,7 @@
  */
 import { useState } from "react";
 import { Icon } from "../components";
+import { BELOW_DRAWER_QUERY, useMediaQuery } from "../lib/useMediaQuery";
 import { useWorkspace } from "./WorkspaceProvider";
 
 /** A readable label for a workspace: its display name if set, else a stub from the id
@@ -17,6 +18,8 @@ export function workspaceLabel(id: string, name?: string): string {
 
 export function WorkspaceSwitcher({ labelOp = 1 }: { labelOp?: number }) {
   const { workspaces, activeId, setActive, create } = useWorkspace();
+  // Below 1024 this renders only in the drawer top — the wrapped context bar drops it.
+  const touch = useMediaQuery(BELOW_DRAWER_QUERY);
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
@@ -65,6 +68,15 @@ export function WorkspaceSwitcher({ labelOp = 1 }: { labelOp?: number }) {
           width: "100%",
           minWidth: 0,
           opacity: labelOp,
+          // >= 44px hit area in the drawer. Measured 255 x 31.7 at 390x844 before this;
+          // `.drawer-context button { min-height: 44px }` never applied, because `all: unset`
+          // above is INLINE and expands to `min-height: unset`.
+          //
+          // Height-only, and safe: this is the first child of a flex COLUMN (`.drawer-context`,
+          // `gap: 10`) and spans the drawer's full width, so it has no horizontal neighbour and
+          // the variant switcher below it just moves down 12px. #1076
+          minHeight: touch ? 44 : undefined,
+          boxSizing: "border-box",
         }}
       >
         <span style={{ flex: 1, minWidth: 0 }}>
