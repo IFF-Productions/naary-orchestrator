@@ -20,6 +20,8 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
  */
 
 const scimIdentityRows: Record<string, unknown>[] = [];
+/** Emails the fake MembersService has "invited" — what makes a POSTed subject readable back. */
+const invited = new Set<string>();
 const db = {
   membership: {
     findMany: vi.fn(async ({ where }: { where: { tenantId: string } }) =>
@@ -43,10 +45,20 @@ const db = {
   },
   invitation: {
     findMany: vi.fn(async () => []),
-    findFirst: vi.fn(async () => null),
+    findFirst: vi.fn(
+      async ({ where }: { where: { email?: { equals?: string } } }) => {
+        const email = where?.email?.equals ?? "";
+        return invited.has(email)
+          ? { email, createdAt: new Date("2026-08-04T00:00:00Z") }
+          : null;
+      },
+    ),
   },
   scimIdentity: {
+    // No identity row exists in this fixture, so a DELETE is a 404 — enough to prove the route
+    // and the error envelope; the write SEMANTICS are scim.write-isolation.spec.ts's job.
     findFirst: vi.fn(async () => null),
+    deleteMany: vi.fn(async () => ({ count: 0 })),
     upsert: vi.fn(
       async ({
         where,
@@ -73,12 +85,16 @@ const db = {
 };
 vi.mock("@naary/db", () => ({ getPrisma: () => db }));
 
+import { AuditService } from "../src/audit/audit.service";
 import { ApiTokenService } from "../src/auth/api-token.service";
 import { AuthGuard } from "../src/auth/auth.guard";
 import { FirebaseVerifier } from "../src/auth/firebase-verifier";
+import { MembersService } from "../src/members/members.service";
 import { MembershipService } from "../src/membership/membership.service";
 import { PermissionsService } from "../src/permissions/permissions.service";
+import { scimBodyParser } from "../src/scim/scim-body-parser";
 import { ScimConnectionService } from "../src/scim/scim-connection.service";
+import { ScimProvisioningService } from "../src/scim/scim-provisioning.service";
 import { ScimUsersService } from "../src/scim/scim-users.service";
 import { ScimController } from "../src/scim/scim.controller";
 import { ScimGuard } from "../src/scim/scim.guard";
@@ -96,7 +112,23 @@ beforeAll(async () => {
     controllers: [ScimController],
     providers: [
       ScimUsersService,
+      ScimProvisioningService,
       ScimGuard,
+      // The member lifecycle is faked here on purpose: this spec is about the guard chain, the
+      // routing and the wire format. That de-provisioning really goes through MembersService —
+      // with the group cascade, the cache invalidations and the audit row — is asserted against
+      // the REAL service in scim.write-isolation.spec.ts.
+      {
+        provide: MembersService,
+        useValue: {
+          invite: async (_t: string, _c: unknown, email: string) => {
+            invited.add(email);
+          },
+          removeMember: async () => ({ removed: false }),
+          revokeInvitation: async () => undefined,
+        },
+      },
+      { provide: AuditService, useValue: { record: async () => undefined } },
       {
         provide: ScimConnectionService,
         useValue: {
@@ -141,6 +173,11 @@ beforeAll(async () => {
   }).compile();
 
   app = moduleRef.createNestApplication();
+  // The SAME middleware main.ts installs — an IdP's `application/scim+json` body is invisible
+  // to express.json() without it, and that failure only ever shows up over real HTTP.
+  // Registered BEFORE init(), exactly as main.ts does it — the ordering that decides whether
+  // Nest installs its own JSON parser at all (see scim-body-parser.ts).
+  app.use(scimBodyParser());
   await app.init();
   await app.listen(0);
   const addr = app.getHttpServer().address() as AddressInfo;
@@ -209,15 +246,22 @@ describe("GET /scim/v2/* through the real guard chain", () => {
     expect(res.body.bulk).toMatchObject({ supported: false });
   });
 
-  it("has no write surface at all (POST/PATCH/DELETE are not routed)", async () => {
-    for (const method of ["POST", "PATCH", "DELETE", "PUT"]) {
-      const res = await fetch(`${base}/scim/v2/Users`, {
+  /** Slice 2 adds exactly two verbs. PATCH and PUT stay UNROUTED — and unadvertised, per the
+   *  ServiceProviderConfig assertion above — because `active: false` has no home in this data
+   *  model yet (see ScimProvisioningService's docstring). */
+  it("routes no method beyond POST and DELETE (PATCH/PUT are still absent)", async () => {
+    for (const method of ["PATCH", "PUT"]) {
+      const res = await fetch(`${base}/scim/v2/Users/some-id`, {
         method,
-        headers: { authorization: `Bearer ${SCIM_TOKEN_A}` },
+        headers: {
+          authorization: `Bearer ${SCIM_TOKEN_A}`,
+          "content-type": "application/scim+json",
+        },
+        body: JSON.stringify({ Operations: [] }),
       });
       expect(res.status).toBe(404);
     }
-    // /Groups is not implemented either — slice 1 is Users, read-only.
+    // /Groups is not implemented either — slices 1–2 are Users.
     expect(
       (
         await get("/scim/v2/Groups", {
@@ -233,5 +277,122 @@ describe("GET /scim/v2/* through the real guard chain", () => {
     });
     expect(res.status).toBe(400);
     expect(res.body.scimType).toBe("invalidFilter");
+  });
+});
+
+describe("the WRITE surface is behind the same door (#1075 slice 2)", () => {
+  const write = async (
+    method: string,
+    path: string,
+    headers: Record<string, string>,
+    body?: unknown,
+  ) => {
+    const res = await fetch(`${base}${path}`, {
+      method,
+      headers,
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
+    return {
+      status: res.status,
+      location: res.headers.get("location"),
+      text: await res.text(),
+    };
+  };
+
+  it.each([
+    ["POST", "/scim/v2/Users"],
+    ["DELETE", "/scim/v2/Users/some-id"],
+  ])(
+    "401s %s with no bearer — a write cannot slip past @Public()",
+    async (method, path) => {
+      const res = await write(method, path, {
+        "content-type": "application/scim+json",
+      });
+      expect(res.status).toBe(401);
+      expect(res.text).toContain("urn:ietf:params:scim:api:messages:2.0:Error");
+    },
+  );
+
+  /** The credential-model assertion again, on the half that DESTROYS things: an `nry_` token
+   *  is stamped `role: "owner"` by AuthGuard, and must still be nothing here. */
+  it.each([
+    ["POST", "/scim/v2/Users"],
+    ["DELETE", "/scim/v2/Users/some-id"],
+  ])(
+    "401s %s presented with a valid `nry_` API token",
+    async (method, path) => {
+      const res = await write(
+        method,
+        path,
+        {
+          authorization: `Bearer ${API_TOKEN}`,
+          "content-type": "application/scim+json",
+        },
+        method === "POST" ? { userName: "mallory@a.example" } : undefined,
+      );
+      expect(res.status).toBe(401);
+    },
+  );
+
+  /**
+   * THE INTEROP TRAP. Okta and Entra send `application/scim+json`, which express.json() does
+   * NOT match — without scimBodyParser() the body arrives empty and every create 400s with a
+   * message about a missing payload, which looks like the IdP's bug and is ours.
+   */
+  it("parses an application/scim+json body and 201s with a Location header", async () => {
+    const res = await write(
+      "POST",
+      "/scim/v2/Users",
+      {
+        authorization: `Bearer ${SCIM_TOKEN_A}`,
+        "content-type": "application/scim+json",
+      },
+      {
+        schemas: ["urn:ietf:params:scim:schemas:core:2.0:User"],
+        userName: "newbie@a.example",
+        externalId: "okta-1",
+      },
+    );
+    expect(res.status).toBe(201);
+    const body = JSON.parse(res.text) as { id: string; active: boolean };
+    expect(body.active).toBe(false); // provisioned = invited, not yet signed in
+    expect(res.location).toBe(`/scim/v2/Users/${body.id}`);
+  });
+
+  it("also accepts a plain application/json body", async () => {
+    const res = await write(
+      "POST",
+      "/scim/v2/Users",
+      {
+        authorization: `Bearer ${SCIM_TOKEN_A}`,
+        "content-type": "application/json",
+      },
+      { userName: "second@a.example" },
+    );
+    expect(res.status).toBe(201);
+  });
+
+  it("400s a userName outside the connection's allowed domains", async () => {
+    const res = await write(
+      "POST",
+      "/scim/v2/Users",
+      {
+        authorization: `Bearer ${SCIM_TOKEN_A}`,
+        "content-type": "application/scim+json",
+      },
+      { userName: "mallory@evil.example" },
+    );
+    expect(res.status).toBe(400);
+    expect(JSON.parse(res.text).scimType).toBe("invalidValue");
+  });
+
+  it("404s a DELETE for an id this connection was never issued, in the SCIM envelope", async () => {
+    const res = await write("DELETE", "/scim/v2/Users/not-mine", {
+      authorization: `Bearer ${SCIM_TOKEN_A}`,
+    });
+    expect(res.status).toBe(404);
+    expect(res.text).toContain("urn:ietf:params:scim:api:messages:2.0:Error");
+    // No hint that the id might belong to someone else.
+    expect(res.text).not.toMatch(/tenant|workspace|belongs/i);
   });
 });

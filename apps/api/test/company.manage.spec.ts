@@ -13,7 +13,11 @@ const companyMembership = {
   delete: vi.fn(),
   count: vi.fn(),
 };
-const tenantSettings = { findUnique: vi.fn(), update: vi.fn() };
+const tenantSettings = {
+  findUnique: vi.fn(),
+  findMany: vi.fn(),
+  update: vi.fn(),
+};
 const membership = { findFirst: vi.fn(), findMany: vi.fn() };
 
 vi.mock("@naary/db", () => ({
@@ -24,7 +28,12 @@ import { CompaniesController } from "../src/companies/companies.controller";
 import { CompanyService } from "../src/companies/company.service";
 
 // The manage surface never touches these collaborators.
-const svc = new CompanyService({} as never, {} as never, {} as never, {} as never);
+const svc = new CompanyService(
+  {} as never,
+  {} as never,
+  {} as never,
+  {} as never,
+);
 
 beforeEach(() => {
   for (const group of [companyMembership, tenantSettings, membership]) {
@@ -37,6 +46,11 @@ beforeEach(() => {
   companyMembership.delete.mockResolvedValue({});
   tenantSettings.findUnique.mockResolvedValue({ companyId: "c-1" });
   tenantSettings.update.mockResolvedValue({});
+  // The company owns two workspaces — the only place addMember may resolve an email from.
+  tenantSettings.findMany.mockResolvedValue([
+    { tenantId: "t-1" },
+    { tenantId: "t-2" },
+  ]);
 });
 
 // §4 ordering is the privacy invariant: company membership FIRST, then the attached-to-THIS-
@@ -175,7 +189,11 @@ describe("addMember (slice 4) — owner-only, email→uid via Membership", () =>
       .mockResolvedValueOnce(null); // target's existing company role
     const out = await svc.addMember("u-1", "c-1", "  User@Acme.com  ", "admin");
     expect(membership.findFirst).toHaveBeenCalledWith({
-      where: { email: { equals: "User@Acme.com", mode: "insensitive" } },
+      where: {
+        email: { equals: "User@Acme.com", mode: "insensitive" },
+        // #1075 decision 3 — the candidate set is this COMPANY's workspaces, never the instance.
+        tenantId: { in: ["t-1", "t-2"] },
+      },
       orderBy: { createdAt: "desc" },
       select: { userId: true },
     });
@@ -191,11 +209,91 @@ describe("addMember (slice 4) — owner-only, email→uid via Membership", () =>
     });
   });
 
+  /**
+   * #1075 decision 3 (LDAP-DIRECTORY.md §5, SAML-SSO.md:136) — the prerequisite SCIM makes due.
+   *
+   * The lookup used to run across the WHOLE INSTANCE with "newest row wins", so whichever
+   * workspace most recently created a Membership for an address won it — including a workspace
+   * with no relationship to this company. Human invites made that rare; a SCIM connection
+   * creating memberships in bulk, automatically, makes it routine. Here the outsider's row is
+   * the NEWEST, so an unscoped lookup returns them and the company owner grants company-wide
+   * admin to a stranger who merely shares an email address with their colleague.
+   */
+  it("resolves the email inside THIS COMPANY's workspaces, not the newest row on the instance", async () => {
+    const rows = [
+      // Newest first in wall-clock terms — and outside the company.
+      {
+        userId: "u-outsider",
+        email: "same@acme.com",
+        tenantId: "t-elsewhere",
+        createdAt: new Date("2026-08-05"),
+      },
+      {
+        userId: "u-colleague",
+        email: "same@acme.com",
+        tenantId: "t-1",
+        createdAt: new Date("2026-01-01"),
+      },
+    ];
+    membership.findFirst.mockImplementation(
+      async ({
+        where,
+      }: {
+        where: {
+          email: { equals: string };
+          tenantId?: { in: string[] };
+        };
+      }) => {
+        const allowed = where.tenantId?.in;
+        const hits = rows
+          .filter(
+            (r) =>
+              r.email.toLowerCase() === where.email.equals.toLowerCase() &&
+              (!allowed || allowed.includes(r.tenantId)),
+          )
+          .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+        return hits[0] ?? null;
+      },
+    );
+    companyMembership.findUnique
+      .mockResolvedValueOnce({ role: "owner" }) // caller
+      .mockResolvedValueOnce(null); // target has no company role yet
+
+    await svc.addMember("u-1", "c-1", "same@acme.com", "admin");
+    expect(companyMembership.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: { companyId: "c-1", userId: "u-colleague", role: "admin" },
+      }),
+    );
+  });
+
+  it("404s an email that exists ONLY outside the company's workspaces", async () => {
+    tenantSettings.findMany.mockResolvedValue([{ tenantId: "t-1" }]);
+    membership.findFirst.mockImplementation(
+      async ({ where }: { where: { tenantId?: { in: string[] } } }) =>
+        where.tenantId?.in?.includes("t-elsewhere")
+          ? { userId: "u-outsider" }
+          : null,
+    );
+    await expect(
+      svc.addMember("u-1", "c-1", "stranger@acme.com", "admin"),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(companyMembership.upsert).not.toHaveBeenCalled();
+  });
+
+  it("404s without querying memberships at all when the company owns no workspaces", async () => {
+    tenantSettings.findMany.mockResolvedValue([]);
+    await expect(
+      svc.addMember("u-1", "c-1", "anyone@acme.com", "admin"),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(membership.findFirst).not.toHaveBeenCalled();
+  });
+
   it("404s an unknown email with the sign-in-first message", async () => {
     membership.findFirst.mockResolvedValue(null);
     await expect(
       svc.addMember("u-1", "c-1", "ghost@acme.com", "admin"),
-    ).rejects.toThrow(/must sign in first/);
+    ).rejects.toThrow(/must sign in to one of them first/);
     expect(companyMembership.upsert).not.toHaveBeenCalled();
   });
 
