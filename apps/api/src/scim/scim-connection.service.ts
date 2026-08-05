@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { BadRequestException, Injectable } from "@nestjs/common";
 import { getPrisma } from "@naary/db";
 import { hashScimToken, isScimToken, newScimToken } from "./scim-token";
 
@@ -39,7 +39,12 @@ export class ScimConnectionService {
     if (domains.length === 0) {
       // The §5 invariant is not enforced by slice 1 (nothing writes), but an empty allowlist
       // must never be PERSISTED — slice 2 would inherit a connection that permits any domain.
-      throw new Error("At least one allowed email domain is required.");
+      // A Nest exception rather than a bare Error: this is CLI-only today (which just prints
+      // `.message`), but `mint` is exported from ScimModule, and the first HTTP caller should
+      // get a 400 for bad input rather than a 500.
+      throw new BadRequestException(
+        "At least one allowed email domain is required.",
+      );
     }
     const token = newScimToken();
     const row = await getPrisma().scimConnection.create({
