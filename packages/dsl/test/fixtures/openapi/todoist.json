@@ -8,7 +8,7 @@
     "provider": "todoist",
     "pathPrefix": "/api/v1",
     "source": "https://developer.todoist.com/openapi.json",
-    "fetchedAt": "2026-07-30",
+    "fetchedAt": "2026-08-05",
     "note": "PRUNED snapshot — see packages/dsl/scripts/extract-openapi-fixtures.mjs. Do not hand-edit."
   },
   "paths": {

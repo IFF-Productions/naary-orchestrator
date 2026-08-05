@@ -8,13 +8,16 @@
     "provider": "slack",
     "pathPrefix": "",
     "source": "https://raw.githubusercontent.com/slackapi/slack-api-specs/master/web-api/slack_web_openapi_v2.json",
-    "fetchedAt": "2026-07-30",
+    "fetchedAt": "2026-08-05",
     "note": "PRUNED snapshot — see packages/dsl/scripts/extract-openapi-fixtures.mjs. Do not hand-edit."
   },
   "paths": {
     "/chat.postMessage": {
       "post": {
         "operationId": "chat_postMessage",
+        "x-security": [
+          "slackAuth"
+        ],
         "parameters": [
           {
             "name": "token",
@@ -80,6 +83,9 @@
     "/chat.update": {
       "post": {
         "operationId": "chat_update",
+        "x-security": [
+          "slackAuth"
+        ],
         "parameters": [
           {
             "name": "token",
@@ -133,6 +139,9 @@
     "/reactions.add": {
       "post": {
         "operationId": "reactions_add",
+        "x-security": [
+          "slackAuth"
+        ],
         "parameters": [
           {
             "name": "token",

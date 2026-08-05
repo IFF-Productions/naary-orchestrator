@@ -8,7 +8,7 @@
     "provider": "mailchimp",
     "pathPrefix": "",
     "source": "https://api.mailchimp.com/schema/3.0/Swagger.json?expand",
-    "fetchedAt": "2026-07-30",
+    "fetchedAt": "2026-08-05",
     "note": "PRUNED snapshot — see packages/dsl/scripts/extract-openapi-fixtures.mjs. Do not hand-edit."
   },
   "paths": {

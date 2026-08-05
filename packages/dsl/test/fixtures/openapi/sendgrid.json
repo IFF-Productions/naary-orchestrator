@@ -8,7 +8,7 @@
     "provider": "sendgrid",
     "pathPrefix": "/v3",
     "source": "https://raw.githubusercontent.com/twilio/sendgrid-oai/main/spec/json/tsg_mail_v3.json, https://raw.githubusercontent.com/twilio/sendgrid-oai/main/spec/json/tsg_mc_contacts_v3.json, https://raw.githubusercontent.com/twilio/sendgrid-oai/main/spec/json/tsg_templates_v3.json",
-    "fetchedAt": "2026-07-30",
+    "fetchedAt": "2026-08-05",
     "note": "PRUNED snapshot — see packages/dsl/scripts/extract-openapi-fixtures.mjs. Do not hand-edit."
   },
   "paths": {

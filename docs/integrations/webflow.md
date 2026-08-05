@@ -5,10 +5,10 @@ label: 'Webflow'
 category: 'Marketing'
 authType: bearer
 serverUrlRequired: false
-actionCount: 5
+actionCount: 6
 writeActionCount: 1
 oneClickTestable: true
-probeAction: get_authorized_by
+probeAction: list_sites
 liveVerified: false
 ---
 
@@ -41,9 +41,9 @@ Read and create Webflow CMS collection items from a workflow.
 
 ## Verify it works
 
-**One-click:** this provider has an argument-free read (`get_authorized_by` → `GET /token/authorized_by`), so a connection test can confirm the credential without touching your data.
+**One-click:** this provider has an argument-free read (`list_sites` → `GET /sites`), so a connection test can confirm the credential without touching your data.
 
-Either way, the definitive check is **single-node Test** on the canvas: drop a **Webflow** node, pick this connection and the *Get token owner* action, and run just that node. It executes the real activity with the real credential and shows you the provider's actual response.
+Either way, the definitive check is **single-node Test** on the canvas: drop a **Webflow** node, pick this connection and the *List sites* action, and run just that node. It executes the real activity with the real credential and shows you the provider's actual response.
 
 > **Not yet proven against the real API.** This provider's request shape is typed and unit-tested, but no automated test has ever called the live service. If your first call fails with a 4xx, the fault may be ours — check `docs/integrations/VERIFICATION.md` and open an issue rather than assuming your token is wrong.
 
@@ -51,6 +51,7 @@ Either way, the definitive check is **single-node Test** on the canvas: drop a *
 
 | Action | Method | Endpoint | Required fields | Optional fields |
 | --- | --- | --- | --- | --- |
+| List sites | `GET` | `/sites` | — | — |
 | List collections | `GET` | `/sites/{siteId}/collections` | `siteId` | — |
 | List items | `GET` | `/collections/{collectionId}/items` | `collectionId` | `limit`, `offset` |
 | Get item | `GET` | `/collections/{collectionId}/items/{itemId}` | `collectionId`, `itemId` | — |

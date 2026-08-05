@@ -8,13 +8,17 @@
     "provider": "sentry",
     "pathPrefix": "/api/0",
     "source": "https://raw.githubusercontent.com/getsentry/sentry-api-schema/main/openapi-derefed.json",
-    "fetchedAt": "2026-07-31",
+    "fetchedAt": "2026-08-05",
     "note": "PRUNED snapshot — see packages/dsl/scripts/extract-openapi-fixtures.mjs. Do not hand-edit."
   },
   "paths": {
     "/api/0/projects/{organization_id_or_slug}/{project_id_or_slug}/issues/": {
       "get": {
         "operationId": "List a Project's Issues",
+        "deprecated": true,
+        "x-security": [
+          "auth_token"
+        ],
         "parameters": [
           {
             "name": "organization_id_or_slug",
@@ -67,6 +71,9 @@
     "/api/0/organizations/{organization_id_or_slug}/issues/{issue_id}/": {
       "get": {
         "operationId": "getOrganizationIssue",
+        "x-security": [
+          "auth_token"
+        ],
         "parameters": [
           {
             "name": "organization_id_or_slug",
@@ -97,6 +104,9 @@
       },
       "put": {
         "operationId": "updateOrganizationIssue",
+        "x-security": [
+          "auth_token"
+        ],
         "parameters": [
           {
             "name": "organization_id_or_slug",
@@ -171,6 +181,9 @@
     "/api/0/organizations/{organization_id_or_slug}/projects/": {
       "get": {
         "operationId": "listOrganizationProjects",
+        "x-security": [
+          "auth_token"
+        ],
         "parameters": [
           {
             "name": "organization_id_or_slug",
@@ -198,6 +211,9 @@
     "/api/0/organizations/": {
       "get": {
         "operationId": "listOrganizations",
+        "x-security": [
+          "auth_token"
+        ],
         "parameters": [
           {
             "name": "owner",

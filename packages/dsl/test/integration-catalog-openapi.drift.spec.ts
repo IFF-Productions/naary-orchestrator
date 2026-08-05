@@ -11,6 +11,7 @@ import { type ApiOperation, parseOpenApi } from "../src/introspection";
 import {
   ACKNOWLEDGED,
   ACKNOWLEDGED_BODY,
+  ACKNOWLEDGED_DEPRECATED,
   ACKNOWLEDGED_REQUIRED_BODY,
   UNSPECIFIED,
 } from "./openapi-drift-adjudications";
@@ -42,6 +43,11 @@ import {
  *   3b. a static header the catalog PINS carries a value the spec still lists (#944) — the check
  *      that catches a stale API-version pin, where every path can still match while the document
  *      describes a different API from the one we are asking for
+ *   3c. the operation is not flagged `deprecated: true` (#1109) — the check that reads the one
+ *      thing a vendor says about an endpoint's FUTURE rather than its shape. Adjudicated through
+ *      ACKNOWLEDGED_DEPRECATED, so a known deprecation is a written decision and only a NEW one is
+ *      red: see that list's docblock for why an un-adjudicated version of this check would be worse
+ *      than none.
  *   5. every `in:"body"` field lands on a property the spec DECLARES (#813) — the check that
  *      catches a wrong `bodyPath`: a missing envelope key, a doubled one, or a `const`
  *      discriminator at the wrong depth. Tri-stated, and only WRONG is hard: see below.
@@ -237,15 +243,25 @@ function loadFixtures(): Fixture[] {
     });
 }
 
+/** The fixture's raw entry for one operation. `parseOpenApi` models only what httpRequest
+ *  autocomplete needs, so everything else here reads the vendored JSON directly. */
+function rawOperation(
+  fixture: Fixture,
+  path: string,
+  method: string,
+): Record<string, unknown> {
+  const paths = (fixture.raw.paths ?? {}) as Record<string, unknown>;
+  const item = (paths[path] ?? {}) as Record<string, unknown>;
+  return (item[method.toLowerCase()] ?? {}) as Record<string, unknown>;
+}
+
 /** The pruned requestBody `content` map for an operation, or undefined when it declares no body. */
 function requestBodyContent(
   fixture: Fixture,
   path: string,
   method: string,
 ): Record<string, { schema?: unknown }> | undefined {
-  const paths = (fixture.raw.paths ?? {}) as Record<string, unknown>;
-  const item = (paths[path] ?? {}) as Record<string, unknown>;
-  const op = (item[method.toLowerCase()] ?? {}) as Record<string, unknown>;
+  const op = rawOperation(fixture, path, method);
   const body = op.requestBody as
     { content?: Record<string, { schema?: unknown }> } | undefined;
   return body?.content;
@@ -371,9 +387,7 @@ function headerEnums(
   path: string,
   method: string,
 ): Map<string, string[]> {
-  const paths = (fixture.raw.paths ?? {}) as Record<string, unknown>;
-  const item = (paths[path] ?? {}) as Record<string, unknown>;
-  const op = (item[method.toLowerCase()] ?? {}) as Record<string, unknown>;
+  const op = rawOperation(fixture, path, method);
   const params = Array.isArray(op.parameters) ? op.parameters : [];
   const out = new Map<string, string[]>();
   for (const raw of params) {
@@ -416,6 +430,9 @@ interface ActionCheck {
   paramProblems: string[];
   /** A static header we send whose value the pinned spec does not list (#944). Hard. */
   headerValueProblems: string[];
+  /** The vendor flags this operation `deprecated: true` (#1109). Hard, unless
+   *  ACKNOWLEDGED_DEPRECATED carries a written decision to keep calling it. */
+  deprecationProblems: string[];
   bodyProblems: string[];
   /** WRONG body paths (#813) — hard, unless ACKNOWLEDGED_BODY excuses one. */
   bodyPathProblems: string[];
@@ -443,6 +460,7 @@ function checkAction(
     pathProblems: [],
     paramProblems: [],
     headerValueProblems: [],
+    deprecationProblems: [],
     bodyProblems: [],
     bodyPathProblems: [],
     bodyPathVerdicts: [],
@@ -552,6 +570,24 @@ function checkAction(
         "fixture is (`pnpm refresh:openapi-fixtures`)",
     );
   }
+
+  // (3c) the vendor has not DEPRECATED this operation (#1109) --------------------------------------
+  // The one thing a document says about an endpoint's future rather than its shape, and it used to
+  // be thrown away: the extractor emitted `{operationId, parameters, requestBody}` and nothing else,
+  // so there was not one `"deprecated": true` across 27 pinned providers and this file was
+  // structurally blind to it. `sentry.list_issues` sat flagged inside a document already pinned here
+  // while #946 moved its two siblings off the legacy route.
+  //
+  // Read from the fixture rather than from `parseOpenApi`, which models what httpRequest
+  // autocomplete needs. Absence means the vendor said nothing — most never set the flag — so this is
+  // positive evidence only, never a clean bill of health.
+  if (rawOperation(fixture, op.path, op.method).deprecated === true)
+    check.deprecationProblems.push(
+      `upstream flags ${op.method} ${op.path} (${op.operationId ?? "?"}) deprecated:true — the ` +
+        "vendor is telling us this endpoint is on its way out. Migrate to the successor their " +
+        "document names, or add it to ACKNOWLEDGED_DEPRECATED with what the migration costs and " +
+        "the issue that owns it.",
+    );
 
   // (3) required body fields, nested included ------------------------------------------------------
   const schema = requestBodySchema(fixture, op.path, op.method);
@@ -875,6 +911,15 @@ for (const check of checks) {
       expect(check.headerValueProblems, check.key).toEqual([]);
     });
 
+    it("calls an operation the vendor has not deprecated", () => {
+      // Safe to be HARD for the same reason (3b) is: fixtures are pinned, so this can only turn red
+      // when a human refreshes one — never on an unrelated PR because a vendor republished at 3am.
+      const excused = ACKNOWLEDGED_DEPRECATED.some(
+        (a) => a.action === check.key,
+      );
+      expect(excused ? [] : check.deprecationProblems, check.key).toEqual([]);
+    });
+
     it("has a field for every required body property", () => {
       const excused = new Set(
         ACKNOWLEDGED_REQUIRED_BODY.filter((a) => a.action === check.key).map(
@@ -947,6 +992,22 @@ describe("advisory drift — reported, never failed", () => {
           `acknowledged because: ${why}\n  Either the catalog was fixed (delete the entry) or ` +
           "upstream changed the schema (worth a look).",
       ).toBe(true);
+    }
+  });
+
+  it("still finds every acknowledged DEPRECATED operation", () => {
+    // The other direction, and the one that keeps the list from becoming a graveyard: an entry that
+    // no longer matches anything means either the catalog migrated (delete it) or the vendor
+    // un-flagged the endpoint (worth a look). Neither should pass silently.
+    for (const { action, why } of ACKNOWLEDGED_DEPRECATED) {
+      const check = checks.find((c) => c.key === action);
+      expect(check, `${action} is no longer a checked action`).toBeDefined();
+      expect(
+        check?.deprecationProblems.length,
+        `${action} is no longer reported as deprecated upstream.\n  it was acknowledged ` +
+          `because: ${why}\n  Either the catalog moved to the successor (delete the entry) or the ` +
+          "vendor dropped the flag (worth a look).",
+      ).toBeGreaterThan(0);
     }
   });
 

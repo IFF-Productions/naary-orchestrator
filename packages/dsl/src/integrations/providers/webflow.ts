@@ -1,5 +1,5 @@
 // ── Webflow (cloud, api.webflow.com/v2; auth = a site or app API token as a Bearer.
-//    `get_authorized_by` is the credential probe) ──────────────────────────────────────
+//    `list_sites` is the credential probe) ────────────────────────────────────────────
 import type { IntegrationProvider } from "../types";
 
 export const WEBFLOW: IntegrationProvider = {
@@ -7,9 +7,20 @@ export const WEBFLOW: IntegrationProvider = {
   label: "Webflow",
   baseUrl: "https://api.webflow.com/v2",
   description:
-    "Read and write Webflow CMS — list collections/items, get an item, create an item.",
+    "Read and write Webflow CMS — list sites/collections/items, get an item, create an item.",
   auth: "A custom connection whose token is a Webflow API token (site or app token).",
   actions: [
+    {
+      key: "list_sites",
+      label: "List sites",
+      description:
+        "List the sites this token can reach. Needs no arguments, so it is the connection check.",
+      method: "GET",
+      pathTemplate: "/sites",
+      write: false,
+      probe: true,
+      fields: [],
+    },
     {
       key: "list_collections",
       label: "List collections",
@@ -103,11 +114,26 @@ export const WEBFLOW: IntegrationProvider = {
       key: "get_authorized_by",
       label: "Get token owner",
       description:
-        "Return the user this token was authorized by. Needs no arguments and no site scope, so it is the connection check.",
+        "Return the user this token was authorized by. OAuth connections only — a Site Token cannot call Webflow's authorization endpoints.",
       method: "GET",
       pathTemplate: "/token/authorized_by",
       write: false,
-      probe: true,
+      // NOT the probe any more (#1111). It asks "which OAuth app authorized this?", a question a
+      // Site Token has no answer to: Webflow's own site-token page says site tokens "don't grant
+      // access to the following endpoints: Authorization endpoints, Custom code endpoints,
+      // Workspace Activity log endpoints", and this operation is Webflow's `token` group. So a
+      // working Site Token connection failed its own "Test connection" while every Webflow action
+      // we ship ran fine — the exact inversion of what a credential check is for.
+      //
+      // The action stays, because for an OAuth connection it is a legitimate read; only the probe
+      // moved, to `list_sites`. That one is demonstrated WITH a site token by the same Webflow
+      // page: `curl --request GET --url https://api.webflow.com/v2/sites --header 'authorization:
+      // Bearer YOUR_API_TOKEN'` … "Replace YOUR_API_TOKEN with the site token you generated."
+      //
+      // Note the pinned spec cannot adjudicate this and must not be read as if it could: Webflow
+      // declares `security: [{OAuth2: […]}]` on 112 of its 117 operations, including the CMS reads
+      // a Site Token demonstrably performs. The evidence here is the vendor's prose (VERIFICATION.md
+      // §2.5 rule 2), not the document.
       fields: [],
     },
   ],

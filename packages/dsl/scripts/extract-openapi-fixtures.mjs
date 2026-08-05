@@ -26,6 +26,8 @@
  *     answering exactly the questions the catalog asks of it, and nothing more.
  *   - a free-form node (`additionalProperties`, or an object declaring no properties at all)
  *     is marked `x-freeform`, because "we can't tell" must not read as "wrong".
+ *   - an operation's `deprecated: true` is CARRIED (#1109) and its own `security` override is
+ *     summarised as `x-security` — see the two blocks below for why each is worth its bytes.
  *
  * The result is still a structurally valid OpenAPI 3 document — just a lossy one. It is a test
  * fixture, never served or shipped, and nothing outside the drift spec reads it.
@@ -591,6 +593,30 @@ function pruneParameters(raw, deref, pinnedHeaders = new Set()) {
   );
 }
 
+/**
+ * The scheme NAMES an operation's OWN `security` block accepts — `["ApiKey", "OAuth2"]` — or
+ * undefined when it declares none (#1109).
+ *
+ * Emitted only for an operation-level OVERRIDE, and only a non-empty one. An operation that
+ * declares nothing inherits the document's default, and one that declares `security: []` is
+ * explicitly public; both are the LEAST restrictive answer, which is the only thing the drift spec
+ * asks — it compares a credential probe's accepted schemes against the ones the provider's other
+ * shipped actions accept, and only a probe that is STRICTLY narrower is a finding. So "no
+ * `x-security` key" reads as "nothing narrower than the default", never as "we agree".
+ *
+ * A `security` array is a list of ALTERNATIVES (OR), so the names are unioned. One alternative
+ * naming two schemes at once is an AND, which a flat union overstates — it is vanishingly rare and
+ * would only ever make this check quieter, never louder, which is the safe direction for a
+ * hard-failing comparison.
+ */
+function securitySchemeNames(op) {
+  if (!Array.isArray(op?.security) || op.security.length === 0) return undefined;
+  const names = new Set();
+  for (const alternative of op.security)
+    for (const name of Object.keys(alternative ?? {})) names.add(name);
+  return names.size ? [...names].sort() : undefined;
+}
+
 function pruneRequestBody(raw, deref, keep) {
   const rb = deref(raw);
   if (!rb || typeof rb !== "object" || !rb.content) return undefined;
@@ -755,8 +781,19 @@ for (const [provider, { url, pathPrefix, format, external }] of Object.entries(
       : op.requestBody
         ? pruneRequestBody(op.requestBody, deref, keep)
         : undefined;
+    // `deprecated` is CARRIED, and it is the one field here that describes the operation's FUTURE
+    // rather than its shape (#1109). Dropping it made the drift spec structurally blind to a vendor
+    // deprecating an endpoint it still documents — the loudest signal a vendor ever sends, and free
+    // to read. `sentry.list_issues` sat flagged `deprecated: true` inside a document this repo
+    // already pinned and re-read on every refresh, and #946 moved its two siblings off the legacy
+    // route without noticing. `false` is not vendored: it is the default, and absence must keep
+    // reading as "the vendor said nothing", which for most vendors is all it ever says.
+    const deprecated = op.deprecated === true;
+    const security = securitySchemeNames(op);
     entry[hit.method] = {
       ...(op.operationId ? { operationId: op.operationId } : {}),
+      ...(deprecated ? { deprecated: true } : {}),
+      ...(security ? { "x-security": security } : {}),
       ...(parameters.length ? { parameters } : {}),
       ...(requestBody ? { requestBody } : {}),
     };

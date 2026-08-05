@@ -8,7 +8,7 @@
     "provider": "clickup",
     "pathPrefix": "/v2",
     "source": "https://developer.clickup.com/openapi/clickup-api-v2-reference.json",
-    "fetchedAt": "2026-07-30",
+    "fetchedAt": "2026-08-05",
     "note": "PRUNED snapshot — see packages/dsl/scripts/extract-openapi-fixtures.mjs. Do not hand-edit."
   },
   "paths": {

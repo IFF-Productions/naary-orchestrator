@@ -167,7 +167,7 @@ catalog's own `write` flag and `fields[].required`). `Needs` = the fields you mu
 | todoist | `list_tasks` | — | 2/4 | — |
 | twilio | `list_messages` | accountSid | 3/5 | — |
 | vercel | `list_deployments` | — | 3/4 | — |
-| webflow | `list_collections` | siteId | 4/5 | — |
+| webflow | `list_sites` | — | 5/6 | — |
 | zendesk | `list_tickets` | — | 2/5 | — |
 | zoom | `list_meetings` | userId | 3/5 | — |
 
@@ -262,6 +262,51 @@ silently rot.
 **Ordering note:** an `unknown` answer comes *before* the missing-Server-URL check — telling someone to
 fill in a Server URL for a provider we can't probe at all would send them to fix the wrong thing.
 
+#### 2.4.1 …and is that probe a call the connection can actually make? (#1111)
+
+The 31 above answer "we are willing to probe this provider". Until #1111 nothing asked the next
+question — whether the endpoint we probe *exists*, and whether the credential the user actually holds
+is allowed to call it. Both had already gone wrong, in opposite directions:
+
+- **`webflow` probed `get_authorized_by`** (`GET /token/authorized_by`), which asks *which OAuth app
+  authorized this token* — a question a Webflow **Site Token** has no answer to. Webflow's own
+  site-token page: *"Site tokens don't grant access to the following endpoints: Authorization
+  endpoints, Custom code endpoints, Workspace Activity log endpoints."* So a Site Token connection
+  failed its Test while every Webflow action in the catalog ran fine for it — the user is told a
+  working credential is broken, which is worse than not checking. **Fixed here:** the probe is now
+  `list_sites` (`GET /sites`), which the same Webflow page demonstrates *with a site token*
+  (`curl --request GET --url https://api.webflow.com/v2/sites --header 'authorization: Bearer
+  YOUR_API_TOKEN'` … "Replace `YOUR_API_TOKEN` with the site token you generated"). Live:
+  `GET /v2/sites` → 401 where `/v2/nonsense-xyz` → 404 on the same host.
+- **Three probes are on endpoints their vendor no longer publishes** (#1109): `pipedrive.list_deals`
+  (out of support since 1 Aug 2026, #945), `shopify.list_products` (named in Shopify's own
+  product-deprecation banner) and `vercel.list_projects` (`/v9/projects`; the published route is
+  `/v10/projects`). All three answer today, and repointing any of them is a catalog change with
+  #945's output-shape risk — a decision, not a chore — so they are **written down rather than
+  fixed**, in `PROBE_NOT_SPEC_CHECKED`.
+
+`packages/dsl/test/probe-action.drift.spec.ts` is the guard. For every probe it hard-asserts that the
+declaration passes the same safety gate the route applies (`write: false`, `GET`, no user-supplied
+required field) — read from the **raw catalog**, because `pickConnectionTestAction` discards a bad
+declaration silently, so asking *it* would go green while the catalog said something false — and,
+where a spec is pinned, that the operation is present, is not flagged `deprecated`, and is not
+restricted to security schemes narrower than the ones the provider's other shipped actions require.
+
+Coverage, printed by that spec on every run: **31 probeable providers — 20 checked against a pinned
+vendor document, 4 excused as `UNSPECIFIED`** (`asana` · `mattermost` · `posthog` · `zoom`, each a
+documented `me` sentinel with live 401-vs-404 evidence), **7 with no pinned document at all**
+(`pipedrive` · `shopify` · `vercel` · `airtable` · `netlify` · `zendesk` · `deepl`). Every one of the
+seven carries a written reason, and the list is asserted in **both** directions — pinning a spec for
+one of them fails its own entry, which is when it should be deleted.
+
+**What the spec cannot adjudicate, said out loud.** #1109 read `/token/authorized_by` as the one
+Webflow operation overriding the global scheme to OAuth2-only. That does not hold against the
+document pinned here: Webflow declares `security: [{OAuth2: […]}]` on **112 of its 117 operations**,
+including the CMS reads a Site Token demonstrably performs. So the scheme comparison is silent for
+every Webflow action, the fix rests on the vendor's prose (§2.5 rule 2), and a scope-level rule was
+deliberately *not* built — `list_sites` needs `sites:read`, which no other Webflow action requires,
+so a scope-subset rule would fail the very change that fixes the bug.
+
 ### 2.5 Which write bodies a SPEC can vouch for — 54 of 76 (#813)
 
 A third evidence tier, between "unit-tested" and "run live": the request body an action builds,
@@ -275,6 +320,24 @@ that run, and its denominator is computed from the catalog, so "of 76" cannot go
 This does **not** replace the `Live proof` column. A spec proves the shape is *sayable*, not that
 anyone has ever sent it. It does close the specific hole #707 and #811 came out of: an action whose
 body could never be accepted, shipped looking exactly as trustworthy as one that works.
+
+**The spec is also read for what it says about an endpoint's FUTURE (#1109).** Until now the
+extractor emitted `{operationId, parameters, requestBody}` per operation and dropped `deprecated`, so
+there was not one `"deprecated": true` across all pinned fixtures and this instrument was
+structurally blind to a vendor deprecating an endpoint it still documents. That is not hypothetical:
+`sentry.list_issues` sat flagged `deprecated: true` inside a document this repo already pinned and
+re-read on every refresh, while #946 moved its two siblings onto the org-scoped successor. The flag
+is now carried and hard-asserted — **1 of the 127 vendored operations sets it**, and it is that one.
+
+It is adjudicated rather than merely red, through `ACKNOWLEDGED_DEPRECATED`, for the reason every
+list in this file exists: a vendor can flag an endpoint on any morning, and failing an unrelated PR
+teaches everyone to re-run CI without reading. A *known* deprecation is a written decision naming
+what the migration costs and the issue that owns it; a **new** one fails until someone writes those
+two sentences. `sentry.list_issues` is the single entry — its successor moves the project from a
+path segment to a `project` query parameter, so it is a `retiredFields` migration (#944) with an
+uncompared response shape (#945 §4), tracked in #1109. **Absence of the flag proves nothing**: most
+vendors never set it, and the prose deprecations #1109 found by hand (`posthog.list_events`) are not
+machine-readable at all.
 
 **Spec-verified — 27 providers, 54 of the 76 body-bearing write actions:** `asana` · `box` ·
 `calendly` · `clickup` · `cloudflare` · `digitalocean` · `discord` · `front` · `github` · `gitlab` ·

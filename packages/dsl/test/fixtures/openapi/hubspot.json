@@ -8,13 +8,16 @@
     "provider": "hubspot",
     "pathPrefix": "",
     "source": "https://api.hubapi.com/public/api/spec/v2/specs/release/22150/version/3",
-    "fetchedAt": "2026-07-30",
+    "fetchedAt": "2026-08-05",
     "note": "PRUNED snapshot — see packages/dsl/scripts/extract-openapi-fixtures.mjs. Do not hand-edit."
   },
   "paths": {
     "/crm/v3/objects/contacts/{contactId}": {
       "get": {
         "operationId": "get-/crm/v3/objects/contacts/{contactId}_getById",
+        "x-security": [
+          "oauth2"
+        ],
         "parameters": [
           {
             "name": "contactId",
@@ -50,6 +53,9 @@
       },
       "patch": {
         "operationId": "patch-/crm/v3/objects/contacts/{contactId}_update",
+        "x-security": [
+          "oauth2"
+        ],
         "parameters": [
           {
             "name": "contactId",
@@ -84,6 +90,9 @@
     "/crm/v3/objects/contacts": {
       "post": {
         "operationId": "post-/crm/v3/objects/contacts_create",
+        "x-security": [
+          "oauth2"
+        ],
         "requestBody": {
           "required": true,
           "content": {
