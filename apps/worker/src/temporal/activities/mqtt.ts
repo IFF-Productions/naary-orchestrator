@@ -505,6 +505,12 @@ export async function callMqttConsume(
         );
         client.once("connect", (packet) => {
           clearTimeout(timer);
+          // Assigned HERE, not after the await. `resolve` only schedules a microtask, while
+          // mqtt.js pumps subsequent packets through `nextTick` — whose queue drains first — so a
+          // PUBLISH riding in the same TCP buffer as the CONNACK could reach `handleMessage` while
+          // this was still false. Setting it in the handler makes "sessionPresent is known before
+          // any packet is examined" an invariant rather than a matter of arrival timing.
+          sessionPresent = packet.sessionPresent;
           resolve(packet);
         });
         client.once("error", (e) => {

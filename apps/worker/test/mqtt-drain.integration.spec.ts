@@ -251,6 +251,59 @@ describe("mqttDrain — real broker, real Temporal", () => {
     });
   }, 300_000);
 
+  it("keeps a retained message published while the session was offline, exactly once", async () => {
+    // The dangerous edge of the drop rule, and the one place it could destroy a real message. It
+    // also turns out to be the case that best justifies the rule existing.
+    //
+    // The rule assumes a retained PUBLISH arriving on an ESTABLISHED subscription is always a
+    // subscribe-time replay. That rests on MQTT 3.1.1 §3.3.1.3: a broker MUST clear RETAIN when
+    // forwarding a message that matches an established subscription, and MUST set it only for a
+    // message sent because of a NEW subscription. A `retain: true` publish made while our session
+    // was offline is queued against that established subscription, so it must arrive with RETAIN=0
+    // and be kept. If a broker got that wrong the rule would discard a genuine message and merely
+    // increment a counter — silent loss. So it is verified against the broker rather than trusted.
+    //
+    // What the broker actually does, measured: ONE publish produces TWO deliveries. The queued copy
+    // arrives with RETAIN=0 (kept, one run), and our SUBSCRIBE separately replays the retained store
+    // with RETAIN=1 (dropped). So the drop rule is not merely tidy here — without it this ordinary
+    // scenario, a retained publish landing between two drains, would start TWO runs for one message.
+    const topic = `${TOPIC}/retained-offline`;
+    const worker = await makeWorker();
+    await worker.runUntil(async () => {
+      // Establish the session and its subscription first.
+      const first = await env.client.workflow.execute(mqttDrain, {
+        args: [
+          drainInput({
+            topic,
+            maxWaitMs: 1_000,
+            workflowKey: "retained-offline",
+          }),
+        ],
+        taskQueue: TASK_QUEUE,
+        workflowId: "mqtt-retained-offline-1",
+      });
+      expect(first.sessionPresent).toBe(false);
+
+      // A RETAINED publish, with our subscriber offline. It goes to the retained store AND is
+      // queued for the established subscription.
+      await publishOffline(topic, ["live-and-retained"], { retain: true });
+
+      const second = await env.client.workflow.execute(mqttDrain, {
+        args: [drainInput({ topic, workflowKey: "retained-offline" })],
+        taskQueue: TASK_QUEUE,
+        workflowId: "mqtt-retained-offline-2",
+      });
+      expect(second.sessionPresent).toBe(true);
+      // KEPT — delivered with RETAIN cleared, as §3.3.1.3 requires — and run ONCE. A `0` here
+      // would be the silent loss this test exists to catch.
+      expect(second.drained).toBe(1);
+      expect(second.started).toBe(1);
+      // And the broker's SEPARATE retained-store replay of the same value was suppressed. Without
+      // the drop rule this would be a second run for a single publish.
+      expect(second.droppedRetainedReplays).toBe(1);
+    });
+  }, 300_000);
+
   it("registers under the name the schedule starts it by", () => {
     // The API's schedule action names the workflow as a STRING; a rename here would strand every
     // mqttTrigger schedule with "workflow type not registered" at fire time, which nothing else in
