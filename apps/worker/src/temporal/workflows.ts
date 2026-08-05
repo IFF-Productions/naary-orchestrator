@@ -29,3 +29,13 @@ export type { EvalRunInput, EvalRunResult } from "./workflow/eval-run";
 // Registered by the name "kafkaDrain".
 export { kafkaDrain, kafkaRunId } from "./workflow/kafka-drain";
 export type { KafkaDrainInput, KafkaDrainResult } from "./workflow/kafka-drain";
+// MQTT scheduled drain (#1086 slice 3b): one run per message over a PERSISTENT broker session.
+// Registered by the name "mqttDrain". Its run ids are unique-per-drain, NOT a dedupe key — MQTT
+// has no stable message identity to build one from (see mqttRunId). Registered by the name
+// "mqttDrain".
+export {
+  mqttDrain,
+  mqttRunId,
+  mqttSessionClientId,
+} from "./workflow/mqtt-drain";
+export type { MqttDrainInput, MqttDrainResult } from "./workflow/mqtt-drain";

@@ -16,6 +16,7 @@ import {
 } from "@temporalio/client";
 import {
   KAFKA_DRAIN_WORKFLOW,
+  MQTT_DRAIN_WORKFLOW,
   RUN_GRAPH_WORKFLOW,
   TASK_QUEUE,
 } from "@naary/contracts";
@@ -386,6 +387,116 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
+  /**
+   * Keep an `mqttTrigger` graph's interval Schedule in sync (#1086 slice 3b). Mirror of
+   * syncKafkaSchedule, with the differences MQTT forces.
+   *
+   * `overlap: SKIP` is set here too, and NOT because Kafka sets it — the reason is different and
+   * stronger. Kafka's problem was the commit: `admin.setOffsets` is refused while the group has a
+   * live member. MQTT has no commit to refuse; its problem is the SESSION. Both drains connect as
+   * the same client id, and MQTT-3.1.1 §3.1.4-2 requires a broker receiving a second CONNECT for
+   * an in-use client id to DISCONNECT the existing client. Two overlapping drains would therefore
+   * kick each other off the broker in turn, each inheriting the other's half-delivered queue —
+   * a thrash that produces duplicate runs and stalled drains rather than a clean error.
+   *
+   * No `groupId` to resolve, because MQTT has no consumer groups: the drain derives its session
+   * client id from tenant/env/workflowKey/topic/qos (`mqttSessionClientId`), so there is nothing
+   * here for an author to get wrong and nothing to pass through the schedule's args.
+   *
+   * Same invariants as the poll/kafka paths otherwise: delete-then-create so the schedule always
+   * reflects the latest graph, re-paused when the workflow is inactive in this env, best-effort for
+   * the caller. NOT part of the legacy-id reconcile — mqtt ids have always carried the env segment.
+   */
+  async syncMqttSchedule(
+    tenantId: string,
+    environmentId: string,
+    workflowKey: string,
+    graph: GraphDef,
+  ): Promise<void> {
+    const start = graph.nodes.find((n) => n.id === graph.startNodeId);
+    if (!start || start.type !== "mqttTrigger") return;
+    const cfg = (start.config ?? {}) as {
+      connectionId?: string;
+      topic?: string;
+      qos?: 0 | 1;
+      intervalSeconds?: number;
+      maxMessages?: number;
+      maxWaitMs?: number;
+    };
+    // A drain with no connection/topic can only fail every interval forever. Refusing to create the
+    // schedule is the quiet, correct answer — the save-gate already requires both, so reaching here
+    // means the graph was written straight to the DB.
+    if (!cfg.connectionId?.trim() || !cfg.topic?.trim()) return;
+    // 10s floor, as for Kafka: latency IS the cost of the scheduled-drain design, and a broker
+    // connect is far cheaper than an HTTP fetch of someone else's site.
+    const everySeconds = Math.max(
+      10,
+      Math.floor(Number(cfg.intervalSeconds) || 30),
+    );
+    const snapshot = await this.graphs.getLatest(
+      tenantId,
+      environmentId,
+      workflowKey,
+    );
+    if (!snapshot) return;
+    const id = `mqtt-${tenantId}-${environmentId}-${workflowKey}`;
+
+    await this.deleteHandleQuiet(id);
+    const budget = await getBudget(tenantId);
+    await this.client.schedule.create({
+      scheduleId: id,
+      spec: { intervals: [{ every: everySeconds * 1000 }] },
+      // See the docstring: two overlapping drains take each other's broker session over.
+      policies: { overlap: ScheduleOverlapPolicy.SKIP },
+      action: {
+        type: "startWorkflow",
+        workflowType: MQTT_DRAIN_WORKFLOW,
+        taskQueue: TASK_QUEUE,
+        // Temporal appends the scheduled time, so each drain is its own execution.
+        workflowId: `mqttdrain-${tenantId}-${environmentId}-${workflowKey}`,
+        args: [
+          {
+            tenantId,
+            environmentId,
+            workflowKey,
+            graph: snapshot.graph,
+            graphContentHash: snapshot.contentHash,
+            graphVersion: snapshot.version,
+            connectionId: cfg.connectionId,
+            topic: cfg.topic,
+            qos: cfg.qos,
+            maxMessages: cfg.maxMessages,
+            maxWaitMs: cfg.maxWaitMs,
+            perExecutionCapUsd: budget?.perExecutionCapUsd,
+            maxStepsPerRun: budget?.maxStepsPerRun ?? DEFAULT_MAX_STEPS_PER_RUN,
+          },
+        ],
+        memo: {
+          graphContentHash: snapshot.contentHash,
+          graphVersion: snapshot.version,
+        },
+      },
+    });
+    const paused = !(await this.graphs.isActive(
+      tenantId,
+      environmentId,
+      workflowKey,
+    ));
+    if (paused) await this.pauseHandle(id, true);
+    await getPrisma().schedule.upsert({
+      where: { id },
+      create: {
+        id,
+        tenantId,
+        environmentId,
+        workflowKey,
+        cron: `every ${everySeconds}s`,
+        paused,
+      },
+      update: { cron: `every ${everySeconds}s`, paused },
+    });
+  }
+
   /** The env's schedules, enriched with the next fire time from Temporal. */
   async list(tenantId: string, environmentId: string): Promise<ScheduleView[]> {
     const rows = await getPrisma().schedule.findMany({
@@ -440,9 +551,19 @@ export class SchedulesService implements OnModuleInit, OnModuleDestroy {
       `poll-${tenantId}-${environmentId}-${workflowKey}`,
       `cron-${tenantId}-${environmentId}-${workflowKey}`,
       `kafka-${tenantId}-${environmentId}-${workflowKey}`,
+      `mqtt-${tenantId}-${environmentId}-${workflowKey}`,
     ]) {
       await this.deleteHandleQuiet(id);
     }
+    // NOTE, deliberately not code: deleting the schedule stops us DRAINING, but the trigger's
+    // persistent session still exists on the TENANT's broker, and the broker will keep queueing
+    // QoS-1 messages against it until its own expiry policy reaps it (mosquitto's
+    // `persistent_client_expiration` is unset by default, i.e. never). We do not reach out to
+    // destroy it: the API has no broker egress path — connections are resolved and dialled inside
+    // worker activities — and adding one for a best-effort cleanup would mean the control plane
+    // making outbound connections to tenant-supplied hosts, which is the SSRF surface the egress
+    // guard exists to keep in one place. Across a PAUSE the queueing is the behaviour we want
+    // anyway: resuming a paused workflow should pick up what arrived while it was off.
     // Legacy no-env ids (the boot reconcile normally migrated them — this is the delete-path
     // safety net). Ownership-guarded: only cleared when THIS env owns the legacy row, so a
     // sandbox delete can't kill the default env's not-yet-reconciled schedule.

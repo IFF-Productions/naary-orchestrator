@@ -26,6 +26,12 @@ export const RUN_GRAPH_WORKFLOW = "runGraph";
  *  per message, so the schedule's action targets this instead. */
 export const KAFKA_DRAIN_WORKFLOW = "kafkaDrain";
 
+/** Workflow type name for the MQTT scheduled drain (#1086 slice 3b) — the mqttTrigger counterpart
+ *  of KAFKA_DRAIN_WORKFLOW. A separate workflow rather than a mode of `kafkaDrain`: the two resume
+ *  by different mechanisms (committed offsets vs a persistent session) and have different delivery
+ *  guarantees, so sharing one workflow would mean one docstring that is wrong for both. */
+export const MQTT_DRAIN_WORKFLOW = "mqttDrain";
+
 /** Workflow type name for the durable per-session chat workflow (design §2.1b, option A). */
 export const CHAT_SESSION_WORKFLOW = "chatSession";
 

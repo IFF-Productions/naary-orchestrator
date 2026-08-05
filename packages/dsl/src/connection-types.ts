@@ -36,6 +36,7 @@ export const CONNECTION_TYPES: Record<string, ConnectionType[]> = {
   kafkaPublish: ["kafka"],
   kafkaTrigger: ["kafka"],
   mqttPublish: ["mqtt"],
+  mqttTrigger: ["mqtt"],
   firestoreQuery: ["firestore"],
   firestoreWrite: ["firestore"],
   sendEmail: ["smtp"],

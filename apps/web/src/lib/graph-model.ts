@@ -224,6 +224,9 @@ export const NODE_KINDS: NodeKind[] = [
   { type: "kafkaTrigger", label: "Kafka", group: "Triggers", accent: "var(--node-poll, #4f9ad6)",
     description: "Start one run per Kafka message. Messages are drained on an interval; a redelivery does not start a second run.",
     defaultConfig: { connectionId: "", topic: "orders.created", groupId: "naary-orders", intervalSeconds: 30 } },
+  { type: "mqttTrigger", label: "MQTT", group: "Triggers", accent: "var(--node-poll, #4f9ad6)",
+    description: "Start one run per MQTT message. The broker keeps a session for this trigger, so messages published between checks are waiting at the next one.",
+    defaultConfig: { connectionId: "", topic: "sensors/+/temp", qos: 1, intervalSeconds: 30 } },
   { type: "scheduleTrigger", label: "Schedule", group: "Triggers", accent: "var(--node-schedule, #5b8def)",
     description: "Run the workflow on a cron schedule (e.g. every weekday at 9am).",
     defaultConfig: { cron: "0 9 * * 1-5" } },
@@ -614,6 +617,16 @@ export function nodeSubtitle(
   }
   if (kind === "kafkaPublish" || kind === "mqttPublish") {
     return (config.topic as string | undefined) || undefined;
+  }
+  if (kind === "mqttTrigger") {
+    // Filter and cadence — as for kafkaTrigger, the two facts that tell two of them apart.
+    const topic = config.topic as string | undefined;
+    const secs = config.intervalSeconds as number | undefined;
+    return (
+      [topic, secs ? `every ${secs}s` : undefined]
+        .filter(Boolean)
+        .join(" · ") || undefined
+    );
   }
   if (kind === "kafkaTrigger") {
     // Topic and cadence — the two facts that tell one Kafka trigger from another at a glance.

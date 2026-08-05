@@ -57,6 +57,19 @@ export const handleKafkaTrigger: NodeHandler = async ({ node, ctx }) => {
   return;
 };
 
+/**
+ * `mqttTrigger` — one run per MQTT message (#1086 slice 3b).
+ *
+ * Same shape and same reason as `handleKafkaTrigger`: the message arrives WITH the run, passed as
+ * the run input by the drain workflow. A handler that subscribed here would be a second subscriber
+ * outside the drain's session — which, MQTT being what it is, would not merely double-read but take
+ * the session over from the drain (a client id can only be connected once).
+ */
+export const handleMqttTrigger: NodeHandler = async ({ node, ctx }) => {
+  ctx[node.id] = ctx.__input as NodeOutputMap["mqttTrigger"];
+  return;
+};
+
 export const handleScheduleTrigger: NodeHandler = async ({ node, ctx }) => {
   // Entry node: the run was started by a Temporal cron Schedule (control-plane synced
   // on save). Passthrough of the run input — the schedule carries no external event.

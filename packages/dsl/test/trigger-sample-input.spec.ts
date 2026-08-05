@@ -35,6 +35,9 @@ describe("trigger sample input (#983)", () => {
     // schedule/poll are excluded below: a real firing carries a real Kafka message, so there is
     // something for a manual run to be faithful TO. (#1086 slice 2.)
     "kafkaTrigger",
+    // mqttTrigger, for the identical reason (#1086 slice 3b): a real firing carries a real MQTT
+    // message, so a manual run has something meaningful to stand in for.
+    "mqttTrigger",
   ];
 
   it("every entry node that accepts a sample declares it in its registry schema", () => {

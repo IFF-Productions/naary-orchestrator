@@ -22,6 +22,7 @@ const schedules = {
   syncPollSchedule: vi.fn(),
   syncCronSchedule: vi.fn(),
   syncKafkaSchedule: vi.fn(),
+  syncMqttSchedule: vi.fn(),
   teardownForWorkflow: vi.fn(),
 };
 
@@ -33,6 +34,7 @@ beforeEach(() => {
   schedules.syncPollSchedule.mockResolvedValue(undefined);
   schedules.syncCronSchedule.mockResolvedValue(undefined);
   schedules.syncKafkaSchedule.mockResolvedValue(undefined);
+  schedules.syncMqttSchedule.mockResolvedValue(undefined);
   schedules.teardownForWorkflow.mockResolvedValue(undefined);
   svc = new WorkflowLifecycleService(graphs as never, schedules as never);
 });

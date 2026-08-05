@@ -69,6 +69,9 @@ export class WorkflowLifecycleService {
     await this.schedules
       .syncKafkaSchedule(tenantId, environmentId, workflowKey, graph)
       .catch(() => undefined);
+    await this.schedules
+      .syncMqttSchedule(tenantId, environmentId, workflowKey, graph)
+      .catch(() => undefined);
     return snap;
   }
 

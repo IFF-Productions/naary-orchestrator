@@ -250,6 +250,64 @@ export interface KafkaTriggerNodeConfig extends TriggerSampleInputConfig {
 }
 
 /**
+ * MQTT Trigger — ONE RUN PER MESSAGE, drained on an interval over a PERSISTENT SESSION
+ * (#1086 slice 3b).
+ *
+ * Same outer shape as {@link KafkaTriggerNodeConfig} — a Temporal interval Schedule fires a small
+ * `mqttDrain` workflow — and a deliberately different inner one, because MQTT resumes by a
+ * completely different mechanism.
+ *
+ * HOW IT RESUMES, and why there is no `groupId` here. Kafka remembers a consumer group's OFFSET,
+ * so a drain can rejoin at any time and ask "what's after 41?". MQTT has no offsets and no
+ * server-side log to seek in: the ONLY thing that survives a disconnect is a **persistent session**
+ * — the broker keeps the subscription and queues QoS-1 messages against a client id while that
+ * client is away. So this trigger connects with `clean: false` and a **stable, derived client id**
+ * (`naary-` + a hash of tenant/environment/workflowKey — the author never picks it, because two
+ * triggers sharing a client id would take each other's session over and inherit each other's
+ * backlog). Everything published between two drains is waiting at the next connect.
+ *
+ * WHERE THAT STOPS, stated rather than implied:
+ * - The session BEGINS at the first drain. Anything published before a trigger has ever run was
+ *   never queued for anyone and is gone. (A brand-new session does receive the topic's RETAINED
+ *   message, if it has one — which can be old. `retained` is in the output so a graph can tell.)
+ * - QoS 0 is never queued for an offline session. That is why `qos` defaults to 1, and why 2 is
+ *   not offered at all (#1086 §6 puts the exactly-once handshake out of scope).
+ * - If the broker loses the session (restart without persistence, an expiry policy, someone else
+ *   connecting as the same client id), its queued messages go with it — silently, as far as MQTT
+ *   is concerned. The drain reports `sessionPresent: false` when that has happened.
+ *
+ * DELIVERY, and how it differs from Kafka's. Kafka commits AFTER the runs start, so a crash
+ * REDELIVERS and the offset-derived workflowId makes that a no-op. MQTT's acknowledgement cannot
+ * be moved outside the connection that received the message, so the drain acknowledges before its
+ * runs are started. The result is the mirror image: **duplicates are rare, and loss is possible.**
+ * See `mqttDrain`'s docstring for the exact window.
+ *
+ * `sampleInput` IS offered (like kafkaTrigger): a real firing carries a real message, so a manual
+ * "Run now" has something meaningful to stand in for.
+ */
+export interface MqttTriggerNodeConfig extends TriggerSampleInputConfig {
+  /** An `mqtt` connection; its broker URL + credentials are read in-activity, never in the graph. */
+  connectionId: string;
+  /**
+   * Topic FILTER to subscribe to — wildcards allowed here (`sensors/+/temp`, `sensors/#`), which
+   * is the exact opposite of `mqttPublish`, where they are rejected.
+   */
+  topic: string;
+  /**
+   * Subscription QoS. 1 (default) is what makes the persistent session useful: the broker only
+   * queues QoS-1 messages for an offline client, so 0 means "deliver only while a drain happens to
+   * be connected" — i.e. almost never, given drains are short. 2 is not offered.
+   */
+  qos?: 0 | 1;
+  /** How often to drain, in seconds (the Schedule interval; floored server-side). */
+  intervalSeconds?: number;
+  /** Most messages to take in one drain. Each becomes its own run. */
+  maxMessages?: number;
+  /** How long one drain stays connected collecting messages (ms). */
+  maxWaitMs?: number;
+}
+
+/**
  * Respond to Webhook node — set the HTTP response the webhook ingress should return
  * synchronously (for graphs triggered by a webhook). PURE: it records the response
  * into run state; the run then CONTINUES (respond fast, keep working). `body` is
