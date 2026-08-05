@@ -37,6 +37,7 @@ vi.mock("@naary/db", () => ({
 
 import type { Principal } from "../src/auth/tenant.decorator";
 import type { AuditService } from "../src/audit/audit.service";
+import type { ApiTokenService } from "../src/auth/api-token.service";
 import type { CliRefreshTokenService } from "../src/auth/cli-refresh-token.service";
 import type { ExecutionsService } from "../src/executions/executions.service";
 import type { MailerService } from "../src/mail/mailer.service";
@@ -62,6 +63,11 @@ const record = vi.fn().mockResolvedValue(undefined);
 const revokeUserSessions = vi
   .fn()
   .mockResolvedValue({ families: 0, tokens: 0 });
+/** #1118's residual — the same offboarding call deletes the live CLI ACCESS token. Also a quiet
+ *  stub here, and also PRESENT rather than omitted: `revokeCliSessions` catches its own failures,
+ *  so a missing delegate would be a TypeError this file absorbed without a red test. The real
+ *  behaviour is pinned in cli-access-token-revocation.spec.ts. */
+const revokeUserCliTokens = vi.fn().mockResolvedValue(0);
 const svc = new MembersService(
   { invalidate } as unknown as MembershipService,
   { sendInvitation } as unknown as MailerService,
@@ -69,6 +75,7 @@ const svc = new MembersService(
   { heldApprovals } as unknown as ExecutionsService,
   { record } as unknown as AuditService,
   { revokeUserSessions } as unknown as CliRefreshTokenService,
+  { revokeUserCliTokens } as unknown as ApiTokenService,
 );
 
 /** The invite email is fire-and-forget (void) — flush microtasks so the async IIFE settles. */

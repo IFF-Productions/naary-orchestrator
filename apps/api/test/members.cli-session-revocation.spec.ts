@@ -46,6 +46,15 @@ function matches(row: Row, where: Row | undefined): boolean {
         }
         return got === c.equals;
       }
+      // `label: { startsWith: "naary CLI" }` — the CLI filter on the access-token delete.
+      if ("startsWith" in (c as Record<string, unknown>)) {
+        const want = (c as { startsWith: unknown }).startsWith;
+        return (
+          typeof got === "string" &&
+          typeof want === "string" &&
+          got.startsWith(want)
+        );
+      }
       if (got && typeof got === "object")
         return matches(got as Row, cond as Row);
       return false;
@@ -113,12 +122,18 @@ const db = {
     rotatedAt: null,
     revokedAt: null,
   }),
+  // The offboarding path also deletes the live `nry_` ACCESS token (#1118's residual). This file
+  // pins the REFRESH half; the delegate is here so that half runs for real rather than throwing a
+  // TypeError that `revokeCliSessions` would silently swallow. The access half is pinned in
+  // cli-access-token-revocation.spec.ts.
+  apiToken: table([], { expiresAt: null, environmentId: null, userId: null }),
   $transaction: vi.fn(async (ops: Promise<unknown>[]) => Promise.all(ops)),
 };
 
 vi.mock("@naary/db", () => ({ getPrisma: () => db }));
 
 import type { AuditService } from "../src/audit/audit.service";
+import { ApiTokenService } from "../src/auth/api-token.service";
 import { CliRefreshTokenService } from "../src/auth/cli-refresh-token.service";
 import type { Principal } from "../src/auth/tenant.decorator";
 import type { ExecutionsService } from "../src/executions/executions.service";
@@ -139,6 +154,9 @@ const invalidateTenant = vi.fn();
 
 /** REAL, not a double — the whole point is that the revoke reaches the rotation state machine. */
 const cliSessions = new CliRefreshTokenService();
+/** Also real, for the same reason: `revokeCliSessions` calls both, and a double here would hide a
+ *  throw from the second call behind the first. */
+const apiTokens = new ApiTokenService();
 
 const svc = new MembersService(
   { invalidate } as unknown as MembershipService,
@@ -147,6 +165,7 @@ const svc = new MembersService(
   { heldApprovals } as unknown as ExecutionsService,
   { record: auditRecord } as unknown as AuditService,
   cliSessions,
+  apiTokens,
 );
 
 const asOwner: Principal = { tenantId: "t-1", userId: "u-own", role: "owner" };
@@ -186,6 +205,7 @@ beforeEach(() => {
     db.invitation,
     db.tenantSettings,
     db.cliRefreshToken,
+    db.apiToken,
   ]) {
     t.rows.length = 0;
     for (const fn of Object.values(t)) {

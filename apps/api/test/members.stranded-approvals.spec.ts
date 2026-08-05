@@ -134,6 +134,7 @@ vi.mock("@naary/db", () => ({ getPrisma: () => prisma }));
 
 import type { Principal } from "../src/auth/tenant.decorator";
 import type { AuditService } from "../src/audit/audit.service";
+import type { ApiTokenService } from "../src/auth/api-token.service";
 import type { CliRefreshTokenService } from "../src/auth/cli-refresh-token.service";
 import { ExecutionsService } from "../src/executions/executions.service";
 import type { MailerService } from "../src/mail/mailer.service";
@@ -180,6 +181,12 @@ const svc = new MembersService(
   {
     revokeUserSessions: vi.fn().mockResolvedValue({ families: 0, tokens: 0 }),
   } as unknown as CliRefreshTokenService,
+  // …and the access-token half (#1118's residual), stubbed for the same reason. Present, not
+  // omitted: `revokeCliSessions` swallows its own failures, so a missing delegate would be an
+  // invisible TypeError. See cli-access-token-revocation.spec.ts.
+  {
+    revokeUserCliTokens: vi.fn().mockResolvedValue(0),
+  } as unknown as ApiTokenService,
 );
 
 const asOwner: Principal = { tenantId: "t-1", userId: "u-own", role: "owner" };
