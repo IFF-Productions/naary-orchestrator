@@ -24,6 +24,7 @@ const ALL_CONNECTION_TYPES: Record<ConnectionType, true> = {
   mysql: true,
   firestore: true,
   kafka: true,
+  mqtt: true,
   signing: true,
   smtp: true,
 };

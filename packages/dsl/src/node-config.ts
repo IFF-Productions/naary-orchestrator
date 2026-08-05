@@ -64,6 +64,7 @@ import type {
   FirestoreWriteConfig,
   SqlExecConfig,
   KafkaPublishConfig,
+  MqttPublishConfig,
   SqlQueryConfig,
   StartConfig,
   StopAndErrorConfig,
@@ -100,6 +101,7 @@ export interface NodeConfigMap {
   httpRequest: HttpRequestConfig;
   graphQL: GraphQLConfig;
   kafkaPublish: KafkaPublishConfig;
+  mqttPublish: MqttPublishConfig;
   sqlQuery: SqlQueryConfig;
   sqlExec: SqlExecConfig;
   firestoreQuery: FirestoreQueryConfig;

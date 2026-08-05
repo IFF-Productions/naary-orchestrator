@@ -21,6 +21,7 @@ export type ConnectionType =
   | "mysql"
   | "firestore"
   | "kafka"
+  | "mqtt"
   | "signing"
   | "smtp";
 
@@ -34,6 +35,7 @@ export const CONNECTION_TYPES: Record<string, ConnectionType[]> = {
   sqlExec: ["postgres", "mssql", "mysql"],
   kafkaPublish: ["kafka"],
   kafkaTrigger: ["kafka"],
+  mqttPublish: ["mqtt"],
   firestoreQuery: ["firestore"],
   firestoreWrite: ["firestore"],
   sendEmail: ["smtp"],

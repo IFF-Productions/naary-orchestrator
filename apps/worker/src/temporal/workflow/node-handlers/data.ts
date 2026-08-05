@@ -20,6 +20,7 @@ import {
   callHttpRequest,
   callGraphQL,
   callKafkaPublish,
+  callMqttPublish,
   callSqlQuery,
   callSqlExec,
   callFirestoreQuery,
@@ -134,6 +135,34 @@ export const handleKafkaPublish: NodeHandler = async ({
   // {topic, partition, offset} — the message's identity, so a downstream node can correlate a
   // reply without a lookup table.
   ctx[node.id] = result.output satisfies NodeOutputMap["kafkaPublish"];
+  return { costUsd: result.costUsd };
+};
+
+export const handleMqttPublish: NodeHandler = async ({
+  cfg,
+  ctx,
+  node,
+  metaFor,
+}) => {
+  // Same split as kafkaPublish: everything determinable resolves HERE, the URL/credentials/socket
+  // live in the activity, and `payload` passes through as-is so the workflow never serializes and
+  // stays byte-identical on replay.
+  const mqttCfg = asNodeConfig(cfg, "mqttPublish");
+  const result = await callMqttPublish(
+    {
+      connectionId: mqttCfg.connectionId,
+      topic: mqttCfg.topic,
+      payload: mqttCfg.payload,
+      qos: mqttCfg.qos,
+      retain: mqttCfg.retain,
+      timeoutMs: mqttCfg.timeoutMs,
+      costUsd: mqttCfg.costUsd,
+    },
+    ctx.__input,
+    metaFor(node.id),
+  );
+  // What was SENT, not where it landed — MQTT gives a publisher no message identity.
+  ctx[node.id] = result.output satisfies NodeOutputMap["mqttPublish"];
   return { costUsd: result.costUsd };
 };
 

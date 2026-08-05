@@ -259,6 +259,12 @@ export const NODE_KINDS: NodeKind[] = [
   { type: "graphQL", label: "GraphQL", group: "Data sources", accent: "var(--node-graphql, #e535ab)",
     description: "Query a GraphQL API — the response data is available to later steps.",
     defaultConfig: { url: "https://api.example.com/graphql", query: "query {\n  __typename\n}" } },
+  { type: "kafkaPublish", label: "Kafka Publish", group: "Data sources", accent: "var(--node-poll, #4f9ad6)",
+    description: "Publish one message to a Kafka topic. Never retried — a retry could put a second copy on the topic.",
+    defaultConfig: { topic: "orders.created" } },
+  { type: "mqttPublish", label: "MQTT Publish", group: "Data sources", accent: "var(--node-poll, #4f9ad6)",
+    description: "Publish one message to an MQTT topic. QoS 1 by default, so the broker acknowledges it.",
+    defaultConfig: { topic: "sensors/1", qos: 1 } },
   { type: "sqlQuery", label: "SQL Query", group: "Data sources", accent: "var(--node-sql, #b06fd6)",
     description: "Run a read-only query against your database.",
     defaultConfig: { connectionId: "", sql: "SELECT 1" } },
@@ -605,6 +611,9 @@ export function nodeSubtitle(
     const host = url ? url.replace(/^https?:\/\//, "").slice(0, 22) : undefined;
     const every = secs ? `every ${secs}s` : undefined;
     return [every, host].filter(Boolean).join(" · ") || undefined;
+  }
+  if (kind === "kafkaPublish" || kind === "mqttPublish") {
+    return (config.topic as string | undefined) || undefined;
   }
   if (kind === "kafkaTrigger") {
     // Topic and cadence — the two facts that tell one Kafka trigger from another at a glance.

@@ -45,6 +45,7 @@ const TYPE_LABEL: Record<ConnectionType, string> = {
   mysql: "MySQL",
   firestore: "Cloud Firestore",
   kafka: "Kafka",
+  mqtt: "MQTT",
   signing: "signing-key",
   smtp: "SMTP",
 };

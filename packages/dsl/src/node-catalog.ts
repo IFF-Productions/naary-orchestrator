@@ -165,6 +165,12 @@ export const NODE_CATALOG: Record<NodeType, NodeCatalogEntry> = {
       "Publish one message to a Kafka topic; output {topic,partition,offset}. At-most-once — never retried.",
     config: "{ connectionId, topic, value, key?, correlationId?, replyTopic? }",
   },
+  mqttPublish: {
+    group: "data-source",
+    summary:
+      "Publishes ONE message to an MQTT topic; output {topic,qos,retained}. QoS 1 by default.",
+    config: "{ connectionId, topic, payload, qos?, retain?, timeoutMs? }",
+  },
   sqlQuery: {
     group: "data-source",
     summary: "Read-only SQL against a tenant DB; output {rows,rowCount}.",
