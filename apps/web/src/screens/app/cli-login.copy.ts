@@ -28,6 +28,30 @@ export interface FailureCopy {
   /** Whether "Enter another code" is a sensible next step (it isn't for a role refusal —
    *  a different code would be refused identically). */
   retry: boolean;
+  /** Whether to offer the sign-in screen instead (a dead session, where the code is fine). */
+  signIn?: boolean;
+}
+
+/**
+ * Guidance for a role refusal, which depends on WHICH BUTTON was pressed.
+ *
+ * This is the difference between useful and dangerous. The server gates `deny` with the same
+ * owner/admin check as `approve` — so a plain member who reads a code they never generated and
+ * clicks "No — I didn't start this" also lands in the 403. Telling that person to "ask an owner to
+ * approve it" instructs a phishing victim to go get the attacker's session authorized. The safe
+ * answer names refusal, and adds the one reassurance available to someone who cannot act at all:
+ * an undecided code dies by itself inside the window.
+ */
+export function forbiddenGuidance(
+  attempted: "approve" | "deny",
+  workspace: string,
+): string {
+  return attempted === "deny"
+    ? `Ask an owner or admin of ${workspace} to refuse it for you. If nobody does, the code still ` +
+        `expires by itself within ${CLI_CODE_WINDOW_MINUTES} minutes — an unapproved code never ` +
+        `becomes a token. Nothing was authorized.`
+    : `Ask an owner or admin of ${workspace} to approve it — or, if you own another workspace, ` +
+        `switch to it and try again. Nothing was authorized.`;
 }
 
 /**
@@ -77,9 +101,21 @@ export function failureCopy(
       };
     case "forbidden":
       return {
-        title: "Your role can't authorize a CLI login",
+        // "decide", not "approve": the same role gate covers refusing, and a member who clicked
+        // "No — I didn't start this" must not read a title implying they tried to grant anything.
+        title: "Your role can't decide a CLI login",
         body: serverMessage,
         retry: false,
+      };
+    case "session_expired":
+      return {
+        title: "Your session has expired",
+        body:
+          "Nothing was submitted and nothing was authorized. Sign in again, then re-enter the " +
+          "code — it stays valid for the rest of its " +
+          `${CLI_CODE_WINDOW_MINUTES}-minute window.`,
+        retry: false,
+        signIn: true,
       };
     default:
       return {

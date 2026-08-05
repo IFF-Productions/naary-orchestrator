@@ -14,6 +14,7 @@ import {
   CLI_REFRESH_ABSOLUTE_DAYS,
   CLI_REFRESH_IDLE_DAYS,
   failureCopy,
+  forbiddenGuidance,
 } from "../src/screens/app/cli-login.copy";
 
 /**
@@ -59,6 +60,12 @@ describe("CLI-login consent copy matches the server it describes", () => {
   const controller = read("cli-auth.controller.ts");
   const refresh = read("cli-refresh-token.service.ts");
   const requests = read("cli-auth-request.service.ts");
+
+  /** Guard the guard: `constant()` expands `90 * DAY` using a hardcoded day, so pin the API's
+   *  own `DAY` — if it ever meant something else, every lifetime below would agree vacuously. */
+  it("reads the same DAY the refresh service defines", () => {
+    expect(refresh).toMatch(/const DAY = 24 \* 60 \* 60 \* 1000;/);
+  });
 
   it("quotes the real access-token TTL", () => {
     expect(constant(controller, "CLI_ACCESS_TOKEN_TTL_MS")).toBe(
@@ -184,5 +191,46 @@ describe("every refusal says what happened", () => {
     const msg = "Approving a CLI login requires a signed-in user account.";
     expect(failureCopy("forbidden", msg).body).toBe(msg);
     expect(failureCopy("forbidden", msg).title).toMatch(/role/i);
+  });
+
+  it("offers the sign-in screen, not a retry, when the session died", () => {
+    const c = failureCopy("session_expired", "");
+    expect(c.signIn).toBe(true);
+    expect(c.retry).toBe(false);
+  });
+});
+
+/**
+ * The refusal a PHISHING VICTIM sees.
+ *
+ * `POST /auth/cli/deny` is gated by the same owner/admin check as approve, so a plain member who
+ * is shown a code they never generated and clicks "No — I didn't start this" also gets a 403. If
+ * that state tells them to "ask an owner to approve it", the page has just instructed the victim
+ * to go and get the attacker's session authorized. This is the assertion that keeps that from
+ * being reintroduced.
+ */
+describe("a role refusal is explained in terms of the button that was pressed", () => {
+  it("never suggests approving when the user tried to REFUSE", () => {
+    const deny = forbiddenGuidance("deny", "Acme Production").toLowerCase();
+    expect(deny).toContain("refuse");
+    expect(deny).not.toContain("approve it");
+    // The only reassurance available to someone who cannot act: the code dies by itself.
+    expect(deny).toContain(`${CLI_CODE_WINDOW_MINUTES} minutes`);
+  });
+
+  it("does suggest finding an owner to approve when the user tried to APPROVE", () => {
+    const approve = forbiddenGuidance(
+      "approve",
+      "Acme Production",
+    ).toLowerCase();
+    expect(approve).toContain("approve it");
+  });
+
+  it("names the workspace in both", () => {
+    for (const d of ["approve", "deny"] as const) {
+      expect(forbiddenGuidance(d, "Acme Production")).toContain(
+        "Acme Production",
+      );
+    }
   });
 });

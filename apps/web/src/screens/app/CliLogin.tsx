@@ -56,6 +56,7 @@ import {
   CLI_REFRESH_ABSOLUTE_DAYS,
   CLI_REFRESH_IDLE_DAYS,
   failureCopy,
+  forbiddenGuidance,
 } from "./cli-login.copy";
 
 type Outcome =
@@ -81,7 +82,12 @@ export function CliLogin() {
   };
   const [busy, setBusy] = useState<"approve" | "deny" | null>(null);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
-  const [failure, setFailure] = useState<CliLoginError | null>(null);
+  // The attempted decision travels WITH the failure: a role refusal must be explained in terms of
+  // the button that was pressed (see `forbiddenGuidance`), and `busy` is cleared by then.
+  const [failure, setFailure] = useState<{
+    error: CliLoginError;
+    attempted: "approve" | "deny";
+  } | null>(null);
 
   const code = normalizeUserCode(raw);
   const active = workspaces.find((w) => w.tenantId === activeId);
@@ -105,25 +111,18 @@ export function CliLogin() {
         label: res.label,
       });
     } catch (e) {
-      if (e instanceof UnauthorizedError) {
-        // The session died between load and click. Not a role problem and not a code problem —
-        // saying either would send the user hunting for the wrong thing.
-        setFailure(
-          new CliLoginError(
-            "unavailable",
-            "Your session has expired, so nothing was submitted. Sign in again and re-enter the code.",
-          ),
-        );
-      } else if (e instanceof CliLoginError) {
-        setFailure(e);
-      } else {
-        setFailure(
-          new CliLoginError(
-            "unavailable",
-            e instanceof Error ? e.message : "The request was refused.",
-          ),
-        );
-      }
+      // The session died between load and click. Not a role problem and not a code problem —
+      // saying either would send the user hunting for the wrong thing.
+      const error =
+        e instanceof UnauthorizedError
+          ? new CliLoginError("session_expired", "")
+          : e instanceof CliLoginError
+            ? e
+            : new CliLoginError(
+                "unavailable",
+                e instanceof Error ? e.message : "The request was refused.",
+              );
+      setFailure({ error, attempted: decision });
     } finally {
       setBusy(null);
     }
@@ -151,7 +150,8 @@ export function CliLogin() {
             <Decided outcome={outcome} workspace={wsName} onAgain={reset} />
           ) : failure ? (
             <Refused
-              failure={failure}
+              failure={failure.error}
+              attempted={failure.attempted}
               workspace={wsName}
               role={active?.role}
               onAgain={reset}
@@ -166,6 +166,7 @@ export function CliLogin() {
               activeId={activeId}
               workspaceName={wsName}
               roleLikelyBlocked={roleLikelyBlocked}
+              role={active?.role ?? "member"}
               onWorkspace={setActive}
               onRaw={setRaw}
               onDecide={decide}
@@ -304,6 +305,7 @@ function Consent({
   activeId,
   workspaceName,
   roleLikelyBlocked,
+  role,
   onWorkspace,
   onRaw,
   onDecide,
@@ -316,6 +318,8 @@ function Consent({
   activeId: string | null;
   workspaceName: string;
   roleLikelyBlocked: boolean;
+  /** The caller's role in the active workspace, shown verbatim in the advisory. */
+  role: string;
   onWorkspace: (id: string) => void;
   onRaw: (v: string) => void;
   onDecide: (d: "approve" | "deny") => void;
@@ -392,13 +396,18 @@ function Consent({
         </div>
       )}
 
+      {/* Neutral between the two buttons ON PURPOSE. The server gates `deny` with the same
+          owner/admin check as `approve`, so this warning applies to refusing as well — and telling
+          someone looking at a code they didn't generate to "ask an owner to approve it" would be
+          exactly the wrong instruction. The role is interpolated, not hardcoded to "member": the
+          gate is "not owner and not admin", and RBAC groups can put other names in there. */}
       {roleLikelyBlocked && (
         <div style={{ marginBottom: 18 }}>
           <Callout tone="info">
-            You're a <strong>member</strong> of {workspaceName}. Authorizing a
-            CLI login mints a workspace token, so it's limited to owners and
-            admins — this will most likely be refused. Ask an owner to approve
-            it, or switch to a workspace you own.
+            Your role in {workspaceName} is <strong>{role}</strong>. Deciding a
+            CLI login — approving <em>or</em> refusing one — is limited to
+            owners and admins, so this will most likely be refused. Ask an owner
+            or admin to handle it, or switch to a workspace you own.
           </Callout>
         </div>
       )}
@@ -632,22 +641,24 @@ function Decided({
 
 function Refused({
   failure,
+  attempted,
   workspace,
   role,
   onAgain,
 }: {
   failure: CliLoginError;
+  /** Which button produced this refusal. Load-bearing for the 403 — `deny` is gated by the same
+   *  owner/admin check as `approve`, so a member who tried to REFUSE a code lands here too. */
+  attempted: "approve" | "deny";
   workspace: string;
   role?: string;
   onAgain: () => void;
 }) {
   const copy = failureCopy(failure.reason, failure.serverMessage);
+  const soft = failure.reason === "forbidden" || copy.signIn;
   return (
     <>
-      <ResultIcon
-        tone={failure.reason === "forbidden" ? "idle" : "warn"}
-        icon={failure.reason === "forbidden" ? "key" : "alert"}
-      />
+      <ResultIcon tone={soft ? "idle" : "warn"} icon={soft ? "key" : "alert"} />
       <Header
         logo={false}
         title={copy.title}
@@ -658,12 +669,10 @@ function Refused({
               <div style={{ marginTop: 8 }}>
                 {role ? (
                   <>
-                    You're a <strong>{role}</strong> in {workspace}.{" "}
+                    Your role in {workspace} is <strong>{role}</strong>.{" "}
                   </>
                 ) : null}
-                Ask an owner or admin of {workspace} to run this — or, if you
-                own another workspace, switch to it and try again. Nothing was
-                authorized.
+                {forbiddenGuidance(attempted, workspace)}
               </div>
             )}
           </>
@@ -674,6 +683,13 @@ function Refused({
           <Button variant="primary" icon="refresh" onClick={onAgain}>
             Enter another code
           </Button>
+        )}
+        {copy.signIn && (
+          <Link to="/auth" style={{ textDecoration: "none" }}>
+            <Button variant="primary" icon="key">
+              Sign in again
+            </Button>
+          </Link>
         )}
         <Link to="/app" style={{ textDecoration: "none" }}>
           <Button variant="secondary">Back to Naary</Button>

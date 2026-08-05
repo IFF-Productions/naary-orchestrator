@@ -28,9 +28,16 @@ export type CliLoginFailureReason =
   | "already_decided"
   /** No pending request with that code (a typo, or a code from another deployment). */
   | "unknown"
-  /** Signed in, but this principal may not authorize a CLI login (owner/admin only, and a real
-   *  user account — an `nry_` token principal has no user and is refused too). */
+  /** Signed in, but this principal may not DECIDE a CLI login — owner/admin only, and a real user
+   *  account (an `nry_` token principal has no user and is refused too). Note this gates BOTH
+   *  approve and deny: the server's `assertMayApprove` runs on each, because a denial is a
+   *  decision on the same row and leaving it open would let anyone who learns a user code cancel
+   *  someone else's login. So this state must never assume which button was pressed. */
   | "forbidden"
+  /** Client-side only, never a server answer: the session died before the click, so nothing was
+   *  submitted. Distinct from `forbidden` (the role is fine) and from `unknown` (the code is
+   *  fine) — re-entering the code would fail identically until the user signs in again. */
+  | "session_expired"
   /** Anything else: network, 5xx, a body we couldn't read. */
   | "unavailable";
 
