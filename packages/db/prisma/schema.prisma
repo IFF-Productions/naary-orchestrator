@@ -1392,3 +1392,66 @@ model SsoConnection {
 
   @@index([tenantId])
 }
+
+// ---------------------------------------------------------------------------
+// SCIM 2.0 provisioning (design LDAP-DIRECTORY.md §3.1, #1075 — slice 1)
+// ---------------------------------------------------------------------------
+
+/// A customer IdP (Entra/Okta/Google/JumpCloud) authorised to read — and, from slice 2, to
+/// provision — ONE workspace's directory over SCIM 2.0.
+///
+/// DELIBERATELY NOT `ApiToken`. A verified `nry_` token is stamped `role: "owner"` by
+/// AuthGuard (auth.guard.ts, the "zero grants ⇒ full-access owner stamp" branch) and the
+/// ApiToken row carries no scope column — so reusing it would hand the IdP the workspace's
+/// graphs, executions, secrets and connections. This table exists so a SCIM credential can
+/// authenticate a tenant WITHOUT ever becoming a principal. Same hashing discipline
+/// (sha256, plaintext shown once), different authority.
+model ScimConnection {
+  id                  String    @id @default(uuid())
+  tenantId            String
+  /// Human label shown to the operator who registered it (e.g. "Okta — acme.com").
+  label               String
+  /// sha256 hex of the `nryscim_` bearer. The plaintext is shown once at registration and
+  /// never stored — identical to ApiToken.tokenHash.
+  tokenHash           String    @unique
+  /// Non-empty allowlist of email domains this IdP may provision (lowercased, no '@').
+  /// STORED BUT NOT YET ENFORCED in slice 1: with no write endpoints there is nothing to
+  /// enforce it against. The LDAP-DIRECTORY.md §5 invariant is proven by slice 2, not here.
+  allowedEmailDomains String[]
+  /// Kill switch: a disabled connection is rejected by ScimGuard on every request.
+  /// Subject to the same revocation lag as every other credential here — see ScimGuard.
+  enabled             Boolean   @default(true)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @default(now()) @updatedAt
+  lastUsedAt          DateTime?
+
+  @@index([tenantId])
+}
+
+/// The STABLE SCIM resource id for one directory subject in one workspace.
+///
+/// Exists because `Membership.userId` is a Firebase uid and a SCIM-provisioned user has never
+/// signed in — they are an `Invitation` first and a `Membership` later. The id an IdP stores
+/// after a reconcile GET is used for every subsequent PATCH/DELETE, so it must survive that
+/// transition; returning an Invitation id and later a Membership id would 404 the IdP on
+/// everyone it had already synced. This row is the id, and it outlives both.
+///
+/// Keyed on the lowercased email because that is the only identifier both Invitation and
+/// Membership share. `userId` is filled in opportunistically once a Membership exists, so a
+/// later email change (slice 2's PATCH userName) can move the email without moving the id.
+model ScimIdentity {
+  id         String   @id @default(uuid())
+  tenantId   String
+  /// Lowercased. The join key across Invitation → Membership.
+  email      String
+  /// Firebase uid, once this subject has an accepted Membership. Null while pending.
+  userId     String?
+  /// The IdP's own identifier for this subject, when it has told us one (slice 2).
+  externalId String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @default(now()) @updatedAt
+
+  @@unique([tenantId, email])
+  @@index([tenantId])
+  @@index([tenantId, externalId])
+}

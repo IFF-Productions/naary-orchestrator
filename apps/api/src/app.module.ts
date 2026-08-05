@@ -47,6 +47,7 @@ import { PinsModule } from "./pins/pins.module";
 import { SchedulesModule } from "./schedules/schedules.module";
 import { TagsModule } from "./tags/tags.module";
 import { SecretsModule } from "./secrets/secrets.module";
+import { ScimModule } from "./scim/scim.module";
 import { SsoModule } from "./sso/sso.module";
 import { PreferencesModule } from "./preferences/preferences.module";
 import { SettingsModule } from "./settings/settings.module";
@@ -86,6 +87,8 @@ import { WebhooksModule } from "./webhooks/webhooks.module";
     // SAML SSO (#455). @Global: AuthGuard (an eager APP_GUARD) verifies `nrys_` sessions with
     // SsoSessionService, and AuthModule has no imports of its own.
     SsoModule,
+    ScimModule, // SCIM 2.0 directory read surface (#1075); inert with no connections registered
+
     UsageModule,
     BudgetModule,
     WebhooksModule,
