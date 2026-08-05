@@ -60,9 +60,13 @@ model ApiToken {
   // resolve through these joins. Deleting the token cascades its rows.
   groupMemberships GroupTokenMember[]
 
+  // Kept DELIBERATELY, even though the composite below subsumes it as a prefix. Dropping an index
+  // is a separate change with its own blast radius (this is the index every tenant-scoped token
+  // read has planned against since the table existed), and it does not belong in an expand-only
+  // migration whose whole claim is that the old image is unaffected.
   @@index([tenantId])
-  // The offboarding read: "this user's CLI tokens in THIS workspace". Composite and tenant-first
-  // so it also serves the plain `tenantId` lookups; rows with a NULL userId are simply never
+  // The offboarding read: "this user's CLI tokens in THIS workspace". Tenant-first so it is also a
+  // usable prefix for the plain `tenantId` lookups; rows with a NULL userId are simply never
   // matched by it, which is the point.
   @@index([tenantId, userId])
 }
