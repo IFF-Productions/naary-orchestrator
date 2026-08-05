@@ -208,7 +208,7 @@ reached with a PAT — verify the mode you actually use.
 | Providers | What's missing by default |
 | --- | --- |
 | `mattermost`, `deepl`, `shopify`, `mailchimp`, `zendesk`, `jira` | **No `baseUrl` in the catalog** — the connection's Server URL is mandatory. These 6 fail closed without one; 31 others have a fixed base |
-| `posthog` | **Regional host** (#1110) — `us.posthog.com`, `eu.posthog.com`, or self-hosted. Also takes its base from the connection, but is the one provider with a `defaultBaseUrl`: an empty Server URL calls US Cloud, so connections made before the host was asked for keep working. An EU key against the US host fails as an *auth* error, which is why this looked like a bad credential rather than a wrong region |
+| `posthog` | **Regional host** (#1110) — `us.posthog.com`, `eu.posthog.com`, or self-hosted. Also takes its base from the connection, and is the one provider with a `defaultBaseUrl`: rows created before the host was asked for store none and still call US Cloud, so none of them broke. That fallback is *compatibility only* — no create path accepts an empty Server URL (the form requires https; `CreateConnectionDto` rejects an empty string for every type). An EU key against the US host fails as an *auth* error, which is why this looked like a bad credential rather than a wrong region |
 | `googlesheets` | A Google **OAuth access token** with the `spreadsheets` scope. A Google API key will never work — API keys go in a `?key=` query param, which this node does not send |
 | `zoom` | A server-to-server OAuth token with a **~1h TTL** — rotate it, or calls start 401ing after an hour of working fine |
 

@@ -210,20 +210,20 @@ export function renderIntegrationDoc(
     out.push(
       `- **Server URL:** not needed — Naary always calls \`${p.baseUrl}\`.`,
     );
-  } else if (p.defaultBaseUrl) {
-    // A per-tenant host that ALSO has a default (#1110): required for anyone not on that default,
-    // ignorable for anyone who is. Saying only "required" would be wrong for half the readers and
-    // saying only "optional" would be wrong for the other half, so state the fallback explicitly.
-    out.push(
-      `- **Server URL: set it unless you are on \`${p.defaultBaseUrl}\`.** ${sentence(
-        prose.serverUrl ?? "Set it to your instance's API base",
-      )} Left blank, Naary calls \`${p.defaultBaseUrl}\` — so a connection anywhere else must set it.`,
-    );
   } else {
+    // `defaultBaseUrl` is deliberately NOT written up as "you can leave this blank" (#1110): the
+    // Connect form requires an https Server URL and the create-connection DTO rejects an empty
+    // one, so no reader of this page can take that path. It is a compatibility fallback for rows
+    // created before the provider asked for a host — a fact about why nothing broke, not an
+    // instruction — so it is stated as exactly that, in the past tense, after the requirement.
     out.push(
       `- **Server URL: required.** ${sentence(
         prose.serverUrl ?? "Set it to your instance's API base",
-      )} Getting this wrong is the most common cause of a setup that looks right and 404s.`,
+      )} Getting this wrong is the most common cause of a setup that looks right and 404s.` +
+        (p.defaultBaseUrl
+          ? ` (${p.label} connections made *before* this field was asked for store no host and keep` +
+            ` calling \`${p.defaultBaseUrl}\`, so none of them broke — but every new connection sets it.)`
+          : ""),
     );
   }
   out.push("");
@@ -244,9 +244,9 @@ export function renderIntegrationDoc(
   out.push(
     !needsServerUrl(p)
       ? "3. Leave **Server URL** as the default — this provider has a fixed API base."
-      : `3. Set **Server URL** to ${prose.serverUrl ?? "your instance's API base"}${
-          p.defaultBaseUrl ? ` (blank means \`${p.defaultBaseUrl}\`)` : ""
-        }.`,
+      : // No "or leave it blank" variant here even for a provider with a `defaultBaseUrl` — this is
+        // the step list for making a NEW connection, and that path rejects an empty Server URL.
+        `3. Set **Server URL** to ${prose.serverUrl ?? "your instance's API base"}.`,
   );
   out.push("4. Paste the credential into the token field and save.");
   out.push(

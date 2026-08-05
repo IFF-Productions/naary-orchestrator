@@ -218,6 +218,21 @@ describe("what the guides claim is derived, not asserted", () => {
   });
 
   /**
+   * A `defaultBaseUrl` must never read as an OPTION in a guide. No create path accepts an empty
+   * Server URL — the Connect form requires https, and `CreateConnectionDto` rejects an empty
+   * string for every connection type — so "you can leave this blank" would document a path the
+   * reader cannot take. The fallback is compatibility for rows that predate the field.
+   */
+  it("tells every connection-hosted provider the Server URL is required, fallback or not", () => {
+    for (const p of INTEGRATION_PROVIDERS.filter(needsServerUrl)) {
+      expect(
+        readFileSync(pagePath(p.key), "utf8"),
+        `${p.key}.md must state the Server URL is required`,
+      ).toContain("**Server URL: required.**");
+    }
+  });
+
+  /**
    * `liveVerified` must never outrun the live suite. If someone adds a key here without a
    * `*.live.spec.ts` behind it, every downstream surface starts claiming proof we don't have.
    */

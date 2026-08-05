@@ -25,7 +25,7 @@ Query PostHog events and people, and annotate releases, from a workflow.
 
 - **You need:** a personal API key.
 - **How the token is sent:** A standard `Authorization: Bearer <token>` header. Paste only the token.
-- **Server URL: set it unless you are on `https://us.posthog.com`.** `https://us.posthog.com` for US Cloud, `https://eu.posthog.com` for EU Cloud, or your own host if you self-host. Left blank, Naary calls `https://us.posthog.com` — so a connection anywhere else must set it.
+- **Server URL: required.** `https://us.posthog.com` for US Cloud, `https://eu.posthog.com` for EU Cloud, or your own host if you self-host. Getting this wrong is the most common cause of a setup that looks right and 404s. (PostHog connections made *before* this field was asked for store no host and keep calling `https://us.posthog.com`, so none of them broke — but every new connection sets it.)
 
 ## Get your credentials
 
@@ -37,7 +37,7 @@ Query PostHog events and people, and annotate releases, from a workflow.
 
 1. Go to **Integrations → Connect a server**.
 2. Pick the **PostHog** tile (or *Custom* if you are configuring it by hand).
-3. Set **Server URL** to `https://us.posthog.com` for US Cloud, `https://eu.posthog.com` for EU Cloud, or your own host if you self-host (blank means `https://us.posthog.com`).
+3. Set **Server URL** to `https://us.posthog.com` for US Cloud, `https://eu.posthog.com` for EU Cloud, or your own host if you self-host.
 4. Paste the credential into the token field and save.
 5. Connections are **per environment** — a sandbox connection and a prod connection are separate rows, so test credentials can never be used by a production run.
 

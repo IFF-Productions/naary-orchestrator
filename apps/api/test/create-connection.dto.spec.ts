@@ -98,6 +98,21 @@ describe("CreateConnectionDto", () => {
     },
   );
 
+  /**
+   * NO create path accepts an empty Server URL — for ANY type, including the label-only ones
+   * (#1110). The PostHog fix leans on this: `defaultBaseUrl` is documented as a compatibility
+   * fallback for rows that predate the field rather than as "leave it blank", and that sentence is
+   * only true while this holds. If the DTO ever starts accepting `""`, the fallback becomes a
+   * reachable path and the guides are wrong.
+   */
+  it.each(CONNECTION_TYPES)(
+    "rejects an EMPTY serverUrl for type=%s",
+    async (type) => {
+      const errors = await validate(dto({ type, serverUrl: "" }));
+      expect(errors.map((e) => e.property)).toContain("serverUrl");
+    },
+  );
+
   it("still requires an https URL for connections it calls over HTTP", async () => {
     const errors = await validate(
       dto({
