@@ -8,13 +8,16 @@
     "provider": "front",
     "pathPrefix": "",
     "source": "https://raw.githubusercontent.com/frontapp/front-api-specs/main/core-api/core-api.json",
-    "fetchedAt": "2026-07-30",
+    "fetchedAt": "2026-08-05",
     "note": "PRUNED snapshot — see packages/dsl/scripts/extract-openapi-fixtures.mjs. Do not hand-edit."
   },
   "paths": {
     "/conversations": {
       "get": {
         "operationId": "list-conversations",
+        "x-security": [
+          "http"
+        ],
         "parameters": [
           {
             "name": "q",
@@ -47,6 +50,9 @@
     "/conversations/{conversation_id}": {
       "get": {
         "operationId": "get-conversation-by-id",
+        "x-security": [
+          "http"
+        ],
         "parameters": [
           {
             "name": "conversation_id",
@@ -59,6 +65,9 @@
     "/conversations/{conversation_id}/comments": {
       "post": {
         "operationId": "add-comment",
+        "x-security": [
+          "http"
+        ],
         "parameters": [
           {
             "name": "conversation_id",
@@ -88,7 +97,10 @@
     },
     "/inboxes": {
       "get": {
-        "operationId": "list-inboxes"
+        "operationId": "list-inboxes",
+        "x-security": [
+          "http"
+        ]
       }
     }
   }

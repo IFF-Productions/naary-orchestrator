@@ -26,6 +26,8 @@
  *     answering exactly the questions the catalog asks of it, and nothing more.
  *   - a free-form node (`additionalProperties`, or an object declaring no properties at all)
  *     is marked `x-freeform`, because "we can't tell" must not read as "wrong".
+ *   - an operation's `deprecated: true` is CARRIED (#1109) and its own `security` override is
+ *     summarised as `x-security` — see the two blocks below for why each is worth its bytes.
  *
  * The result is still a structurally valid OpenAPI 3 document — just a lossy one. It is a test
  * fixture, never served or shipped, and nothing outside the drift spec reads it.
@@ -591,6 +593,49 @@ function pruneParameters(raw, deref, pinnedHeaders = new Set()) {
   );
 }
 
+/**
+ * The scheme NAMES this operation accepts — `["ApiKey", "OAuth2"]` — RESOLVED against the document
+ * (#1109). Undefined only when neither the operation nor the document says anything at all.
+ *
+ * ## The OpenAPI rule this has to get right, because the first version got it wrong
+ *
+ * An operation that omits `security` does NOT mean "unrestricted" — it **inherits the document-level
+ * `security`**, which may be more restrictive than what a sibling operation declares for itself.
+ * Resolving that fallback HERE is what makes the fixture's `x-security` mean one thing:
+ *
+ *   - `["A","B"]` — the schemes this operation accepts, from whichever level declared them.
+ *   - `[]`        — declared and EMPTY, i.e. explicitly public. `security: []` is the one spelling
+ *                   that really does mean "no credential required", and it overrides the document
+ *                   default rather than inheriting it — so it must survive as an empty array and
+ *                   never collapse into "absent".
+ *   - absent      — the document is silent at BOTH levels. Genuinely unknown, and the drift spec
+ *                   treats it as unknowable rather than inventing a verdict.
+ *
+ * Before this resolved the fallback, "absent" conflated the last two, and the auth-mode check
+ * reasoned from "absent ⇒ unrestricted" — which would silently pass a probe that the document
+ * default restricts more tightly than the actions it vouches for. That is the #1111 failure the
+ * check exists to catch, so the bug was in the check, not only in this comment.
+ *
+ * A `security` array is a list of ALTERNATIVES (OR), so the names are unioned. One alternative
+ * naming two schemes at once is an AND, which a flat union overstates — it is vanishingly rare and
+ * would only ever make the comparison quieter, never louder, which is the safe direction for a
+ * hard-failing check.
+ */
+function securitySchemeNames(op, spec) {
+  // Operation level WINS when present at all — including `security: []`, which is why this tests
+  // for the key's presence rather than for a non-empty array.
+  const declared = Array.isArray(op?.security)
+    ? op.security
+    : Array.isArray(spec?.security)
+      ? spec.security
+      : undefined;
+  if (!declared) return undefined;
+  const names = new Set();
+  for (const alternative of declared)
+    for (const name of Object.keys(alternative ?? {})) names.add(name);
+  return [...names].sort();
+}
+
 function pruneRequestBody(raw, deref, keep) {
   const rb = deref(raw);
   if (!rb || typeof rb !== "object" || !rb.content) return undefined;
@@ -755,8 +800,24 @@ for (const [provider, { url, pathPrefix, format, external }] of Object.entries(
       : op.requestBody
         ? pruneRequestBody(op.requestBody, deref, keep)
         : undefined;
+    // `deprecated` is CARRIED, and it is the one field here that describes the operation's FUTURE
+    // rather than its shape (#1109). Dropping it made the drift spec structurally blind to a vendor
+    // deprecating an endpoint it still documents — the loudest signal a vendor ever sends, and free
+    // to read. `sentry.list_issues` sat flagged `deprecated: true` inside a document this repo
+    // already pinned and re-read on every refresh, and #946 moved its two siblings off the legacy
+    // route without noticing. `false` is not vendored: it is the default, and absence must keep
+    // reading as "the vendor said nothing", which for most vendors is all it ever says.
+    const deprecated = op.deprecated === true;
+    // Resolved against the operation's OWN document — `hit.spec`, not `firstSpec` — because a
+    // multi-document provider (SendGrid, Zoom) can carry a different default per file.
+    const security = securitySchemeNames(op, spec);
     entry[hit.method] = {
       ...(op.operationId ? { operationId: op.operationId } : {}),
+      ...(deprecated ? { deprecated: true } : {}),
+      // `security !== undefined`, not a truthiness test: `[]` is a MEANINGFUL value here
+      // ("explicitly public") and truthiness would keep it, but saying so stops the next
+      // reader from "simplifying" it into a falsy check that silently drops the empty case.
+      ...(security !== undefined ? { "x-security": security } : {}),
       ...(parameters.length ? { parameters } : {}),
       ...(requestBody ? { requestBody } : {}),
     };

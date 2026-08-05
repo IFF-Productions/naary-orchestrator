@@ -8,13 +8,17 @@
     "provider": "asana",
     "pathPrefix": "",
     "source": "https://raw.githubusercontent.com/Asana/openapi/master/defs/asana_oas.yaml",
-    "fetchedAt": "2026-07-30",
+    "fetchedAt": "2026-08-05",
     "note": "PRUNED snapshot — see packages/dsl/scripts/extract-openapi-fixtures.mjs. Do not hand-edit."
   },
   "paths": {
     "/tasks/{task_gid}": {
       "get": {
         "operationId": "getTask",
+        "x-security": [
+          "oauth2",
+          "personalAccessToken"
+        ],
         "parameters": [
           {
             "name": "task_gid",
@@ -35,6 +39,10 @@
       },
       "put": {
         "operationId": "updateTask",
+        "x-security": [
+          "oauth2",
+          "personalAccessToken"
+        ],
         "parameters": [
           {
             "name": "task_gid",
@@ -129,6 +137,10 @@
     "/tasks": {
       "post": {
         "operationId": "createTask",
+        "x-security": [
+          "oauth2",
+          "personalAccessToken"
+        ],
         "parameters": [
           {
             "name": "opt_pretty",
@@ -220,6 +232,10 @@
     "/tasks/{task_gid}/stories": {
       "post": {
         "operationId": "createStoryForTask",
+        "x-security": [
+          "oauth2",
+          "personalAccessToken"
+        ],
         "parameters": [
           {
             "name": "task_gid",

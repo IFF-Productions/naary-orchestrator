@@ -8,13 +8,16 @@
     "provider": "notion",
     "pathPrefix": "/v1",
     "source": "https://developers.notion.com/openapi.json",
-    "fetchedAt": "2026-07-30",
+    "fetchedAt": "2026-08-05",
     "note": "PRUNED snapshot — see packages/dsl/scripts/extract-openapi-fixtures.mjs. Do not hand-edit."
   },
   "paths": {
     "/v1/pages/{page_id}": {
       "get": {
         "operationId": "retrieve-a-page",
+        "x-security": [
+          "bearerAuth"
+        ],
         "parameters": [
           {
             "name": "page_id",
@@ -40,6 +43,9 @@
     "/v1/databases/{database_id}": {
       "get": {
         "operationId": "retrieve-database",
+        "x-security": [
+          "bearerAuth"
+        ],
         "parameters": [
           {
             "name": "database_id",
@@ -60,6 +66,9 @@
     "/v1/data_sources/{data_source_id}/query": {
       "post": {
         "operationId": "post-database-query",
+        "x-security": [
+          "bearerAuth"
+        ],
         "parameters": [
           {
             "name": "data_source_id",
@@ -102,6 +111,9 @@
     "/v1/pages": {
       "post": {
         "operationId": "post-page",
+        "x-security": [
+          "bearerAuth"
+        ],
         "parameters": [
           {
             "name": "Notion-Version",
@@ -138,6 +150,9 @@
     "/v1/blocks/{block_id}/children": {
       "patch": {
         "operationId": "patch-block-children",
+        "x-security": [
+          "bearerAuth"
+        ],
         "parameters": [
           {
             "name": "block_id",
@@ -213,6 +228,9 @@
     "/v1/users/me": {
       "get": {
         "operationId": "get-self",
+        "x-security": [
+          "bearerAuth"
+        ],
         "parameters": [
           {
             "name": "Notion-Version",

@@ -8,13 +8,16 @@
     "provider": "intercom",
     "pathPrefix": "",
     "source": "https://raw.githubusercontent.com/intercom/Intercom-OpenAPI/main/descriptions/2.16/api.intercom.io.yaml",
-    "fetchedAt": "2026-07-30",
+    "fetchedAt": "2026-08-05",
     "note": "PRUNED snapshot — see packages/dsl/scripts/extract-openapi-fixtures.mjs. Do not hand-edit."
   },
   "paths": {
     "/contacts/{contact_id}": {
       "get": {
         "operationId": "ShowContact",
+        "x-security": [
+          "bearerAuth"
+        ],
         "parameters": [
           {
             "name": "Intercom-Version",
@@ -61,6 +64,9 @@
     "/contacts": {
       "post": {
         "operationId": "CreateContact",
+        "x-security": [
+          "bearerAuth"
+        ],
         "parameters": [
           {
             "name": "Intercom-Version",
@@ -120,6 +126,9 @@
     "/contacts/{contact_id}/notes": {
       "post": {
         "operationId": "createNote",
+        "x-security": [
+          "bearerAuth"
+        ],
         "parameters": [
           {
             "name": "Intercom-Version",
@@ -177,6 +186,9 @@
     "/messages": {
       "post": {
         "operationId": "createMessage",
+        "x-security": [
+          "bearerAuth"
+        ],
         "parameters": [
           {
             "name": "Intercom-Version",
@@ -234,6 +246,9 @@
     "/me": {
       "get": {
         "operationId": "identifyAdmin",
+        "x-security": [
+          "bearerAuth"
+        ],
         "parameters": [
           {
             "name": "Intercom-Version",

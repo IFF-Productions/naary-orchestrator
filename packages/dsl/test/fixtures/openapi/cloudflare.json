@@ -8,13 +8,18 @@
     "provider": "cloudflare",
     "pathPrefix": "",
     "source": "https://raw.githubusercontent.com/cloudflare/api-schemas/main/openapi.json",
-    "fetchedAt": "2026-07-30",
+    "fetchedAt": "2026-08-05",
     "note": "PRUNED snapshot — see packages/dsl/scripts/extract-openapi-fixtures.mjs. Do not hand-edit."
   },
   "paths": {
     "/zones": {
       "get": {
         "operationId": "zones-get",
+        "x-security": [
+          "api_email",
+          "api_key",
+          "api_token"
+        ],
         "parameters": [
           {
             "name": "name",
@@ -72,6 +77,11 @@
     "/zones/{zone_id}/dns_records": {
       "get": {
         "operationId": "dns-records-for-a-zone-list-dns-records",
+        "x-security": [
+          "api_email",
+          "api_key",
+          "api_token"
+        ],
         "parameters": [
           {
             "name": "zone_id",
@@ -262,6 +272,11 @@
       },
       "post": {
         "operationId": "dns-records-for-a-zone-create-dns-record",
+        "x-security": [
+          "api_email",
+          "api_key",
+          "api_token"
+        ],
         "parameters": [
           {
             "name": "zone_id",
@@ -304,6 +319,11 @@
     "/zones/{zone_id}/dns_records/{dns_record_id}": {
       "delete": {
         "operationId": "dns-records-for-a-zone-delete-dns-record",
+        "x-security": [
+          "api_email",
+          "api_key",
+          "api_token"
+        ],
         "parameters": [
           {
             "name": "dns_record_id",

@@ -8,13 +8,17 @@
     "provider": "gitlab",
     "pathPrefix": "/api/v4",
     "source": "https://gitlab.com/gitlab-org/gitlab/-/raw/master/doc/api/openapi/openapi_v3.yaml",
-    "fetchedAt": "2026-07-30",
+    "fetchedAt": "2026-08-05",
     "note": "PRUNED snapshot — see packages/dsl/scripts/extract-openapi-fixtures.mjs. Do not hand-edit."
   },
   "paths": {
     "/api/v4/projects/{id}/issues/{issue_iid}": {
       "get": {
         "operationId": "getApiV4ProjectsIdIssuesIssueIid",
+        "x-security": [
+          "http",
+          "oauth2"
+        ],
         "parameters": [
           {
             "name": "id",
@@ -32,6 +36,10 @@
     "/api/v4/projects/{id}/issues": {
       "get": {
         "operationId": "getApiV4ProjectsIdIssues",
+        "x-security": [
+          "http",
+          "oauth2"
+        ],
         "parameters": [
           {
             "name": "id",
@@ -262,6 +270,10 @@
       },
       "post": {
         "operationId": "postApiV4ProjectsIdIssues",
+        "x-security": [
+          "http",
+          "oauth2"
+        ],
         "parameters": [
           {
             "name": "id",
@@ -310,6 +322,10 @@
     "/api/v4/projects/{id}/issues/{noteable_id}/notes": {
       "post": {
         "operationId": "postApiV4ProjectsIdIssuesNoteableIdNotes",
+        "x-security": [
+          "http",
+          "oauth2"
+        ],
         "parameters": [
           {
             "name": "id",
@@ -345,7 +361,11 @@
     },
     "/api/v4/user": {
       "get": {
-        "operationId": "getApiV4User"
+        "operationId": "getApiV4User",
+        "x-security": [
+          "http",
+          "oauth2"
+        ]
       }
     }
   }

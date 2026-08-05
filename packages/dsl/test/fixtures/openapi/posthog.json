@@ -8,13 +8,16 @@
     "provider": "posthog",
     "pathPrefix": "",
     "source": "https://app.posthog.com/api/schema/?format=json",
-    "fetchedAt": "2026-07-30",
+    "fetchedAt": "2026-08-05",
     "note": "PRUNED snapshot — see packages/dsl/scripts/extract-openapi-fixtures.mjs. Do not hand-edit."
   },
   "paths": {
     "/api/projects/{project_id}/events/": {
       "get": {
         "operationId": "events_list",
+        "x-security": [
+          "PersonalAPIKeyAuth"
+        ],
         "parameters": [
           {
             "name": "after",
@@ -87,6 +90,9 @@
     "/api/projects/{project_id}/persons/": {
       "get": {
         "operationId": "persons_list",
+        "x-security": [
+          "PersonalAPIKeyAuth"
+        ],
         "parameters": [
           {
             "name": "distinct_id",
@@ -134,6 +140,9 @@
     "/api/projects/{project_id}/persons/{id}/": {
       "get": {
         "operationId": "persons_retrieve",
+        "x-security": [
+          "PersonalAPIKeyAuth"
+        ],
         "parameters": [
           {
             "name": "format",
@@ -156,6 +165,9 @@
     "/api/projects/{project_id}/annotations/": {
       "post": {
         "operationId": "annotations_create",
+        "x-security": [
+          "PersonalAPIKeyAuth"
+        ],
         "parameters": [
           {
             "name": "project_id",

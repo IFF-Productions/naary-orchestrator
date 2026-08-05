@@ -8,13 +8,16 @@
     "provider": "mattermost",
     "pathPrefix": "",
     "source": "https://developers.mattermost.com/mattermost-openapi-v4.yaml",
-    "fetchedAt": "2026-07-30",
+    "fetchedAt": "2026-08-05",
     "note": "PRUNED snapshot — see packages/dsl/scripts/extract-openapi-fixtures.mjs. Do not hand-edit."
   },
   "paths": {
     "/api/v4/posts": {
       "post": {
         "operationId": "CreatePost",
+        "x-security": [
+          "bearerAuth"
+        ],
         "parameters": [
           {
             "name": "set_online",
@@ -53,6 +56,9 @@
     "/api/v4/teams/name/{team_name}/channels/name/{channel_name}": {
       "get": {
         "operationId": "GetChannelByNameForTeamName",
+        "x-security": [
+          "bearerAuth"
+        ],
         "parameters": [
           {
             "name": "team_name",
@@ -75,6 +81,9 @@
     "/api/v4/channels/{channel_id}/posts": {
       "get": {
         "operationId": "GetPostsForChannel",
+        "x-security": [
+          "bearerAuth"
+        ],
         "parameters": [
           {
             "name": "channel_id",
@@ -122,6 +131,9 @@
     "/api/v4/reactions": {
       "post": {
         "operationId": "SaveReaction",
+        "x-security": [
+          "bearerAuth"
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -142,6 +154,9 @@
     "/api/v4/users/username/{username}": {
       "get": {
         "operationId": "GetUserByUsername",
+        "x-security": [
+          "bearerAuth"
+        ],
         "parameters": [
           {
             "name": "username",

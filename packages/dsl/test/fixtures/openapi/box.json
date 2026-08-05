@@ -8,13 +8,16 @@
     "provider": "box",
     "pathPrefix": "",
     "source": "https://raw.githubusercontent.com/box/box-openapi/en/openapi.json",
-    "fetchedAt": "2026-07-30",
+    "fetchedAt": "2026-08-05",
     "note": "PRUNED snapshot — see packages/dsl/scripts/extract-openapi-fixtures.mjs. Do not hand-edit."
   },
   "paths": {
     "/folders/{folder_id}/items": {
       "get": {
         "operationId": "get_folders_id_items",
+        "x-security": [
+          "OAuth2Security"
+        ],
         "parameters": [
           {
             "name": "folder_id",
@@ -67,6 +70,9 @@
     "/files/{file_id}": {
       "get": {
         "operationId": "get_files_id",
+        "x-security": [
+          "OAuth2Security"
+        ],
         "parameters": [
           {
             "name": "file_id",
@@ -97,6 +103,9 @@
       },
       "delete": {
         "operationId": "delete_files_id",
+        "x-security": [
+          "OAuth2Security"
+        ],
         "parameters": [
           {
             "name": "file_id",
@@ -114,6 +123,9 @@
     "/folders": {
       "post": {
         "operationId": "post_folders",
+        "x-security": [
+          "OAuth2Security"
+        ],
         "parameters": [
           {
             "name": "fields",
@@ -152,6 +164,9 @@
     "/users/me": {
       "get": {
         "operationId": "get_users_me",
+        "x-security": [
+          "OAuth2Security"
+        ],
         "parameters": [
           {
             "name": "fields",

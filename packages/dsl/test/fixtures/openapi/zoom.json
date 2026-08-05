@@ -8,13 +8,17 @@
     "provider": "zoom",
     "pathPrefix": "",
     "source": "https://developers.zoom.us/api-hub/meetings/methods/endpoints.json, https://developers.zoom.us/api-hub/users/methods/endpoints.json",
-    "fetchedAt": "2026-07-30",
+    "fetchedAt": "2026-08-05",
     "note": "PRUNED snapshot — see packages/dsl/scripts/extract-openapi-fixtures.mjs. Do not hand-edit."
   },
   "paths": {
     "/users/{userId}/meetings": {
       "get": {
         "operationId": "meetings",
+        "x-security": [
+          "openapi_authorization",
+          "openapi_oauth"
+        ],
         "parameters": [
           {
             "name": "userId",
@@ -60,6 +64,10 @@
       },
       "post": {
         "operationId": "meetingCreate",
+        "x-security": [
+          "openapi_authorization",
+          "openapi_oauth"
+        ],
         "parameters": [
           {
             "name": "userId",
@@ -98,6 +106,10 @@
     "/meetings/{meetingId}": {
       "get": {
         "operationId": "meeting",
+        "x-security": [
+          "openapi_authorization",
+          "openapi_oauth"
+        ],
         "parameters": [
           {
             "name": "meetingId",
@@ -118,6 +130,10 @@
       },
       "delete": {
         "operationId": "meetingDelete",
+        "x-security": [
+          "openapi_authorization",
+          "openapi_oauth"
+        ],
         "parameters": [
           {
             "name": "meetingId",

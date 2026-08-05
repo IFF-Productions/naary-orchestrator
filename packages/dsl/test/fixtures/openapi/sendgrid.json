@@ -8,13 +8,16 @@
     "provider": "sendgrid",
     "pathPrefix": "/v3",
     "source": "https://raw.githubusercontent.com/twilio/sendgrid-oai/main/spec/json/tsg_mail_v3.json, https://raw.githubusercontent.com/twilio/sendgrid-oai/main/spec/json/tsg_mc_contacts_v3.json, https://raw.githubusercontent.com/twilio/sendgrid-oai/main/spec/json/tsg_templates_v3.json",
-    "fetchedAt": "2026-07-30",
+    "fetchedAt": "2026-08-05",
     "note": "PRUNED snapshot — see packages/dsl/scripts/extract-openapi-fixtures.mjs. Do not hand-edit."
   },
   "paths": {
     "/v3/mail/send": {
       "post": {
         "operationId": "SendMail",
+        "x-security": [
+          "BearerAuth"
+        ],
         "parameters": [
           {
             "name": "Content-Encoding",
@@ -97,6 +100,9 @@
     "/v3/marketing/contacts": {
       "put": {
         "operationId": "UpdateContact",
+        "x-security": [
+          "BearerAuth"
+        ],
         "requestBody": {
           "required": false,
           "content": {
@@ -138,6 +144,9 @@
     "/v3/templates": {
       "get": {
         "operationId": "ListTemplate",
+        "x-security": [
+          "BearerAuth"
+        ],
         "parameters": [
           {
             "name": "generations",

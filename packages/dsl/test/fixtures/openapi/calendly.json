@@ -8,18 +8,26 @@
     "provider": "calendly",
     "pathPrefix": "",
     "source": "https://calendly.stoplight.io/api/v1/projects/calendly/api-docs/nodes/reference/calendly-api/openapi.yaml",
-    "fetchedAt": "2026-07-30",
+    "fetchedAt": "2026-08-05",
     "note": "PRUNED snapshot — see packages/dsl/scripts/extract-openapi-fixtures.mjs. Do not hand-edit."
   },
   "paths": {
     "/users/me": {
       "get": {
-        "operationId": "get-current-user"
+        "operationId": "get-current-user",
+        "x-security": [
+          "oauth2",
+          "personal_access_token"
+        ]
       }
     },
     "/scheduled_events": {
       "get": {
         "operationId": "list-scheduled-events",
+        "x-security": [
+          "oauth2",
+          "personal_access_token"
+        ],
         "parameters": [
           {
             "name": "user",
@@ -77,6 +85,10 @@
     "/scheduled_events/{uuid}": {
       "get": {
         "operationId": "get-scheduled-event",
+        "x-security": [
+          "oauth2",
+          "personal_access_token"
+        ],
         "parameters": [
           {
             "name": "uuid",
@@ -89,6 +101,10 @@
     "/scheduled_events/{uuid}/cancellation": {
       "post": {
         "operationId": "create-scheduled-event-cancellation",
+        "x-security": [
+          "oauth2",
+          "personal_access_token"
+        ],
         "parameters": [
           {
             "name": "uuid",

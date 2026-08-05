@@ -8,13 +8,16 @@
     "provider": "pagerduty",
     "pathPrefix": "",
     "source": "https://raw.githubusercontent.com/PagerDuty/api-schema/main/reference/REST/openapiv3.json",
-    "fetchedAt": "2026-07-30",
+    "fetchedAt": "2026-08-05",
     "note": "PRUNED snapshot — see packages/dsl/scripts/extract-openapi-fixtures.mjs. Do not hand-edit."
   },
   "paths": {
     "/incidents": {
       "post": {
         "operationId": "createIncident",
+        "x-security": [
+          "api_key"
+        ],
         "parameters": [
           {
             "name": "Accept",
@@ -91,6 +94,9 @@
       },
       "get": {
         "operationId": "listIncidents",
+        "x-security": [
+          "api_key"
+        ],
         "parameters": [
           {
             "name": "Accept",
@@ -183,6 +189,9 @@
     "/incidents/{id}": {
       "get": {
         "operationId": "getIncident",
+        "x-security": [
+          "api_key"
+        ],
         "parameters": [
           {
             "name": "Accept",
@@ -208,6 +217,9 @@
       },
       "put": {
         "operationId": "updateIncident",
+        "x-security": [
+          "api_key"
+        ],
         "parameters": [
           {
             "name": "Accept",
@@ -268,6 +280,9 @@
     "/incidents/{id}/notes": {
       "post": {
         "operationId": "createIncidentNote",
+        "x-security": [
+          "api_key"
+        ],
         "parameters": [
           {
             "name": "Accept",

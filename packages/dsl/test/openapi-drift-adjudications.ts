@@ -15,6 +15,9 @@
  *                              Live evidence (401 vs 404) is expected, not optional.
  *   ACKNOWLEDGED_BODY        — the spec is wrong or incomplete about a field we send on purpose.
  *   ACKNOWLEDGED_REQUIRED_BODY — the provider's document contradicts ITSELF about a requirement.
+ *   ACKNOWLEDGED_DEPRECATED  — the vendor flags the operation `deprecated: true` and we still call
+ *                              it. An entry is a decision to keep calling it FOR NOW, with the
+ *                              issue that will settle it.
  */
 
 /**
@@ -195,6 +198,42 @@ export const UNSPECIFIED: { action: string; why: string }[] = [
       "The generic CRM Objects document has `/crm/v3/objects/{objectType}`, but binding a LITERAL " +
       "segment of ours to a PLACEHOLDER of theirs would make `{}` match anything and quietly " +
       "un-check every path in this file.",
+  },
+];
+
+/**
+ * Operations the vendor flags `deprecated: true` and we call anyway (#1109).
+ *
+ * ## Why this is a list and not just a red build
+ *
+ * A vendor can set that flag on any morning, in a document nobody here touched, and the refresh that
+ * notices is somebody else's PR. Failing that PR teaches everyone to re-run CI without reading — the
+ * check would be worth less than nothing. So a KNOWN deprecation is recorded here with what it costs
+ * and what will settle it, and a NEW one fails until a human writes those two sentences. Same
+ * bargain as ACKNOWLEDGED above, and asserted in the same both-directions way in the spec: an entry
+ * that no longer matches anything is either a migrated catalog (delete it) or a vendor un-flagging
+ * an endpoint (worth a look), and both want a person.
+ *
+ * ## The bar for adding one
+ *
+ * Not "we haven't got round to it". `deprecated: true` is the loudest signal a vendor sends short of
+ * a 410, so an entry has to say why the migration is a DECISION rather than a chore — the successor
+ * changes the output shape authors have bound expressions to (#945 §4), or it changes an input the
+ * save gate would have to migrate with `retiredFields` (#944). Name the issue that owns it.
+ */
+export const ACKNOWLEDGED_DEPRECATED: { action: string; why: string }[] = [
+  {
+    action: "sentry.list_issues",
+    why:
+      "Sentry flags `GET /projects/{org}/{project}/issues/` deprecated in its own document, in " +
+      "favour of the org-scoped `listOrganizationIssues` — the same family #946 moved `get_issue` " +
+      "and `update_issue` to, leaving this one behind. Kept for now because it is not a path swap: " +
+      "the project moves from a PATH segment (`projectSlug`) to a `project` QUERY parameter, so it " +
+      "is a `retiredFields` migration of a field authors have bound to (#944's machinery), and the " +
+      "response shape of the org-scoped list has not been compared against the project-scoped one " +
+      "(#945 §4 — output deltas fail silently at run time with no gate anywhere). Tracked in " +
+      "https://github.com/IFF-Productions/naary-orchestrator/issues/1109 (finding 3). The endpoint " +
+      "answers today; Sentry publishes no sunset date for it.",
   },
 ];
 

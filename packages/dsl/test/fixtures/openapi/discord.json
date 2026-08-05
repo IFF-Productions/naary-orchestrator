@@ -8,13 +8,16 @@
     "provider": "discord",
     "pathPrefix": "",
     "source": "https://raw.githubusercontent.com/discord/discord-api-spec/main/specs/openapi.json",
-    "fetchedAt": "2026-07-30",
+    "fetchedAt": "2026-08-05",
     "note": "PRUNED snapshot — see packages/dsl/scripts/extract-openapi-fixtures.mjs. Do not hand-edit."
   },
   "paths": {
     "/channels/{channel_id}/messages": {
       "post": {
         "operationId": "create_message",
+        "x-security": [
+          "BotToken"
+        ],
         "parameters": [
           {
             "name": "channel_id",
@@ -97,6 +100,9 @@
       },
       "get": {
         "operationId": "list_messages",
+        "x-security": [
+          "BotToken"
+        ],
         "parameters": [
           {
             "name": "channel_id",
@@ -129,6 +135,9 @@
     "/channels/{channel_id}": {
       "get": {
         "operationId": "get_channel",
+        "x-security": [
+          "BotToken"
+        ],
         "parameters": [
           {
             "name": "channel_id",
@@ -141,6 +150,9 @@
     "/users/@me/channels": {
       "post": {
         "operationId": "create_dm",
+        "x-security": [
+          "BotToken"
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -160,6 +172,9 @@
     "/channels/{channel_id}/messages/{message_id}/reactions/{emoji_name}/@me": {
       "put": {
         "operationId": "add_my_message_reaction",
+        "x-security": [
+          "BotToken"
+        ],
         "parameters": [
           {
             "name": "channel_id",
@@ -181,7 +196,11 @@
     },
     "/users/@me": {
       "get": {
-        "operationId": "get_my_user"
+        "operationId": "get_my_user",
+        "x-security": [
+          "BotToken",
+          "OAuth2"
+        ]
       }
     }
   }

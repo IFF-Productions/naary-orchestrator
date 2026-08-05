@@ -8,13 +8,16 @@
     "provider": "twilio",
     "pathPrefix": "/2010-04-01",
     "source": "https://raw.githubusercontent.com/twilio/twilio-oai/main/spec/json/twilio_api_v2010.json",
-    "fetchedAt": "2026-07-30",
+    "fetchedAt": "2026-08-05",
     "note": "PRUNED snapshot — see packages/dsl/scripts/extract-openapi-fixtures.mjs. Do not hand-edit."
   },
   "paths": {
     "/2010-04-01/Accounts/{AccountSid}/Messages.json": {
       "post": {
         "operationId": "CreateMessage",
+        "x-security": [
+          "accountSid_authToken"
+        ],
         "parameters": [
           {
             "name": "AccountSid",
@@ -64,6 +67,9 @@
       },
       "get": {
         "operationId": "ListMessage",
+        "x-security": [
+          "accountSid_authToken"
+        ],
         "parameters": [
           {
             "name": "AccountSid",
@@ -116,6 +122,9 @@
     "/2010-04-01/Accounts/{AccountSid}/Messages/{Sid}.json": {
       "get": {
         "operationId": "FetchMessage",
+        "x-security": [
+          "accountSid_authToken"
+        ],
         "parameters": [
           {
             "name": "AccountSid",
@@ -133,6 +142,9 @@
     "/2010-04-01/Accounts/{AccountSid}/Calls.json": {
       "post": {
         "operationId": "CreateCall",
+        "x-security": [
+          "accountSid_authToken"
+        ],
         "parameters": [
           {
             "name": "AccountSid",
@@ -197,6 +209,9 @@
     "/2010-04-01/Accounts.json": {
       "get": {
         "operationId": "ListAccount",
+        "x-security": [
+          "accountSid_authToken"
+        ],
         "parameters": [
           {
             "name": "FriendlyName",

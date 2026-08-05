@@ -2,19 +2,23 @@
   "openapi": "3.0.3",
   "info": {
     "title": "The Jira Cloud platform REST API",
-    "version": "1001.0.0-SNAPSHOT-a763f97fb5896e76df1878703c45a1ad020dcca2"
+    "version": "1001.0.0-SNAPSHOT-ec6eb9a053ff929b1f69b33da424844a4598f942"
   },
   "x-naary": {
     "provider": "jira",
     "pathPrefix": "",
     "source": "https://developer.atlassian.com/cloud/jira/platform/swagger.v3.json",
-    "fetchedAt": "2026-07-30",
+    "fetchedAt": "2026-08-05",
     "note": "PRUNED snapshot — see packages/dsl/scripts/extract-openapi-fixtures.mjs. Do not hand-edit."
   },
   "paths": {
     "/rest/api/2/issue/{issueIdOrKey}": {
       "get": {
         "operationId": "getIssue",
+        "x-security": [
+          "OAuth2",
+          "basicAuth"
+        ],
         "parameters": [
           {
             "name": "issueIdOrKey",
@@ -57,6 +61,10 @@
     "/rest/api/2/issue": {
       "post": {
         "operationId": "createIssue",
+        "x-security": [
+          "OAuth2",
+          "basicAuth"
+        ],
         "parameters": [
           {
             "name": "updateHistory",
@@ -88,6 +96,10 @@
     "/rest/api/2/issue/{issueIdOrKey}/comment": {
       "post": {
         "operationId": "addComment",
+        "x-security": [
+          "OAuth2",
+          "basicAuth"
+        ],
         "parameters": [
           {
             "name": "issueIdOrKey",
@@ -140,6 +152,10 @@
     "/rest/api/2/issue/{issueIdOrKey}/transitions": {
       "post": {
         "operationId": "doTransition",
+        "x-security": [
+          "OAuth2",
+          "basicAuth"
+        ],
         "parameters": [
           {
             "name": "issueIdOrKey",
@@ -195,6 +211,10 @@
     "/rest/api/2/myself": {
       "get": {
         "operationId": "getCurrentUser",
+        "x-security": [
+          "OAuth2",
+          "basicAuth"
+        ],
         "parameters": [
           {
             "name": "expand",

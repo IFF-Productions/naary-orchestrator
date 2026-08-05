@@ -8,13 +8,16 @@
     "provider": "digitalocean",
     "pathPrefix": "/v2",
     "source": "https://raw.githubusercontent.com/digitalocean/openapi/main/specification/DigitalOcean-public.v2.yaml",
-    "fetchedAt": "2026-07-30",
+    "fetchedAt": "2026-08-05",
     "note": "PRUNED snapshot — see packages/dsl/scripts/extract-openapi-fixtures.mjs. Do not hand-edit."
   },
   "paths": {
     "/v2/droplets": {
       "get": {
         "operationId": "droplets_list",
+        "x-security": [
+          "bearer_auth"
+        ],
         "parameters": [
           {
             "name": "per_page",
@@ -45,6 +48,9 @@
       },
       "post": {
         "operationId": "droplets_create",
+        "x-security": [
+          "bearer_auth"
+        ],
         "requestBody": {
           "required": false,
           "content": {
@@ -78,6 +84,9 @@
     "/v2/droplets/{droplet_id}": {
       "get": {
         "operationId": "droplets_get",
+        "x-security": [
+          "bearer_auth"
+        ],
         "parameters": [
           {
             "name": "droplet_id",
@@ -88,6 +97,9 @@
       },
       "delete": {
         "operationId": "droplets_destroy",
+        "x-security": [
+          "bearer_auth"
+        ],
         "parameters": [
           {
             "name": "droplet_id",

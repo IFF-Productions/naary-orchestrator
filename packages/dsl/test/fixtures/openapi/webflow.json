@@ -8,13 +8,24 @@
     "provider": "webflow",
     "pathPrefix": "",
     "source": "https://raw.githubusercontent.com/webflow/openapi-spec/main/openapi/v2.yml",
-    "fetchedAt": "2026-07-30",
+    "fetchedAt": "2026-08-05",
     "note": "PRUNED snapshot — see packages/dsl/scripts/extract-openapi-fixtures.mjs. Do not hand-edit."
   },
   "paths": {
+    "/sites": {
+      "get": {
+        "operationId": "list-sites",
+        "x-security": [
+          "OAuth2"
+        ]
+      }
+    },
     "/sites/{site_id}/collections": {
       "get": {
         "operationId": "list-collections",
+        "x-security": [
+          "OAuth2"
+        ],
         "parameters": [
           {
             "name": "site_id",
@@ -27,6 +38,9 @@
     "/collections/{collection_id}/items": {
       "get": {
         "operationId": "list-collection-items",
+        "x-security": [
+          "OAuth2"
+        ],
         "parameters": [
           {
             "name": "collection_id",
@@ -87,6 +101,9 @@
       },
       "post": {
         "operationId": "create-item",
+        "x-security": [
+          "OAuth2"
+        ],
         "parameters": [
           {
             "name": "collection_id",
@@ -130,6 +147,9 @@
     "/collections/{collection_id}/items/{item_id}": {
       "get": {
         "operationId": "Get-Item",
+        "x-security": [
+          "OAuth2"
+        ],
         "parameters": [
           {
             "name": "collection_id",
@@ -151,7 +171,10 @@
     },
     "/token/authorized_by": {
       "get": {
-        "operationId": "authorized_by"
+        "operationId": "authorized_by",
+        "x-security": [
+          "OAuth2"
+        ]
       }
     }
   }
