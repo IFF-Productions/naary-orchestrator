@@ -26,6 +26,11 @@ naary auth status          # resolved apiUrl + masked token
 > `--api-url https://your-host` requests `https://your-host/api/v1/runs`. Adding the prefix
 > yourself yields `/api/api/v1/...` and 404s.
 
+> **Point it at the web origin, not the API's own port.** That `/api` segment is stripped by
+> the proxy in front of the app; the API service itself serves `/v1/...`. So a URL that
+> reaches the API directly (`http://localhost:3000`) 404s on every request. The default,
+> `http://localhost:8081`, is the local web app from `docker compose up`.
+
 Credentials land in `~/.naary/config.json` (written `0600`, inside a `0700` directory).
 
 Resolution order is **flags → environment → config file → default**:

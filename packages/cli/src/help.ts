@@ -1,4 +1,11 @@
-/** Help text for the naary CLI. Plain strings so `--help` needs no dependencies. */
+/**
+ * Help text for the naary CLI. Plain strings so `--help` needs no *runtime* dependencies —
+ * the one import is our own constant, deliberately: the default URL was previously spelled
+ * out here as a second literal, so when the default was wrong the help text confidently
+ * documented the wrong value too. Interpolating makes drift impossible.
+ */
+
+import { DEFAULT_API_URL } from "./config";
 
 export const TOP_HELP = `naary — CLI for the naary orchestrator public API (/api/v1)
 
@@ -13,7 +20,7 @@ Groups:
   config      Variables, write-only secrets, usage, and insights
 
 Connection options (pass after <group> <command>):
-  --api-url <url>   API base URL (default http://localhost:3000)
+  --api-url <url>   Base origin, no /api (default ${DEFAULT_API_URL})
   --token <nry_..>  Bearer token
   --env <id>        Environment id (sent as X-Environment-Id)
 

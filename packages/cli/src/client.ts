@@ -53,6 +53,14 @@ export interface RequestOptions {
   requireAuth?: boolean;
 }
 
+/**
+ * `/api` is a PROXY path, not the API's own. Three facts fix this:
+ *   1. the controllers are `@Controller("v1/runs")` etc. — the API serves `/v1/...`;
+ *   2. `apps/api/src/main.ts` sets no global prefix, so nothing adds `/api` server-side;
+ *   3. `apps/web/nginx.conf` (and the vite dev proxy) rewrite `^/api/(.*)` → `/$1`.
+ * So `apiUrl` must be an origin sitting BEHIND that rewrite — the web origin, not the API's
+ * own port. Pointed straight at the API this prefix is dead weight and every call 404s.
+ */
 const API_PREFIX = "/api/v1";
 
 /** Join base url + /api/v1 + path, normalizing slashes. */

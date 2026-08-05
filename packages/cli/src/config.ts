@@ -12,7 +12,18 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-export const DEFAULT_API_URL = "http://localhost:3000";
+/**
+ * Default base URL: the local **web** origin (nginx), NOT the API container's own port.
+ *
+ * The client appends `/api/v1` (see client.ts), and that `/api` segment is a PROXY path —
+ * the API itself serves `v1/*` with no global prefix, and `apps/web/nginx.conf` rewrites
+ * `^/api/(.*)` → `/$1` before proxying. So the base URL must be an origin that has that
+ * proxy in front of it. This used to be `http://localhost:3000` (the API direct), which
+ * composed to `http://localhost:3000/api/v1/runs` — a path nothing has ever served, so the
+ * very first command anyone ran with no configuration 404'd. `http://localhost:8081` is the
+ * local web origin the root README documents, and it is where the strip actually happens.
+ */
+export const DEFAULT_API_URL = "http://localhost:8081";
 
 /** The shape persisted at ~/.naary/config.json. All fields optional. */
 export interface ConfigFile {
