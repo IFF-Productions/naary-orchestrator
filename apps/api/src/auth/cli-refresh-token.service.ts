@@ -136,15 +136,26 @@ export class CliRefreshTokenService {
     });
     if (!row) return fail("unknown");
 
-    // Order matters only in that revocation wins: a family killed by reuse detection must not be
+    // Revocation wins over everything: a family already killed by reuse detection must not be
     // reported as merely "expired", and must never mint anything.
     if (row.revokedAt) return fail("revoked");
     if (row.expiresAt.getTime() <= now.getTime()) return fail("expired");
+
+    // "Was this already superseded?" is asked BEFORE "is this row still fresh?", and the order is
+    // load-bearing. Rotation stamps `lastUsedAt` on the row it retires, so a retired row's idle
+    // clock starts at its rotation instant — checking idle first would answer `idle_expired` to
+    // every replay older than 30 days and never reach reuse detection, leaving the family alive
+    // and refreshing. That is the likeliest leak of all (a month-old laptop backup or shell
+    // history), so it is precisely the one that must not slip through.
+    //
+    // It sits BELOW the absolute cap on purpose: successors inherit `expiresAt` unchanged, so a
+    // family past its cap is already dead in every row and revoking it would be a no-op. Only the
+    // idle window is per-row, and therefore only the idle window could hide a live family.
+    if (row.rotatedAt) return this.afterRotation(row, now);
+
     const idleSince = (row.lastUsedAt ?? row.createdAt).getTime();
     if (now.getTime() - idleSince > REFRESH_IDLE_TTL_MS)
       return fail("idle_expired");
-
-    if (row.rotatedAt) return this.afterRotation(row, now);
 
     // Compare-and-set: `rotatedAt: null` in the WHERE is the guard that makes rotation single-use
     // under concurrency. Without it, two simultaneous callers both "rotate" the same row and the

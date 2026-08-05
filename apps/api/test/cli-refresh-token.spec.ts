@@ -204,6 +204,28 @@ describe("rotate — the old token dies", () => {
     });
   });
 
+  it("detects reuse of a token rotated away LONGER AGO than the idle window", async () => {
+    // The realistic leak: a copy from a month-old laptop backup or shell history, replayed while
+    // the family is still very much alive. Rotation stamps `lastUsedAt` on the row it retires, so
+    // this row's idle clock reads "40 days stale" — if the idle check ran before reuse detection
+    // this would answer `idle_expired`, decline politely, and leave the thief's family refreshing.
+    const first = await service.issue("tenant-A", "user-1", T0);
+    let token = await rotateOk(first.refreshToken, T0);
+    // The real user keeps working weekly, well past the 30-day idle window of the leaked copy.
+    for (let week = 1; week <= 5; week++)
+      token = await rotateOk(token, at(week * 7 * DAY));
+
+    expect(await service.rotate(first.refreshToken, at(40 * DAY))).toEqual({
+      ok: false,
+      reason: "reused",
+    });
+    expect(liveRows()).toHaveLength(0);
+    expect(await service.rotate(token, at(41 * DAY))).toEqual({
+      ok: false,
+      reason: "revoked",
+    });
+  });
+
   it("does not touch an UNRELATED family", async () => {
     const victim = await service.issue("tenant-A", "user-1", T0);
     const other = await service.issue("tenant-A", "user-1", T0);
