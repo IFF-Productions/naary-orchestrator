@@ -83,6 +83,25 @@ export interface RunStateView {
    *  resume). Null when no cap is configured / the run is closed — consumers must not
    *  fabricate a budget meter without it. */
   perExecutionCapUsd: number | null;
+  /**
+   * Ledger PROVENANCE for the nodes of this run that billed, keyed by nodeId (#1069).
+   *
+   * Run detail's per-step cost/tokens come from the node's own output in `ctx`, which cannot say
+   * whether the token counts were measured or are the Tier-1 rule-6 fallback ESTIMATE — by the
+   * time they reach the output, an estimated 900 and a measured 900 are the same integer. The
+   * `UsageEvent` row for `(executionId, nodeId)` does know (#1060), so this carries that one bit
+   * across, and nothing else.
+   *
+   * Deliberately NOT the ledger's cost/tokens. They are a different number from the output's on
+   * purpose — an agent node's output `costUsd` includes flat MCP tool cost the token ledger does
+   * not, and a node that ran several passes (loop/items) has ONE ledger row, because `recordUsage`
+   * upserts on `(executionId, nodeId)` and first write wins. Rendering ledger figures as the
+   * step's would quietly drop tool spend and show pass-1 numbers for a looped node.
+   *
+   * SCOPE: tokens. A row can be `estimated: false` and still carry a fallback PRICE (an unpriced
+   * model books 0). An ABSENT key claims nothing either way — most node types never bill.
+   */
+  nodeUsage: Record<string, { estimated: boolean }>;
 }
 
 /** Approver routing display summary on an awaiting row (Slice 1). */

@@ -336,12 +336,62 @@ async function resolveCtxRefs(
   }
 }
 
+/**
+ * Ledger provenance for a run's billed nodes: nodeId → whether its TOKEN counts were the rule-6
+ * fallback estimate (#1069). See `RunStateView.nodeUsage` for why only this bit crosses over.
+ *
+ * Scoped by `tenantId` as well as `executionId` even though the caller has already proven
+ * ownership — the scoping of a spend read should be legible in the query itself, not inferred
+ * from what happened three calls up.
+ *
+ * Best-effort: a ledger read that fails must not take the run detail down with it. The run's
+ * outputs, timings and error are the reason the page is open; losing an "estimated" marker is a
+ * far smaller harm than a 500. `{}` reads as "no claim either way", which is exactly true.
+ */
+async function ledgerProvenance(
+  id: string,
+  tenantId: string,
+): Promise<Record<string, { estimated: boolean }>> {
+  try {
+    const rows = await getPrisma().usageEvent.findMany({
+      where: { executionId: id, tenantId },
+      select: { nodeId: true, estimated: true },
+    });
+    const out: Record<string, { estimated: boolean }> = {};
+    for (const r of rows) out[r.nodeId] = { estimated: r.estimated };
+    return out;
+  } catch (e) {
+    logQueryFailure("state:ledger-provenance", id, e);
+    return {};
+  }
+}
+
+/**
+ * Live detail for a run, plus the ledger provenance of the steps that billed.
+ *
+ * The two reads are sequenced, not parallel: `queryRunState` is what performs the ownership and
+ * view checks, so the ledger read only ever runs for a caller already cleared to see this run's
+ * spend. (The run's cost is ALREADY on this response — `spentUsd`, and every node output's own
+ * `costUsd` inside `ctx`. This adds no figure, only a qualifier on figures the caller can see.)
+ */
 export async function queryState(
   deps: ExecutionsDeps,
   id: string,
   tenantId: string,
   actor?: Principal,
 ): Promise<RunStateView> {
+  const view = await queryRunState(deps, id, tenantId, actor);
+  return { ...view, nodeUsage: await ledgerProvenance(id, tenantId) };
+}
+
+/** The run state itself (Temporal + read model). Returns from eight branches, which is why the
+ *  ledger join above wraps it rather than being threaded through each one. */
+async function queryRunState(
+  deps: ExecutionsDeps,
+  id: string,
+  tenantId: string,
+  actor?: Principal,
+): Promise<Omit<RunStateView, "nodeUsage">> {
   const row = await deps.assertOwner(id, tenantId);
   // G3 (§8.4): the run detail (incl. its ctx/output) is view-gated on its workflow.
   await deps.assertRunAccess(actor, "view", row);
@@ -494,7 +544,7 @@ export async function queryState(
     // Best-effort by construction: a history that has aged out, a query the server rejects, or a
     // replay that can't reconstruct all leave us exactly where we were before, so the failed run
     // still renders. Nothing here can turn a readable failure into an unreadable one.
-    const closed: RunStateView = {
+    const closed: Omit<RunStateView, "nodeUsage"> = {
       status: TEMPORAL_CLOSED_STATUS[desc.status.name] ?? "unknown",
       // The read-model's failedNodeId stays authoritative for WHICH node died (#525) — it was
       // stamped by the interpreter at the throwing node, and is race-safe across concurrent

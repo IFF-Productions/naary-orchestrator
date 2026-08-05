@@ -129,6 +129,12 @@ export function buildNodeLogRows({
         `${s.label} (${s.id})`,
         ...(s.duration ? [s.duration] : []),
         ...safeFields(ctx[s.id]),
+        // #1069. Deliberately NOT an entry in SAFE_OUTPUT_FIELDS: this does not come from the
+        // node's output at all — it comes from the usage ledger, joined on (executionId, nodeId)
+        // — so putting it in that allowlist would widen the one list whose job is to bound what
+        // OUTPUT content can reach a row, to read a key that isn't in the output. It rides the
+        // step instead, and the allowlist test is untouched by this change.
+        ...(s.costEstimated ? ["est. tokens"] : []),
       ];
       return {
         id: `node-${s.id}`,

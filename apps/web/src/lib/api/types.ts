@@ -32,6 +32,20 @@ export interface ExecutionState {
   spentUsd?: number | null;
   /** The per-run cap the run enforces; null/absent = no cap — never fabricate a meter. */
   perExecutionCapUsd?: number | null;
+  /**
+   * Ledger provenance per node (#1069): `estimated` means that step's TOKEN counts — and so the
+   * cost derived from them — are the fail-safe estimate booked when the provider reported no
+   * usage, not a measurement.
+   *
+   * Absent key ⇒ NO claim either way, not "measured": most node types never bill, and every run
+   * that predates this field has an empty map. So the UI marks the estimated case and leaves
+   * everything else exactly as it was — a marker is only honest if its absence isn't a claim.
+   *
+   * Unknown-typed for the same reason `nodeTimes` above is (it matches the generated schema, whose
+   * `additionalProperties: true` is an unknown record); shape-checked at read time by
+   * run-view-model's `nodeEstimated`.
+   */
+  nodeUsage?: Record<string, unknown> | null;
 }
 
 /** A captured body — already redacted and truncated by the WORKER, at the point of failure. */

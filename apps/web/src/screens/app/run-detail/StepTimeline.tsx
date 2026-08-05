@@ -21,8 +21,18 @@ export interface TimelineStep {
   duration: string | null;
   /** Real recorded duration in ms (drives the proportional done bar); null → uniform bar. */
   durationMs?: number | null;
-  /** Real per-step cost (the node output's metered costUsd); null → "—". */
+  /** Real per-step cost (the node output's costUsd); null → "—". */
   cost: string | null;
+  /**
+   * True when the ledger says this step's TOKEN counts were the rule-6 fallback ESTIMATE, so the
+   * cost derived from them is approximate (#1069). Renders as a "~" on the cost column — the row
+   * is 72px of mono, so the qualifier has to be one character; the step card spells it out.
+   *
+   * False/undefined is simply NOT MARKED — it covers a measured step, a step that billed nothing
+   * metered, and a run predating the flag alike. It is not a claim of its own, and callers do not
+   * distinguish those cases (see `nodeEstimated` for why the read collapses them).
+   */
+  costEstimated?: boolean;
 }
 
 function barStyle(
@@ -234,15 +244,25 @@ export function StepTimeline({
                 </span>
                 <span
                   className="mono"
+                  title={
+                    p.costEstimated && p.cost
+                      ? "Estimated — the provider reported no token usage for this step, so this cost is derived from an estimate."
+                      : undefined
+                  }
                   style={{
                     fontSize: "var(--text-xs)",
-                    color: "var(--ink-3)",
-                    width: 66,
+                    // Estimated spend borrows the paused/attention colour so a scan of the column
+                    // separates the two kinds of claim without reading the numbers.
+                    color:
+                      p.costEstimated && p.cost
+                        ? "var(--state-paused)"
+                        : "var(--ink-3)",
+                    width: 72,
                     textAlign: "right",
                     flex: "none",
                   }}
                 >
-                  {p.cost ?? "—"}
+                  {p.cost ? (p.costEstimated ? `~${p.cost}` : p.cost) : "—"}
                 </span>
               </button>
             );

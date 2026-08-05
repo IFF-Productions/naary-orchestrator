@@ -46,6 +46,7 @@ import {
   fmtStepDuration,
   fmtWhen,
   historyTimes,
+  nodeEstimated,
   nodeIcon,
   nodeTimeOf,
   stepCostText,
@@ -461,8 +462,10 @@ function RunView({ id }: { id: string }) {
         const st = states[nid] ?? "pending";
         // Slice 2: real per-step duration from the worker-stamped nodeTimes map
         // (deterministic workflow time) and real cost from the node output's own
-        // metered costUsd. A waiting step keeps its live age; runs that predate
+        // recorded costUsd. A waiting step keeps its live age; runs that predate
         // the feature carry no map → the columns keep "—" (never fabricated).
+        // Whether that cost is metered or ESTIMATED is a separate fact the output
+        // cannot carry — see costEstimated below (#1069).
         const t = nodeTimeOf(state?.nodeTimes, nid);
         return {
           id: nid,
@@ -474,6 +477,10 @@ function RunView({ id }: { id: string }) {
             st === "waiting" ? waitingAge : t ? fmtStepDuration(t) : null,
           durationMs: t ? Math.max(0, t.f - t.s) : null,
           cost: stepCostText(state?.ctx[nid]),
+          // #1069: whether that cost rests on ESTIMATED tokens — a ledger fact, joined by nodeId.
+          // Boolean, not a tri-state: `nodeEstimated` answers only "does this row get marked?",
+          // and a node with no ledger entry answers that the same way a measured one does.
+          costEstimated: nodeEstimated(state?.nodeUsage, nid),
         };
       }),
     [order, nodeById, states, waitingAge, state],
@@ -527,6 +534,9 @@ function RunView({ id }: { id: string }) {
       duration: st === "waiting" ? waitingAge : t ? fmtStepDuration(t) : null,
       cost: stepCostText(state.ctx[selectedId]),
       tokens: stepTokensText(state.ctx[selectedId]),
+      // #1069: the figures above come from the node's OUTPUT, which cannot say whether its token
+      // counts were measured or estimated. The ledger can, so the provenance is joined in here.
+      costEstimated: nodeEstimated(state.nodeUsage, selectedId),
       output,
       isTriggerInput,
       hasCtxOutput,
