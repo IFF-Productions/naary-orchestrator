@@ -60,7 +60,7 @@ integrations (SQL, SMTP, MCP, LLM providers, notification channels) and the oper
 
 ### Analytics
 
-- **[PostHog](./posthog.md)** — Query PostHog events and people, and annotate releases, from a workflow. <sub>(not live-verified)</sub>
+- **[PostHog](./posthog.md)** — Query PostHog events and people, and annotate releases, from a workflow. <sub>(needs a Server URL, not live-verified)</sub>
 
 ### Communication
 

@@ -7,6 +7,7 @@ export const DEEPL: IntegrationProvider = {
   key: "deepl",
   label: "DeepL",
   baseUrlFromConnection: true,
+  serverUrlExample: "https://api-free.deepl.com or https://api.deepl.com",
   authScheme: { header: "Authorization", prefix: "DeepL-Auth-Key " },
   description:
     "Translate text with DeepL — translate, check quota usage, list supported languages.",

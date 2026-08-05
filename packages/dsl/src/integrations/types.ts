@@ -183,6 +183,26 @@ export interface IntegrationProvider {
   /** When true, the base URL is the CONNECTION's serverUrl (e.g. an Atlassian site). */
   baseUrlFromConnection?: boolean;
   /**
+   * The host to call when a `baseUrlFromConnection` provider's connection stores NO serverUrl
+   * (#1110). Only meaningful together with that flag — resolve both through
+   * `resolveIntegrationBaseUrl`, never by reading this field directly.
+   *
+   * It exists for exactly one situation: a provider that USED to have a fixed `baseUrl` and
+   * turns out to be per-tenant after all. Connections made before the change stored no host
+   * (nothing asked for one), and a `Connection` row carries no provider key — it is a `custom`
+   * connection with a user-chosen label — so no migration can find those rows to backfill them.
+   * Without a fallback, fixing the per-tenant case would break every connection that works today.
+   */
+  defaultBaseUrl?: string;
+  /**
+   * A concrete example Server URL, e.g. "https://your-site.atlassian.net". DISPLAY ONLY — the
+   * connect form's placeholder and the "this connection needs a Server URL" error, never used to
+   * build a request. Required of every `baseUrlFromConnection` provider (asserted in
+   * integrations.spec): "set a Server URL" without a shape is advice nobody can act on, and the
+   * alternative — a hand-written switch per surface — is a list that goes stale silently.
+   */
+  serverUrlExample?: string;
+  /**
    * How the connection token becomes the auth header (default "bearer").
    * - "bearer" — `Authorization: Bearer <token>` (GitHub etc.).
    * - "basic"  — HTTP Basic; the stored token is `email:api_token`, sent as

@@ -96,6 +96,17 @@ function optionalKeys(a: IntegrationAction): string[] {
     .map((f) => f.key);
 }
 
+/**
+ * End a prose FRAGMENT with a full stop before another sentence follows it.
+ *
+ * `prose.serverUrl` is authored as a fragment ("your Atlassian site, e.g. `…`") because it is also
+ * dropped into "Set **Server URL** to …". Pasted straight in front of the next sentence it produced
+ * "…`us19`) Getting this wrong is…" — two sentences run together, in every Server-URL guide.
+ */
+function sentence(fragment: string): string {
+  return /[.!?]$/.test(fragment.trim()) ? fragment : `${fragment}.`;
+}
+
 /** "a token" / "an API key" — the guides read as prose, so this shouldn't be left to chance. */
 function article(noun: string): string {
   return /^[aeiou]/i.test(noun) ? "an" : "a";
@@ -199,11 +210,20 @@ export function renderIntegrationDoc(
     out.push(
       `- **Server URL:** not needed — Naary always calls \`${p.baseUrl}\`.`,
     );
+  } else if (p.defaultBaseUrl) {
+    // A per-tenant host that ALSO has a default (#1110): required for anyone not on that default,
+    // ignorable for anyone who is. Saying only "required" would be wrong for half the readers and
+    // saying only "optional" would be wrong for the other half, so state the fallback explicitly.
+    out.push(
+      `- **Server URL: set it unless you are on \`${p.defaultBaseUrl}\`.** ${sentence(
+        prose.serverUrl ?? "Set it to your instance's API base",
+      )} Left blank, Naary calls \`${p.defaultBaseUrl}\` — so a connection anywhere else must set it.`,
+    );
   } else {
     out.push(
-      `- **Server URL: required.** ${
-        prose.serverUrl ?? "Set it to your instance's API base."
-      } Getting this wrong is the most common cause of a setup that looks right and 404s.`,
+      `- **Server URL: required.** ${sentence(
+        prose.serverUrl ?? "Set it to your instance's API base",
+      )} Getting this wrong is the most common cause of a setup that looks right and 404s.`,
     );
   }
   out.push("");
@@ -224,7 +244,9 @@ export function renderIntegrationDoc(
   out.push(
     !needsServerUrl(p)
       ? "3. Leave **Server URL** as the default — this provider has a fixed API base."
-      : `3. Set **Server URL** to ${prose.serverUrl ?? "your instance's API base"}.`,
+      : `3. Set **Server URL** to ${prose.serverUrl ?? "your instance's API base"}${
+          p.defaultBaseUrl ? ` (blank means \`${p.defaultBaseUrl}\`)` : ""
+        }.`,
   );
   out.push("4. Paste the credential into the token field and save.");
   out.push(

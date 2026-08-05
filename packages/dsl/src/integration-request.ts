@@ -23,7 +23,32 @@ import {
   buildIntegrationRequest,
   getIntegrationAction,
   getIntegrationProvider,
+  type IntegrationProvider,
 } from "./integrations";
+
+/**
+ * WHICH HOST does this provider's request go to — the catalog's, or the connection's? (#1110)
+ *
+ * Lives here, beside `planIntegrationCall`, for the reason this module exists at all: the worker
+ * activity and the API's "Test connection" both answer it, and when they answer it differently the
+ * credential check probes a DIFFERENT host than the node will call — so a passing test proves
+ * nothing and a failing one blames the token. That is precisely how PostHog's regional host went
+ * unnoticed: `get_me` was wrong in exactly the same way every action was.
+ *
+ * Returns `null` for "no host could be resolved", which is a configuration fault; the callers own
+ * the message, because the worker must raise a non-retryable failure and the API must return a
+ * verdict on the connection.
+ */
+export function resolveIntegrationBaseUrl(
+  provider: IntegrationProvider,
+  serverUrl?: string | null,
+): string | null {
+  if (!provider.baseUrlFromConnection) return provider.baseUrl ?? null;
+  // A connection's own host always wins. `defaultBaseUrl` is the fallback for connections made
+  // before the provider asked for one (see POSTHOG's note) — most providers have none, and for
+  // those a missing Server URL stays the hard error it has always been.
+  return serverUrl?.trim() || provider.defaultBaseUrl || null;
+}
 
 /**
  * Base64 via whichever encoder the host provides — Node's `Buffer` in the worker/api, the

@@ -57,6 +57,7 @@ export {
 export {
   planIntegrationCall,
   pickConnectionTestAction,
+  resolveIntegrationBaseUrl,
   type IntegrationCallPlan,
   type IntegrationCallPlanInput,
   type ConnectionTestProbe,

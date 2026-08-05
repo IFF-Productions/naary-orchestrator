@@ -7,6 +7,7 @@ export const MATTERMOST: IntegrationProvider = {
   key: "mattermost",
   label: "Mattermost",
   baseUrlFromConnection: true,
+  serverUrlExample: "https://your-mattermost.example.com",
   authScheme: "bearer",
   description:
     "Post to Mattermost — send a message, reply in a thread, react, or read channel history.",

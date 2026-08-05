@@ -399,6 +399,49 @@ describe("callIntegration activity", () => {
     expect(init.body).toBeUndefined();
   });
 
+  /**
+   * PostHog's host is REGIONAL (#1110): `us.posthog.com`, `eu.posthog.com`, or a self-hosted
+   * domain. The catalog used to hardcode `app.posthog.com`, so every action failed for an EU
+   * tenant — and the connection test, which probes `get_me` over the same base, blamed the token.
+   */
+  it("PostHog list_events → base from the connection's region (EU)", async () => {
+    connMock.mockResolvedValue({
+      serverUrl: "https://eu.posthog.com",
+      authMode: "api_token",
+    });
+    fetchMock.mockResolvedValue(res(200, { results: [] }));
+    const cfg: IntegrationNodeConfig = {
+      provider: "posthog",
+      action: "list_events",
+      connectionId: "ph",
+      fields: { projectId: "42" },
+    };
+    await callIntegration(cfg, cfg.fields!, META);
+    const [url] = fetchMock.mock.calls[0];
+    expect(url.toString()).toBe(
+      "https://eu.posthog.com/api/projects/42/events/",
+    );
+  });
+
+  it("PostHog with no stored host → US Cloud, the pre-#1110 behaviour, not a config failure", async () => {
+    // Every PostHog connection made before #1110 looks like this: the catalog owned the host, so
+    // nothing ever asked for one, and a Connection row carries no provider key for a migration to
+    // find. Fixing EU tenants must not take these down.
+    connMock.mockResolvedValue({ serverUrl: null, authMode: "api_token" });
+    fetchMock.mockResolvedValue(res(200, { results: [] }));
+    const cfg: IntegrationNodeConfig = {
+      provider: "posthog",
+      action: "list_events",
+      connectionId: "ph",
+      fields: { projectId: "42" },
+    };
+    await callIntegration(cfg, cfg.fields!, META);
+    const [url] = fetchMock.mock.calls[0];
+    expect(url.toString()).toBe(
+      "https://us.posthog.com/api/projects/42/events/",
+    );
+  });
+
   it("PagerDuty create_incident → 'Authorization: Token token=<key>' (NOT a Bearer) + v2 Accept + From header", async () => {
     connMock.mockResolvedValue({ serverUrl: null, authMode: "api_token" });
     authMock.mockResolvedValue({ Authorization: "Bearer pd-key" });

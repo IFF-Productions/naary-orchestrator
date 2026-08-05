@@ -186,8 +186,16 @@ describe("what the guides claim is derived, not asserted", () => {
     }
   });
 
-  /** The 6 Server-URL providers are the top setup failure; the guides must say so for exactly them. */
-  it("exactly 6 providers require a Server URL", () => {
+  /**
+   * The Server-URL providers are the top setup failure; the guides must say so for exactly them.
+   *
+   * PostHog joined the list in #1110 — its host is REGIONAL (`us.` / `eu.` / self-hosted) and the
+   * catalog used to hardcode `app.posthog.com`, which cannot serve two regions. It is the one
+   * member with a `defaultBaseUrl`, so its guide says "set it unless you're on us.posthog.com"
+   * rather than "required"; the split is asserted below so a future default can't quietly turn a
+   * genuinely required Server URL into an optional-looking one.
+   */
+  it("exactly 7 providers take their host from the connection", () => {
     expect(
       INTEGRATION_PROVIDERS.filter(needsServerUrl)
         .map((p) => p.key)
@@ -197,9 +205,16 @@ describe("what the guides claim is derived, not asserted", () => {
       "jira",
       "mailchimp",
       "mattermost",
+      "posthog",
       "shopify",
       "zendesk",
     ]);
+  });
+
+  it("only PostHog has a fallback host — for the other 6 a missing Server URL is fatal", () => {
+    expect(
+      INTEGRATION_PROVIDERS.filter((p) => p.defaultBaseUrl).map((p) => p.key),
+    ).toEqual(["posthog"]);
   });
 
   /**

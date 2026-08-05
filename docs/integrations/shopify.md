@@ -26,7 +26,7 @@ Read and manage Shopify products and orders from a workflow.
 - **You need:** an Admin API access token.
 - **Scopes / permissions:** `read_products`/`write_products`, `write_orders` as required
 - **How the token is sent:** A custom header: `X-Shopify-Access-Token: <token>` — a **bare** value, with no `Bearer ` prefix. Naary applies this for you; paste only the token itself.
-- **Server URL: required.** `https://{your-store}.myshopify.com/admin/api/2024-01` — substitute your store handle, and check the API version is still supported Getting this wrong is the most common cause of a setup that looks right and 404s.
+- **Server URL: required.** `https://{your-store}.myshopify.com/admin/api/2024-01` — substitute your store handle, and check the API version is still supported. Getting this wrong is the most common cause of a setup that looks right and 404s.
 
 ## Get your credentials
 

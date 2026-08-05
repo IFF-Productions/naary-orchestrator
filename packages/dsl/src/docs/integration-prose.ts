@@ -451,9 +451,13 @@ export const INTEGRATION_PROSE: Record<string, IntegrationProse> = {
     steps: [
       "In PostHog, open **Settings → Organization → Security → Personal API key access** and create a key.",
       "Note your **project id** from the project settings — most endpoints need it.",
+      "Note which **region** your project is in — it is in the URL you log in at (`us.posthog.com` or `eu.posthog.com`), and it decides the Server URL below.",
     ],
+    serverUrl:
+      "`https://us.posthog.com` for US Cloud, `https://eu.posthog.com` for EU Cloud, or your own host if you self-host",
     gotchas: [
       "A personal API key is **not** the same as the project write-only key used by the tracking SDKs. The SDK key will not work here.",
+      "PostHog's regions are **separate deployments**: a key issued on EU Cloud is unknown to the US host, so a wrong Server URL fails as an auth error and looks like a bad key. `app.posthog.com` is the legacy alias for US Cloud.",
       "Self-hosted PostHog needs its own Server URL and must be publicly resolvable.",
     ],
   },
