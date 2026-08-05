@@ -132,11 +132,20 @@ describe("ApiTokenService.verify — expiry", () => {
   });
 
   it("treats the expiry instant itself as expired (<=, not <)", async () => {
+    // The clock must be FROZEN exactly on expiresAt for this to be a boundary test at all: a
+    // millisecond of real time either side and it degenerates into one of the two cases above.
+    // Hence useFakeTimers + the try/finally restore (the pattern sso-session.service.spec.ts
+    // uses) — setSystemTime alone moves the clock under vitest 4, but leaving it moved on a
+    // failing assertion would leak the frozen time into every test after this one.
     const now = new Date("2026-08-04T12:00:00Z");
+    vi.useFakeTimers();
     vi.setSystemTime(now);
-    const token = await seedToken(new Date(now));
-    expect(await service.verify(token)).toBeNull();
-    vi.useRealTimers();
+    try {
+      const token = await seedToken(new Date(now));
+      expect(await service.verify(token)).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("does NOT stamp lastUsedAt for an expired token (a dead token must not look active)", async () => {
