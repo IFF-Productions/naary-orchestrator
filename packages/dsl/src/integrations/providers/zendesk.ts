@@ -6,6 +6,7 @@ export const ZENDESK: IntegrationProvider = {
   key: "zendesk",
   label: "Zendesk",
   baseUrlFromConnection: true,
+  serverUrlExample: "https://your-subdomain.zendesk.com/api/v2",
   authScheme: "basic",
   description:
     "Manage Zendesk Support — read, create, and update tickets; create users.",

@@ -109,7 +109,10 @@ const SOURCES = {
     pathPrefix: "",
   },
   posthog: {
-    url: "https://app.posthog.com/api/schema/?format=json",
+    // us.posthog.com, not the legacy app.posthog.com alias (#1110). The pinned fixture still
+    // records the old URL as its `source`; a refresh rewrites that, and the schema is the same
+    // document either way — PostHog's regions differ in DATA, not in API shape.
+    url: "https://us.posthog.com/api/schema/?format=json",
     pathPrefix: "",
   },
   sendgrid: {

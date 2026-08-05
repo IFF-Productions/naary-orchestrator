@@ -25,7 +25,7 @@ Post to Mattermost channels and read recent posts from a workflow.
 
 - **You need:** a personal access token or bot token.
 - **How the token is sent:** A standard `Authorization: Bearer <token>` header. Paste only the token.
-- **Server URL: required.** your Mattermost base URL, e.g. `https://chat.your-company.com` Getting this wrong is the most common cause of a setup that looks right and 404s.
+- **Server URL: required.** your Mattermost base URL, e.g. `https://chat.your-company.com`. Getting this wrong is the most common cause of a setup that looks right and 404s.
 
 ## Get your credentials
 

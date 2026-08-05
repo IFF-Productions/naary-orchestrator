@@ -353,9 +353,11 @@ describe("ConnectionTestService — declines to probe (`unknown`)", () => {
 });
 
 describe("ConnectionTestService — a baseUrl-less provider with no Server URL", () => {
-  // Six catalog providers have no `baseUrl` and need the connection's Server URL. Since #835 ALL
+  // Six catalog providers have no `baseUrl` and REQUIRE the connection's Server URL. Since #835 ALL
   // SIX are probeable (jira/mailchimp/mattermost gained an identity read), so all six reach this
   // branch — where three of them used to report "no safe read" before the URL was ever looked at.
+  // (PostHog is a seventh connection-hosted provider but declares a default host, so it is
+  // deliberately absent here — see the #1110 block below.)
   it.each(["deepl", "shopify", "zendesk", "jira", "mailchimp", "mattermost"])(
     "%s with an empty serverUrl gets a distinct 'set a Server URL' error, not a 404",
     async (providerKey) => {
@@ -387,6 +389,55 @@ describe("ConnectionTestService — a baseUrl-less provider with no Server URL",
     expect(out.status).toBe("unknown");
     expect(captured).toHaveLength(0);
     expect(setStatus).not.toHaveBeenCalled();
+  });
+
+  /**
+   * #1110 — the probe must hit the tenant's REGION.
+   *
+   * PostHog's host is regional (`us.` / `eu.` / self-hosted) and the catalog used to hardcode
+   * `app.posthog.com`. The credential check ran `get_me` against that same wrong host, so an EU
+   * tenant's perfectly good personal API key came back reported as broken. The host is the only
+   * thing under test here, and the loopback rewrite keeps only the path — so this reads the URL the
+   * service handed to the egress guard, which is the request it was about to make.
+   */
+  describe("posthog's regional host", () => {
+    function probeUrls(): string[] {
+      useLocalProvider();
+      const rewrite = __connTestDeps.assertEgressAllowed;
+      const seen: string[] = [];
+      __connTestDeps.assertEgressAllowed = (async (url: string) => {
+        seen.push(url);
+        return (rewrite as (u: string) => Promise<URL>)(url);
+      }) as never;
+      return seen;
+    }
+
+    it("calls the connection's own region (EU)", async () => {
+      const urls = probeUrls();
+      getById.mockResolvedValue({
+        ...CONN,
+        serverUrl: "https://eu.posthog.com",
+      });
+
+      const out = await svc.test("t1", "c1", "posthog");
+
+      expect(out.ok).toBe(true);
+      expect(urls).toEqual(["https://eu.posthog.com/api/users/@me/"]);
+    });
+
+    it("falls back to US Cloud for a connection saved before the host was asked for", async () => {
+      // No serverUrl is what EVERY pre-#1110 posthog connection looks like, and they cannot be
+      // migrated (a Connection row carries no provider key). This must stay a working probe, not
+      // the "set a Server URL" failure the other six per-tenant providers get.
+      const urls = probeUrls();
+      getById.mockResolvedValue({ ...CONN, serverUrl: "" });
+
+      const out = await svc.test("t1", "c1", "posthog");
+
+      expect(out.ok).toBe(true);
+      expect(setStatus).toHaveBeenCalledWith("t1", "c1", "connected");
+      expect(urls).toEqual(["https://us.posthog.com/api/users/@me/"]);
+    });
   });
 
   it("a Server URL that IS set is used verbatim as the base (zendesk)", async () => {

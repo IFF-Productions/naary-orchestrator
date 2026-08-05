@@ -953,10 +953,10 @@ export function ConnectForm({
           style={fieldStyle}
           value={serverUrl}
           onChange={(e) => setServerUrl(e.target.value)}
+          // The picked provider's OWN example (#1110) — this used to be Atlassian's site URL for
+          // every per-tenant host, which is an example that is wrong for all but one of them.
           placeholder={
-            picked?.hostFromConnection
-              ? "https://your-site.atlassian.net"
-              : "https://mcp.example.com"
+            picked?.serverUrlPlaceholder ?? "https://mcp.example.com"
           }
         />
         {picked && (

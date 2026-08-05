@@ -25,7 +25,7 @@ Translate text mid-workflow and keep an eye on your character quota.
 
 - **You need:** a DeepL auth key.
 - **How the token is sent:** A custom header: `Authorization: DeepL-Auth-Key <token>`. Naary applies this for you; paste only the token itself.
-- **Server URL: required.** `https://api-free.deepl.com` for a Free key, `https://api.deepl.com` for Pro Getting this wrong is the most common cause of a setup that looks right and 404s.
+- **Server URL: required.** `https://api-free.deepl.com` for a Free key, `https://api.deepl.com` for Pro. Getting this wrong is the most common cause of a setup that looks right and 404s.
 
 ## Get your credentials
 

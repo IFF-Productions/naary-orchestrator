@@ -6,6 +6,7 @@ import {
   getIntegrationAction,
   getIntegrationProvider,
   planIntegrationCall,
+  resolveIntegrationBaseUrl,
   validateIntegrationConfig,
 } from "@naary/dsl";
 import type {
@@ -78,17 +79,16 @@ export async function callIntegration(
     ? await __httpDeps.getConnection(meta.tenantId, cfg.connectionId)
     : null;
 
-  // Base URL: static (GitHub) or the connection's site (Jira). A connection-based provider
-  // with no serverUrl is a config error, not a retry.
-  let base = provider.baseUrl ?? null;
-  if (provider.baseUrlFromConnection) {
-    base = conn?.serverUrl ?? null;
-    if (!base) {
-      throw ApplicationFailure.nonRetryable(
-        `integration '${cfg.provider}': connection '${cfg.connectionId}' has no server URL`,
-        "INTEGRATION_NO_BASE_URL",
-      );
-    }
+  // Base URL: static (GitHub), the connection's site (Jira), or the provider's regional default
+  // when the connection stores none (PostHog — #1110). Resolved by @naary/dsl so the API's "Test
+  // connection" probes the SAME host this node calls. A connection-based provider with neither a
+  // serverUrl nor a default is a config error, not a retry.
+  const base = resolveIntegrationBaseUrl(provider, conn?.serverUrl);
+  if (!base) {
+    throw ApplicationFailure.nonRetryable(
+      `integration '${cfg.provider}': connection '${cfg.connectionId}' has no server URL`,
+      "INTEGRATION_NO_BASE_URL",
+    );
   }
   // Path/query templating is pure but CAN reject its input (e.g. a CR/LF in a header field
   // bound from run data — a header-injection attempt). That's a data/config fault a retry
@@ -124,7 +124,7 @@ export async function callIntegration(
       provider: cfg.provider,
       action: cfg.action,
       fields,
-      baseUrl: base!,
+      baseUrl: base,
       authHeaders,
       authMode: conn?.authMode,
     });

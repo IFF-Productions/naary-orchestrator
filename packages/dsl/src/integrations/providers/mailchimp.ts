@@ -6,6 +6,7 @@ export const MAILCHIMP: IntegrationProvider = {
   key: "mailchimp",
   label: "Mailchimp",
   baseUrlFromConnection: true,
+  serverUrlExample: "https://<dc>.api.mailchimp.com/3.0",
   authScheme: "bearer",
   description:
     "Manage Mailchimp audiences — add/get/update list members, list members, create a campaign.",

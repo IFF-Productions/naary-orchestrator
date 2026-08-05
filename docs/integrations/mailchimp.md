@@ -25,7 +25,7 @@ Add and update Mailchimp audience members, and create campaigns.
 
 - **You need:** an API key.
 - **How the token is sent:** A standard `Authorization: Bearer <token>` header. Paste only the token.
-- **Server URL: required.** `https://{dc}.api.mailchimp.com/3.0`, where `{dc}` is your key's datacenter suffix (e.g. `us19`) Getting this wrong is the most common cause of a setup that looks right and 404s.
+- **Server URL: required.** `https://{dc}.api.mailchimp.com/3.0`, where `{dc}` is your key's datacenter suffix (e.g. `us19`). Getting this wrong is the most common cause of a setup that looks right and 404s.
 
 ## Get your credentials
 

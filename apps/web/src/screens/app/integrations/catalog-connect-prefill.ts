@@ -28,6 +28,15 @@ export interface CatalogConnectPrefill {
   serverUrl: string;
   /** What to put in Server URL, in words — differs per provider, so it can't be a placeholder. */
   serverUrlHint: string;
+  /**
+   * The Server URL PLACEHOLDER — a concrete example for this provider (#1110).
+   *
+   * From the catalog, because the form's own placeholder was a single hardcoded
+   * `https://your-site.atlassian.net`: an Atlassian site shown to someone connecting Shopify,
+   * Mailchimp or PostHog, i.e. an example that is wrong for six of the seven providers that
+   * actually need this field.
+   */
+  serverUrlPlaceholder: string;
   /** Catalog providers are all `custom` connections; github/atlassian are their own OAuth apps. */
   type: "custom";
   authMode: "api_token";
@@ -89,13 +98,28 @@ export function catalogConnectPrefill(
   return {
     label: provider.label,
     // For a per-tenant host there is nothing to prefill — the value is the user's own site, and
-    // guessing one would be worse than leaving it blank.
-    serverUrl: hostFromConnection ? "" : (provider.baseUrl ?? ""),
+    // guessing one would be worse than leaving it blank. UNLESS the provider names a default
+    // (PostHog's US region, #1110): that is the host the call would go to anyway, so showing it
+    // is honest, and it is the one a user edits (`us` → `eu`) rather than composes from nothing.
+    serverUrl: hostFromConnection
+      ? (provider.defaultBaseUrl ?? "")
+      : (provider.baseUrl ?? ""),
     serverUrlHint: hostFromConnection
-      ? `Your own ${provider.label} host — this IS the address every call goes to.`
+      ? provider.defaultBaseUrl
+        ? // Not "blank falls back to …": this form REQUIRES an https Server URL to submit, so the
+          // fallback is never the thing that happens here. It is prefilled instead, and the only
+          // useful sentence is the one that tells you when to change it.
+          `Your ${provider.label} region's host — this IS the address every call goes to. Prefilled with ${provider.defaultBaseUrl}; change it if that is not your region.`
+        : `Your own ${provider.label} host — this IS the address every call goes to.`
       : provider.baseUrl
         ? `Prefilled from the catalog. ${provider.label} calls go to this host regardless, so it is only a label here.`
         : "Any https URL — a label only for this provider.",
+    // The catalog's example for a real host; for the rest the field is a label, so the generic
+    // MCP-ish placeholder the form already used stays right.
+    serverUrlPlaceholder:
+      provider.serverUrlExample ??
+      provider.baseUrl ??
+      "https://mcp.example.com",
     type: "custom",
     // Connections have one token-shaped mode; the SCHEME (bearer/basic/custom header) is applied
     // by the request builder, which is why `authHeader` below is the useful thing to show.

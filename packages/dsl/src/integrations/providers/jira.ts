@@ -7,6 +7,7 @@ export const JIRA: IntegrationProvider = {
   key: "jira",
   label: "Jira",
   baseUrlFromConnection: true,
+  serverUrlExample: "https://your-site.atlassian.net",
   authScheme: "basic",
   description: "Manage Jira tickets — read, create, comment, and transition.",
   auth: "A Jira connection whose Server URL is your Atlassian site (https://you.atlassian.net) and whose token is `your-email@company.com:your-api-token` (sent as HTTP Basic).",

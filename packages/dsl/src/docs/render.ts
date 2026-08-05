@@ -96,6 +96,17 @@ function optionalKeys(a: IntegrationAction): string[] {
     .map((f) => f.key);
 }
 
+/**
+ * End a prose FRAGMENT with a full stop before another sentence follows it.
+ *
+ * `prose.serverUrl` is authored as a fragment ("your Atlassian site, e.g. `…`") because it is also
+ * dropped into "Set **Server URL** to …". Pasted straight in front of the next sentence it produced
+ * "…`us19`) Getting this wrong is…" — two sentences run together, in every Server-URL guide.
+ */
+function sentence(fragment: string): string {
+  return /[.!?]$/.test(fragment.trim()) ? fragment : `${fragment}.`;
+}
+
 /** "a token" / "an API key" — the guides read as prose, so this shouldn't be left to chance. */
 function article(noun: string): string {
   return /^[aeiou]/i.test(noun) ? "an" : "a";
@@ -200,10 +211,19 @@ export function renderIntegrationDoc(
       `- **Server URL:** not needed — Naary always calls \`${p.baseUrl}\`.`,
     );
   } else {
+    // `defaultBaseUrl` is deliberately NOT written up as "you can leave this blank" (#1110): the
+    // Connect form requires an https Server URL and the create-connection DTO rejects an empty
+    // one, so no reader of this page can take that path. It is a compatibility fallback for rows
+    // created before the provider asked for a host — a fact about why nothing broke, not an
+    // instruction — so it is stated as exactly that, in the past tense, after the requirement.
     out.push(
-      `- **Server URL: required.** ${
-        prose.serverUrl ?? "Set it to your instance's API base."
-      } Getting this wrong is the most common cause of a setup that looks right and 404s.`,
+      `- **Server URL: required.** ${sentence(
+        prose.serverUrl ?? "Set it to your instance's API base",
+      )} Getting this wrong is the most common cause of a setup that looks right and 404s.` +
+        (p.defaultBaseUrl
+          ? ` (${p.label} connections made *before* this field was asked for store no host and keep` +
+            ` calling \`${p.defaultBaseUrl}\`, so none of them broke — but every new connection sets it.)`
+          : ""),
     );
   }
   out.push("");
@@ -224,7 +244,9 @@ export function renderIntegrationDoc(
   out.push(
     !needsServerUrl(p)
       ? "3. Leave **Server URL** as the default — this provider has a fixed API base."
-      : `3. Set **Server URL** to ${prose.serverUrl ?? "your instance's API base"}.`,
+      : // No "or leave it blank" variant here even for a provider with a `defaultBaseUrl` — this is
+        // the step list for making a NEW connection, and that path rejects an empty Server URL.
+        `3. Set **Server URL** to ${prose.serverUrl ?? "your instance's API base"}.`,
   );
   out.push("4. Paste the credential into the token field and save.");
   out.push(

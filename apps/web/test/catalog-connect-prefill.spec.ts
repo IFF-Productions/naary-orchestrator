@@ -67,6 +67,40 @@ describe("catalogConnectPrefill", () => {
     expect(jira?.serverUrlHint).toMatch(/every call goes to/);
   });
 
+  /**
+   * PostHog (#1110): a per-tenant host that ALSO has a default, which is the one case where
+   * prefilling is right — `https://us.posthog.com` is the host the call goes to anyway, and a US
+   * tenant leaving it alone gets today's behaviour while an EU tenant edits two letters.
+   */
+  it("prefills PostHog's default region and names the fallback", () => {
+    const ph = catalogConnectPrefill("posthog");
+
+    expect(ph?.hostFromConnection).toBe(true);
+    expect(ph?.serverUrl).toBe("https://us.posthog.com");
+    expect(ph?.serverUrlHint).toMatch(/every call goes to/);
+    expect(ph?.serverUrlHint).toMatch(/https:\/\/us\.posthog\.com/);
+    // The form's placeholder must offer the region choice, not Atlassian's site URL.
+    expect(ph?.serverUrlPlaceholder).toMatch(/eu\.posthog\.com/);
+  });
+
+  /** The placeholder used to be one hardcoded Atlassian URL for every per-tenant host. */
+  it("gives every per-tenant host its OWN example URL", () => {
+    for (const p of INTEGRATION_PROVIDERS.filter(
+      (x) => x.baseUrlFromConnection,
+    )) {
+      const prefill = catalogConnectPrefill(p.key);
+      expect(prefill?.serverUrlPlaceholder, p.key).toBe(p.serverUrlExample);
+      expect(prefill?.serverUrlPlaceholder, p.key).toMatch(/^https:\/\//);
+    }
+    // Non-vacuous, and specific: Shopify's example is a shop, not a Jira site.
+    expect(catalogConnectPrefill("shopify")?.serverUrlPlaceholder).toMatch(
+      /myshopify\.com/,
+    );
+    expect(catalogConnectPrefill("jira")?.serverUrlPlaceholder).toMatch(
+      /atlassian\.net/,
+    );
+  });
+
   it("marks a catalog-hosted provider's URL as a label only", () => {
     expect(catalogConnectPrefill("stripe")?.serverUrlHint).toMatch(
       /only a label/,

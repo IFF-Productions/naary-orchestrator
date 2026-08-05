@@ -25,7 +25,7 @@ Read, create and update Zendesk tickets from a workflow.
 
 - **You need:** an API token, paired with your agent email.
 - **How the token is sent:** HTTP Basic — Naary base64-encodes the credential pair for you. Paste the raw `user:secret` pair, not a pre-encoded string.
-- **Server URL: required.** `https://{your-subdomain}.zendesk.com/api/v2` Getting this wrong is the most common cause of a setup that looks right and 404s.
+- **Server URL: required.** `https://{your-subdomain}.zendesk.com/api/v2`. Getting this wrong is the most common cause of a setup that looks right and 404s.
 
 ## Get your credentials
 

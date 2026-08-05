@@ -1,15 +1,29 @@
-// ── PostHog (cloud, app.posthog.com; auth = a personal API key as a Bearer.
-//    `get_me` is the credential probe) ─────────────────────────────────────────────────
+// ── PostHog (base = the CONNECTION's serverUrl, because PostHog's host is REGIONAL:
+//    us.posthog.com for US Cloud, eu.posthog.com for EU Cloud, and self-hosted has its own.
+//    PostHog's docs are explicit that requests must go to the right one. Auth = a personal
+//    API key as a Bearer; `get_me` is the credential probe) ────────────────────────────
 import type { IntegrationProvider } from "../types";
 
 export const POSTHOG: IntegrationProvider = {
   key: "posthog",
   label: "PostHog",
-  baseUrl: "https://app.posthog.com",
+  baseUrlFromConnection: true,
+  // WHY A FALLBACK, AND WHY THIS VALUE (#1110). Until now the catalog hardcoded
+  // `https://app.posthog.com`, so every existing PostHog connection was made without ever being
+  // asked for a host — and a `Connection` row records no provider key (it is a `custom`
+  // connection with a user-chosen label), so a migration has no way to tell PostHog's rows from
+  // anyone else's and backfill them. Making the host connection-supplied with no fallback would
+  // therefore fix EU/self-hosted tenants by breaking every US tenant that works today, which is a
+  // strictly worse trade. So an empty serverUrl keeps calling US Cloud, which is where the old
+  // `app.posthog.com` resolves — unchanged behaviour for everyone who works today, a host field
+  // for everyone who doesn't. (A connection that DID store `app.posthog.com` also keeps calling
+  // exactly the host it calls today; this change never rewrites a value a user typed.)
+  defaultBaseUrl: "https://us.posthog.com",
+  serverUrlExample: "https://us.posthog.com or https://eu.posthog.com",
   authScheme: "bearer",
   description:
     "Read PostHog analytics — list events and persons, get a person, add an annotation.",
-  auth: "A custom connection whose token is a PostHog personal API key — sent as a Bearer token.",
+  auth: "A custom connection whose Server URL is your PostHog region's host (https://us.posthog.com for US Cloud, https://eu.posthog.com for EU Cloud, or your own host if self-hosted) and whose token is a PostHog personal API key — sent as a Bearer token. Left blank, US Cloud is assumed.",
   actions: [
     {
       key: "list_events",

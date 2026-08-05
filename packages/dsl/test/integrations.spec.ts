@@ -1967,6 +1967,28 @@ describe("integration catalog — self-consistency (can't drift)", () => {
           true,
         );
       });
+
+      // #1110 — the two fields that only mean anything for a per-tenant host. Both are read by
+      // surfaces (the connect form's placeholder, the API's "set a Server URL" error) that used to
+      // hand-maintain the same facts and went stale silently; asserting them here is what makes
+      // deriving them safe.
+      it("names an example Server URL when the host comes from the connection", () => {
+        if (!provider.baseUrlFromConnection) return;
+        expect(
+          provider.serverUrlExample,
+          `${provider.key} takes its host from the connection but gives no example URL — the ` +
+            `connect form would show someone else's (#1110)`,
+        ).toMatch(/^https:\/\//);
+      });
+
+      it("only defaults its base URL when the host comes from the connection", () => {
+        if (provider.defaultBaseUrl === undefined) return;
+        expect(
+          provider.baseUrlFromConnection,
+          `${provider.key} sets defaultBaseUrl without baseUrlFromConnection — nothing reads it`,
+        ).toBe(true);
+        expect(provider.defaultBaseUrl).toMatch(/^https:\/\//);
+      });
       for (const action of provider.actions) {
         describe(action.key, () => {
           it("every {placeholder} is a declared path field", () => {

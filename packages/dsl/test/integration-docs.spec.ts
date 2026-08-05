@@ -186,8 +186,16 @@ describe("what the guides claim is derived, not asserted", () => {
     }
   });
 
-  /** The 6 Server-URL providers are the top setup failure; the guides must say so for exactly them. */
-  it("exactly 6 providers require a Server URL", () => {
+  /**
+   * The Server-URL providers are the top setup failure; the guides must say so for exactly them.
+   *
+   * PostHog joined the list in #1110 — its host is REGIONAL (`us.` / `eu.` / self-hosted) and the
+   * catalog used to hardcode `app.posthog.com`, which cannot serve two regions. It is the one
+   * member with a `defaultBaseUrl`, so its guide says "set it unless you're on us.posthog.com"
+   * rather than "required"; the split is asserted below so a future default can't quietly turn a
+   * genuinely required Server URL into an optional-looking one.
+   */
+  it("exactly 7 providers take their host from the connection", () => {
     expect(
       INTEGRATION_PROVIDERS.filter(needsServerUrl)
         .map((p) => p.key)
@@ -197,9 +205,31 @@ describe("what the guides claim is derived, not asserted", () => {
       "jira",
       "mailchimp",
       "mattermost",
+      "posthog",
       "shopify",
       "zendesk",
     ]);
+  });
+
+  it("only PostHog has a fallback host — for the other 6 a missing Server URL is fatal", () => {
+    expect(
+      INTEGRATION_PROVIDERS.filter((p) => p.defaultBaseUrl).map((p) => p.key),
+    ).toEqual(["posthog"]);
+  });
+
+  /**
+   * A `defaultBaseUrl` must never read as an OPTION in a guide. No create path accepts an empty
+   * Server URL — the Connect form requires https, and `CreateConnectionDto` rejects an empty
+   * string for every connection type — so "you can leave this blank" would document a path the
+   * reader cannot take. The fallback is compatibility for rows that predate the field.
+   */
+  it("tells every connection-hosted provider the Server URL is required, fallback or not", () => {
+    for (const p of INTEGRATION_PROVIDERS.filter(needsServerUrl)) {
+      expect(
+        readFileSync(pagePath(p.key), "utf8"),
+        `${p.key}.md must state the Server URL is required`,
+      ).toContain("**Server URL: required.**");
+    }
   });
 
   /**

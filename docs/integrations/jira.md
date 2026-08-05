@@ -25,7 +25,7 @@ Read, create, comment on and transition Jira issues from a workflow.
 
 - **You need:** an Atlassian API token, paired with your account email.
 - **How the token is sent:** HTTP Basic — Naary base64-encodes the credential pair for you. Paste the raw `user:secret` pair, not a pre-encoded string.
-- **Server URL: required.** your Atlassian site, e.g. `https://your-company.atlassian.net` Getting this wrong is the most common cause of a setup that looks right and 404s.
+- **Server URL: required.** your Atlassian site, e.g. `https://your-company.atlassian.net`. Getting this wrong is the most common cause of a setup that looks right and 404s.
 
 ## Get your credentials
 

@@ -40,7 +40,9 @@ import {
   getIntegrationProvider,
   pickConnectionTestAction,
   planIntegrationCall,
+  resolveIntegrationBaseUrl,
 } from "@naary/dsl";
+import type { IntegrationProvider } from "@naary/dsl";
 
 /**
  * How much of a provider's response body to read for the error excerpt. We display 200 chars;
@@ -171,28 +173,30 @@ export class ConnectionTestService {
     }
     const checkedAction = `${providerKey}.${probe.action}`;
 
-    // Base URL: the catalog's static base, or the connection's Server URL for the 6 providers with
-    // none (mattermost, deepl, shopify, mailchimp, zendesk, jira). A missing Server URL gets its
-    // OWN clear message — otherwise the probe would hit a relative/garbage URL and report a
-    // baffling 404 or "invalid URL" as if the token were at fault.
-    let baseUrl = provider.baseUrl ?? null;
-    if (provider.baseUrlFromConnection) {
-      baseUrl = conn.serverUrl?.trim() ? conn.serverUrl.trim() : null;
-      if (!baseUrl) {
-        // A config gap, not a bad credential — flag the connection as `error` (never
-        // `needs_reauth`: re-authorizing would not fix a missing URL).
-        await this.connections.setStatus(tenantId, connectionId, "error");
-        return {
-          ok: false,
-          status: "failed",
-          httpStatus: null,
-          checkedAction,
-          connectionStatus: "error",
-          message:
-            `${provider.label} has no fixed API base URL, so this connection needs a Server URL ` +
-            `(e.g. ${serverUrlHint(providerKey)}). Edit the connection and set it, then test again.`,
-        };
-      }
+    // Base URL: the catalog's static base, the connection's Server URL for the providers with none
+    // (mattermost, deepl, shopify, mailchimp, zendesk, jira, posthog), or that provider's default
+    // host when it declares one and the connection stores nothing (PostHog — #1110). Resolved by
+    // @naary/dsl, the SAME call the integration activity makes, so this probe can never check a
+    // different host than the node will call: PostHog's regional-host bug was invisible precisely
+    // because the probe was wrong in exactly the way every action was.
+    //
+    // Still no host? That gets its OWN clear message — otherwise the probe would hit a
+    // relative/garbage URL and report a baffling 404 as if the token were at fault.
+    const baseUrl = resolveIntegrationBaseUrl(provider, conn.serverUrl);
+    if (!baseUrl) {
+      // A config gap, not a bad credential — flag the connection as `error` (never
+      // `needs_reauth`: re-authorizing would not fix a missing URL).
+      await this.connections.setStatus(tenantId, connectionId, "error");
+      return {
+        ok: false,
+        status: "failed",
+        httpStatus: null,
+        checkedAction,
+        connectionStatus: "error",
+        message:
+          `${provider.label} has no fixed API base URL, so this connection needs a Server URL ` +
+          `(e.g. ${serverUrlHint(provider)}). Edit the connection and set it, then test again.`,
+      };
     }
 
     let httpStatus: number | null = null;
@@ -385,22 +389,12 @@ function classifyThrown(
 }
 
 /** Example Server URL per baseUrl-less provider, so the "set a Server URL" error is actionable.
- *  Display text only — never used to build a request. */
-function serverUrlHint(providerKey: string): string {
-  switch (providerKey) {
-    case "jira":
-      return "https://your-site.atlassian.net";
-    case "zendesk":
-      return "https://your-subdomain.zendesk.com/api/v2";
-    case "shopify":
-      return "https://your-shop.myshopify.com/admin/api/2024-01";
-    case "deepl":
-      return "https://api-free.deepl.com or https://api.deepl.com";
-    case "mailchimp":
-      return "https://<dc>.api.mailchimp.com/3.0";
-    case "mattermost":
-      return "https://your-mattermost.example.com";
-    default:
-      return "your provider's API base URL";
-  }
+ *  Display text only — never used to build a request.
+ *
+ *  Read from the CATALOG (#1110). This used to be a `switch` over provider keys here, which is a
+ *  second list of the same facts: adding a per-tenant-host provider left it silently falling
+ *  through to "your provider's API base URL" — the unhelpful sentence this function exists to
+ *  avoid. `integrations.spec` asserts every such provider carries the example. */
+function serverUrlHint(provider: IntegrationProvider): string {
+  return provider.serverUrlExample ?? "your provider's API base URL";
 }

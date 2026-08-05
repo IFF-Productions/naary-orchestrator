@@ -6,6 +6,7 @@ export const SHOPIFY: IntegrationProvider = {
   key: "shopify",
   label: "Shopify",
   baseUrlFromConnection: true,
+  serverUrlExample: "https://your-shop.myshopify.com/admin/api/2024-01",
   authScheme: { header: "X-Shopify-Access-Token" },
   description:
     "Manage a Shopify store's Admin API — read/create/update products and create orders.",
