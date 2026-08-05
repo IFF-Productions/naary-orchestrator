@@ -2,10 +2,20 @@
  * Selected-step detail card for the redesigned Run Detail screen: icon header
  * with the step's state badge, a DURATION / COST / TOKENS / REGION stat strip
  * (real values only — worker-stamped per-node duration, the node output's own
- * metered cost/tokens (Slice 2); anything unrecorded — pre-feature runs, REGION —
+ * cost/tokens (Slice 2); anything unrecorded — pre-feature runs, REGION —
  * renders "—"), and the step's own result — its output from the run ctx, or, for the
  * node the run FAILED on, that node's error (#525). The full durable run log is a
  * SEPARATE run-level panel (RunDetail's "Execution log"), not repeated per step.
+ *
+ * ESTIMATE vs MEASUREMENT (#1069). COST and TOKENS used to be presented as metered on every
+ * step, including the ones where the provider reported no usage and the worker booked the
+ * Tier-1 rule-6 fallback estimate rather than a silently-free zero. Those are different claims,
+ * and this is the screen where someone asks "what did this actually cost?" — so an estimated
+ * step now says so, in the figures themselves and in a line that explains why.
+ *
+ * Only the estimated case is marked. An unmarked step is NOT being called measured: most node
+ * types never bill at all, and every run that predates the ledger flag reports nothing either
+ * way. A marker whose absence asserted "measured" would be the same bug in the other direction.
  */
 import { Icon, type IconName } from "../../../components";
 import type { HttpFailure } from "../../../lib/api";
@@ -41,10 +51,17 @@ export interface StepDetail {
   state: StepState;
   /** Real elapsed for this step (worker-stamped, or the waiting step's age); null → "—". */
   duration: string | null;
-  /** Real metered cost of this step (from its output's costUsd); null → "—". */
+  /** Recorded cost of this step (from its output's costUsd); null → "—". */
   cost?: string | null;
-  /** Real token count of this step (from its output's totalTokens); null → "—". */
+  /** Recorded token count of this step (from its output's totalTokens); null → "—". */
   tokens?: string | null;
+  /**
+   * True when the usage ledger says this node's TOKEN counts were the rule-6 fallback ESTIMATE —
+   * the provider reported no usage, so the worker booked an estimate rather than a zero (#1060).
+   * Undefined/false ⇒ make no claim: the node either billed nothing metered, or the run predates
+   * the flag. Comes from the run state's `nodeUsage` map, never from the node's output.
+   */
+  costEstimated?: boolean;
   /** The step's output from the run ctx (undefined = none yet). */
   output: unknown;
   /** True when `output` is the run's trigger payload — i.e. this is the ENTRY node. Drives the
@@ -110,14 +127,26 @@ export function StepDetailCard({
   step: StepDetail;
   runId?: string;
 }) {
-  const stats: { label: string; value: string; color?: string }[] = [
+  // Only qualify a figure we actually HAVE. An estimated node whose output carried no cost shows
+  // "—", and "~—" would be nonsense — the tilde qualifies a number, it is not a state of its own.
+  const est = step.costEstimated === true;
+  const stats: {
+    label: string;
+    value: string;
+    color?: string;
+    estimated?: boolean;
+  }[] = [
     {
       label: "DURATION",
       value: step.duration ?? "—",
       color: step.state === "waiting" ? "var(--state-paused)" : undefined,
     },
-    { label: "COST", value: step.cost ?? "—" },
-    { label: "TOKENS", value: step.tokens ?? "—" },
+    { label: "COST", value: step.cost ?? "—", estimated: est && !!step.cost },
+    {
+      label: "TOKENS",
+      value: step.tokens ?? "—",
+      estimated: est && !!step.tokens,
+    },
     { label: "REGION", value: "—" },
   ];
 
@@ -225,6 +254,23 @@ export function StepDetailCard({
               }}
             >
               {s.label}
+              {s.estimated && (
+                <span
+                  style={{
+                    marginLeft: 5,
+                    padding: "1px 5px",
+                    borderRadius: "var(--radius-pill)",
+                    color: "var(--state-paused)",
+                    border:
+                      "1px solid color-mix(in srgb, var(--state-paused) 50%, transparent)",
+                    background:
+                      "color-mix(in srgb, var(--state-paused) 12%, transparent)",
+                    letterSpacing: ".05em",
+                  }}
+                >
+                  EST
+                </span>
+              )}
             </div>
             <div
               style={{
@@ -237,11 +283,36 @@ export function StepDetailCard({
                 whiteSpace: "nowrap",
               }}
             >
-              {s.value}
+              {/* "~" carries the qualifier even where the EST chip is clipped or unread — a
+                  screenshot of this strip should not be able to assert a measurement. */}
+              {s.estimated ? `~${s.value}` : s.value}
             </div>
           </div>
         ))}
       </div>
+
+      {/* WHY the figures above are qualified. The chip alone would leave the reader to guess
+          whether "EST" means our arithmetic is approximate or the provider told us nothing;
+          only the second is true, and it is the part that decides whether they can trust the
+          number for an invoice. Rendered only when the ledger actually says so. */}
+      {est && (
+        <div
+          style={{
+            padding: "11px 18px",
+            borderBottom: "1px solid var(--line)",
+            fontSize: "var(--text-xs)",
+            color: "var(--ink-3)",
+            lineHeight: 1.5,
+          }}
+        >
+          <strong style={{ color: "var(--state-paused)" }}>
+            Estimated, not measured.
+          </strong>{" "}
+          The provider returned no token usage for this call, so we recorded an
+          estimate rather than billing it as free. The token count — and the
+          cost derived from it — are approximate.
+        </div>
+      )}
 
       {/* Error — shown FIRST for the node the run failed on (#525): the failure happened
           here, so this is the step's own error, not a generic run message. */}

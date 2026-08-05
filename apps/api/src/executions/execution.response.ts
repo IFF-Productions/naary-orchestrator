@@ -273,6 +273,18 @@ export class RunStateResponse {
       "The per-run budget cap this run enforces (snapshotted at start, refreshed after a budget-pause resume). Null when no cap is configured or the run is closed.",
   })
   perExecutionCapUsd!: number | null;
+  @ApiProperty({
+    type: "object",
+    additionalProperties: true,
+    example: { "agent-1": { estimated: true } },
+    description:
+      "Ledger provenance of the nodes that billed: { [nodeId]: { estimated } }, where `estimated` " +
+      "says the node's TOKEN counts were the fail-safe estimate booked when the provider reported " +
+      "no usage — not a measurement. Scoped to tokens (a metered row can still carry a fallback " +
+      "PRICE). A node with no key here billed nothing metered, and the absence claims nothing. " +
+      "Cost/tokens themselves are NOT taken from the ledger — see the node output in `ctx`.",
+  })
+  nodeUsage!: Record<string, { estimated: boolean }>;
 }
 
 /** The graph snapshot a run executed — for the run-detail canvas (read-only). */

@@ -272,6 +272,27 @@ export function nodeTimeOf(
   };
 }
 
+/**
+ * Did this node's spend come from ESTIMATED token counts? (#1069)
+ *
+ * Shape-checked read of the run state's `nodeUsage` map — the usage ledger's provenance for the
+ * nodes that billed, joined on (executionId, nodeId). The node's own output cannot answer this:
+ * once a rule-6 fallback estimate has become a token count, it is the same integer a measurement
+ * would have been.
+ *
+ * Returns `true` ONLY on an explicit `estimated: true`. Absent, malformed, or `false` all mean the
+ * UI says nothing — including the false case, which is a real "measured" but needs no marker,
+ * because marking one kind of claim is what distinguishes it from the other.
+ */
+export function nodeEstimated(
+  nodeUsage: Record<string, unknown> | null | undefined,
+  nodeId: string,
+): boolean {
+  const raw = nodeUsage?.[nodeId];
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
+  return (raw as { estimated?: unknown }).estimated === true;
+}
+
 /** Compact real-duration text: "0ms" · "340ms" · "1.4s" · "3m 20s". Shared by the
  *  step timeline and the runs-list Duration columns (Slice 2). */
 export function fmtDurMs(ms: number): string {
