@@ -21,6 +21,7 @@ interface Row {
   userId: string;
   tokenHash: string;
   familyId: string;
+  label: string | null;
   createdAt: Date;
   expiresAt: Date;
   lastUsedAt: Date | null;
@@ -36,12 +37,21 @@ const { rows, cliRefreshToken, hooks } = vi.hoisted(() => {
   let seq = 0;
 
   /** Generic predicate: EVERY key in `where` must equal the row's value. Dates compare by
-   *  instant, everything else by identity. Unknown key ⇒ no match (fail closed). */
+   *  instant, everything else by identity. `{ gt }` is the one operator the session list uses
+   *  (the absolute-cap filter) and is implemented for real, because "which families are still
+   *  alive" is precisely what that screen is asserting. Unknown key or unknown operator ⇒ no
+   *  match (fail closed). */
   const matches = (row: Row, where: Record<string, unknown>): boolean =>
     Object.entries(where).every(([k, want]) => {
       const got = (row as unknown as Record<string, unknown>)[k];
       if (want instanceof Date && got instanceof Date)
         return want.getTime() === got.getTime();
+      if (want && typeof want === "object" && !(want instanceof Date)) {
+        return Object.entries(want as Record<string, unknown>).every(
+          ([op, v]) =>
+            op === "gt" && got instanceof Date && v instanceof Date && got > v,
+        );
+      }
       return got === want;
     });
 
@@ -53,6 +63,7 @@ const { rows, cliRefreshToken, hooks } = vi.hoisted(() => {
         const row = {
           id: `row-${++seq}`,
           createdAt: new Date(),
+          label: null,
           lastUsedAt: null,
           rotatedAt: null,
           revokedAt: null,
@@ -64,6 +75,13 @@ const { rows, cliRefreshToken, hooks } = vi.hoisted(() => {
       findUnique: vi.fn(
         async ({ where }: { where: Record<string, unknown> }) =>
           rows.find((r) => matches(r, where)) ?? null,
+      ),
+      findFirst: vi.fn(
+        async ({ where }: { where: Record<string, unknown> }) =>
+          rows.find((r) => matches(r, where)) ?? null,
+      ),
+      findMany: vi.fn(async ({ where }: { where: Record<string, unknown> }) =>
+        rows.filter((r) => matches(r, where)),
       ),
       updateMany: vi.fn(
         async ({
@@ -415,5 +433,276 @@ describe("revokeFamily", () => {
         at(REFRESH_ABSOLUTE_TTL_MS + DAY),
       ),
     ).toEqual({ ok: false, reason: "revoked" });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// listUserSessions — the Settings surface (#1078 §5).
+//
+// The claim under test is NOT "a query returns rows". It is that a person looking at that screen
+// sees ONE entry per laptop (not one per rotation), that every entry shown is a session which could
+// actually still refresh, and that the entries are theirs.
+// ---------------------------------------------------------------------------
+describe("listUserSessions", () => {
+  it("collapses a whole rotation lineage into ONE session row", async () => {
+    const first = await service.issue(
+      "tenant-A",
+      "user-1",
+      T0,
+      "naary CLI — laptop",
+    );
+    // Twelve hours apart — what a fortnight of daily use looks like: 14 rows, one laptop.
+    const TWELVE_HOURS = 12 * 3600 * 1000;
+    let token = first.refreshToken;
+    for (let i = 1; i <= 13; i++) {
+      token = await rotateOk(token, at(i * TWELVE_HOURS));
+    }
+
+    expect(rows).toHaveLength(14);
+    const sessions = await service.listUserSessions(
+      "tenant-A",
+      "user-1",
+      at(14 * TWELVE_HOURS),
+    );
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0]).toMatchObject({
+      familyId: first.familyId,
+      label: "naary CLI — laptop",
+      // The family's FIRST row — "signed in a fortnight ago", not "created 12 hours ago".
+      createdAt: T0,
+      // ...and its NEWEST activity, which is the last refresh.
+      lastUsedAt: at(13 * TWELVE_HOURS),
+    });
+  });
+
+  it("shows one row per DEVICE — two logins are two sessions, newest first", async () => {
+    await service.issue("tenant-A", "user-1", T0, "naary CLI — laptop");
+    await service.issue(
+      "tenant-A",
+      "user-1",
+      at(SECOND),
+      "naary CLI — desktop",
+    );
+    const sessions = await service.listUserSessions(
+      "tenant-A",
+      "user-1",
+      at(DAY),
+    );
+    // Newest activity first, so the device you just used is at the top.
+    expect(sessions.map((s) => s.label)).toEqual([
+      "naary CLI — desktop",
+      "naary CLI — laptop",
+    ]);
+  });
+
+  it("never shows a session `rotate()` would refuse — revoked, idle, or past the cap", async () => {
+    const revoked = await service.issue("tenant-A", "user-1", T0, "revoked");
+    await service.revokeFamily(revoked.familyId, at(SECOND));
+    const alive = await service.issue("tenant-A", "user-1", T0, "alive");
+    const idle = await service.issue("tenant-A", "user-1", T0, "idle");
+
+    // A day in, everything unrevoked is live.
+    expect(
+      (await service.listUserSessions("tenant-A", "user-1", at(DAY))).map(
+        (s) => s.label,
+      ),
+    ).toEqual(["alive", "idle"]);
+
+    // Past the idle window with no refresh, both are dead — and `rotate` agrees, which is the
+    // point: a row on this screen that could not refresh would let someone "revoke" nothing and
+    // believe they had acted.
+    const stale = at(REFRESH_IDLE_TTL_MS + DAY);
+    expect(await service.listUserSessions("tenant-A", "user-1", stale)).toEqual(
+      [],
+    );
+    expect((await service.rotate(idle.refreshToken, stale)).ok).toBe(false);
+
+    // Keeping `alive` refreshed keeps it — and only it — on the screen.
+    let token = alive.refreshToken;
+    for (let d = 1; d <= 40; d++) token = await rotateOk(token, at(d * DAY));
+    expect(
+      (
+        await service.listUserSessions(
+          "tenant-A",
+          "user-1",
+          at(40 * DAY + SECOND),
+        )
+      ).map((s) => s.label),
+    ).toEqual(["alive"]);
+
+    // ...until the 90-day absolute cap, which no amount of use extends.
+    expect(
+      await service.listUserSessions(
+        "tenant-A",
+        "user-1",
+        at(REFRESH_ABSOLUTE_TTL_MS + SECOND),
+      ),
+    ).toEqual([]);
+  });
+
+  it("scopes to the user AND the workspace — not one or the other", async () => {
+    const mine = await service.issue("tenant-A", "user-1", T0, "mine");
+    await service.issue(
+      "tenant-A",
+      "user-2",
+      T0,
+      "same workspace, other human",
+    );
+    await service.issue(
+      "tenant-B",
+      "user-1",
+      T0,
+      "same human, other workspace",
+    );
+
+    const sessions = await service.listUserSessions(
+      "tenant-A",
+      "user-1",
+      at(DAY),
+    );
+    // Positive AND negative in one assertion: exactly one row, and it is the right one. A test that
+    // only asserted "does not contain user-2's" would pass against a list that returned nothing.
+    expect(sessions.map((s) => s.familyId)).toEqual([mine.familyId]);
+  });
+
+  it("renders a pre-label session as a session, not as a crash", async () => {
+    // Rows minted before the `label` column existed (nullable, no backfill — inventing a device
+    // name on a security screen would be a lie). The UI shows "Unknown device".
+    const legacy = await service.issue("tenant-A", "user-1", T0);
+    const [session] = await service.listUserSessions(
+      "tenant-A",
+      "user-1",
+      at(DAY),
+    );
+    expect(session).toMatchObject({ familyId: legacy.familyId, label: null });
+  });
+
+  it("keeps the grace window's two live siblings as ONE session", async () => {
+    // Inside REFRESH_ROTATION_GRACE_MS the same token mints twice (the concurrent-CLI race), so the
+    // family briefly holds two unrotated rows. Grouping by family is what stops that surfacing as
+    // "you are signed in twice on this laptop".
+    const first = await service.issue(
+      "tenant-A",
+      "user-1",
+      T0,
+      "naary CLI — laptop",
+    );
+    await rotateOk(first.refreshToken, at(SECOND));
+    await rotateOk(
+      first.refreshToken,
+      at(SECOND + REFRESH_ROTATION_GRACE_MS / 2),
+    );
+    expect(liveRows()).toHaveLength(3);
+    expect(
+      await service.listUserSessions("tenant-A", "user-1", at(DAY)),
+    ).toHaveLength(1);
+  });
+
+  it("keeps the device label across every rotation", async () => {
+    const first = await service.issue(
+      "tenant-A",
+      "user-1",
+      T0,
+      "naary CLI — laptop",
+    );
+    const next = await service.rotate(first.refreshToken, at(SECOND));
+    // The successor carries it too, which is what lets the refreshed ACCESS token keep the device
+    // name instead of degrading to an anonymous "naary CLI session" row in the token list.
+    expect(next.ok && next.label).toBe("naary CLI — laptop");
+    expect(
+      (await service.listUserSessions("tenant-A", "user-1", at(DAY)))[0].label,
+    ).toBe("naary CLI — laptop");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// revokeUserFamily — the Revoke button. The ownership read IS the security.
+// ---------------------------------------------------------------------------
+describe("revokeUserFamily", () => {
+  it("kills the whole family, and the live token stops refreshing", async () => {
+    const first = await service.issue("tenant-A", "user-1", T0, "laptop");
+    const live = await rotateOk(first.refreshToken, at(SECOND));
+
+    expect(
+      await service.revokeUserFamily(
+        "tenant-A",
+        "user-1",
+        first.familyId,
+        at(2 * SECOND),
+      ),
+    ).toBe(true);
+    expect(
+      await service.listUserSessions("tenant-A", "user-1", at(3 * SECOND)),
+    ).toEqual([]);
+    // The assertion that matters: the CLI holding the current token is actually signed out.
+    expect(await service.rotate(live, at(3 * SECOND))).toEqual({
+      ok: false,
+      reason: "revoked",
+    });
+  });
+
+  it("refuses another human's family in the SAME workspace, and leaves it untouched", async () => {
+    const victim = await service.issue("tenant-A", "user-1", T0, "victim");
+    const live = await rotateOk(victim.refreshToken, at(SECOND));
+
+    expect(
+      await service.revokeUserFamily(
+        "tenant-A",
+        "user-2",
+        victim.familyId,
+        at(2 * SECOND),
+      ),
+    ).toBe(false);
+    // `revokeFamily` takes a BARE familyId, so "returned false" is not enough — read the rows.
+    expect(
+      rows
+        .filter((r) => r.familyId === victim.familyId)
+        .every((r) => r.revokedAt === null),
+    ).toBe(true);
+    expect((await service.rotate(live, at(3 * SECOND))).ok).toBe(true);
+  });
+
+  it("refuses the same human's family in ANOTHER workspace", async () => {
+    // #1117's inverse: one consultant, two workspaces. Signing out of A must not reach B.
+    const other = await service.issue("tenant-B", "user-1", T0, "other");
+    expect(
+      await service.revokeUserFamily(
+        "tenant-A",
+        "user-1",
+        other.familyId,
+        at(SECOND),
+      ),
+    ).toBe(false);
+    expect(rowFor(other.refreshToken)?.revokedAt ?? null).toBeNull();
+  });
+
+  it("answers the same false for unknown and already-revoked — no probe for a real family id", async () => {
+    const mine = await service.issue("tenant-A", "user-1", T0, "laptop");
+    expect(
+      await service.revokeUserFamily(
+        "tenant-A",
+        "user-1",
+        mine.familyId,
+        at(SECOND),
+      ),
+    ).toBe(true);
+    expect(
+      await service.revokeUserFamily(
+        "tenant-A",
+        "user-1",
+        mine.familyId,
+        at(DAY),
+      ),
+    ).toBe(false);
+    expect(
+      await service.revokeUserFamily(
+        "tenant-A",
+        "user-1",
+        "no-such-family",
+        at(DAY),
+      ),
+    ).toBe(false);
+    // Idempotent: the second call must not restamp the first revocation.
+    expect(rowFor(mine.refreshToken)?.revokedAt).toEqual(at(SECOND));
   });
 });

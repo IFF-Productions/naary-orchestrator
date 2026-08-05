@@ -61,6 +61,27 @@ export interface RotatedRefreshToken {
   refreshToken: string;
   /** The family's absolute cap. Unchanged by this rotation. */
   expiresAt: Date;
+  /** The family's device hint, inherited unchanged. Null for a family minted before #1078 §5. */
+  label: string | null;
+}
+
+/**
+ * ONE CLI session as a human recognises it — a rotation FAMILY, not a token (#1078 §5).
+ *
+ * Rotation mints a row on every refresh, so a laptop that has been signed in for a month is
+ * ~60 rows of the same session. Listing tokens would show that; listing families shows the laptop.
+ */
+export interface CliSessionSummary {
+  /** The family id — the handle the revoke route takes. Opaque; it is not a credential. */
+  familyId: string;
+  /** `naary CLI — <hostname>` from the login handshake, or null for a pre-#1078-§5 session. */
+  label: string | null;
+  /** When the human signed in: the FIRST token of the family, not the newest one. */
+  createdAt: Date;
+  /** Newest activity across the family — i.e. the last refresh. See {@link listUserSessions}. */
+  lastUsedAt: Date;
+  /** The family's 90-day absolute cap (uniform across its rows). */
+  expiresAt: Date;
 }
 
 export type RefreshResult =
@@ -98,11 +119,16 @@ export class CliRefreshTokenService {
   private readonly logger = new Logger(CliRefreshTokenService.name);
 
   /** Mint the FIRST token of a new rotation family (i.e. a fresh CLI login).
-   *  Returns the plaintext once — only the sha256 is stored. */
+   *  Returns the plaintext once — only the sha256 is stored.
+   *
+   *  `label` is the handshake's `naary CLI — <hostname>` device hint (#1078 §5) and is optional
+   *  ONLY so it can sit after `now` — moving it earlier would silently retarget every existing
+   *  caller that passes a clock positionally. It is display text, never a credential. */
   async issue(
     tenantId: string,
     userId: string,
     now: Date = new Date(),
+    label?: string | null,
   ): Promise<RotatedRefreshToken> {
     const token = newToken();
     const familyId = randomUUID();
@@ -113,13 +139,21 @@ export class CliRefreshTokenService {
         userId,
         tokenHash: hashToken(token),
         familyId,
+        label: label ?? null,
         // createdAt is written explicitly (rather than left to @default(now())) so it is the SAME
         // instant `expiresAt` was derived from, and so the idle window it anchors is exact.
         createdAt: now,
         expiresAt,
       },
     });
-    return { tenantId, userId, familyId, refreshToken: token, expiresAt };
+    return {
+      tenantId,
+      userId,
+      familyId,
+      refreshToken: token,
+      expiresAt,
+      label: label ?? null,
+    };
   }
 
   /**
@@ -228,6 +262,99 @@ export class CliRefreshTokenService {
     return { families: familyIds.length, tokens };
   }
 
+  /**
+   * The Settings surface (#1078 §5): ONE entry per rotation family this user holds in THIS
+   * workspace, newest activity first.
+   *
+   * Grouping by `familyId` is the whole point. A refresh mints a row every 12 hours, so a session
+   * that has been alive a month is ~60 rows; a per-TOKEN list would show a person dozens of
+   * identical entries for one laptop and the screen would stop being read. It also handles the 60s
+   * grace window for free — two live siblings are still one session.
+   *
+   * WHAT COUNTS AS ACTIVE is defined as "a family `rotate()` would still accept", and is derived
+   * from the same constants rather than a second opinion: not revoked, inside the 90-day absolute
+   * cap, and inside the 30-day idle window. A row shown here that could not actually refresh would
+   * be worse than no screen at all — a user would revoke a dead session and believe they had done
+   * something.
+   *
+   * `lastUsedAt` is the max of `lastUsedAt ?? createdAt` over the family, which in practice is the
+   * last REFRESH: `rotate()` is the only writer of `lastUsedAt`, and a successor's `createdAt` is
+   * the same instant. So its granularity is the 12h access-token TTL, not per-request — still the
+   * column that lets someone recognise a session they don't remember starting.
+   *
+   * Scoped by `(tenantId, userId)` — both from the authenticated principal, never a parameter the
+   * caller chose — which is exactly the index this table already carries.
+   */
+  async listUserSessions(
+    tenantId: string,
+    userId: string,
+    now: Date = new Date(),
+  ): Promise<CliSessionSummary[]> {
+    const rows = await getPrisma().cliRefreshToken.findMany({
+      where: { tenantId, userId, revokedAt: null, expiresAt: { gt: now } },
+      select: {
+        familyId: true,
+        label: true,
+        createdAt: true,
+        lastUsedAt: true,
+        expiresAt: true,
+      },
+    });
+
+    const byFamily = new Map<string, CliSessionSummary>();
+    for (const row of rows) {
+      const used = row.lastUsedAt ?? row.createdAt;
+      const seen = byFamily.get(row.familyId);
+      if (!seen) {
+        byFamily.set(row.familyId, {
+          familyId: row.familyId,
+          label: row.label ?? null,
+          createdAt: row.createdAt,
+          lastUsedAt: used,
+          expiresAt: row.expiresAt,
+        });
+        continue;
+      }
+      // `createdAt` is the family's OLDEST row (when the human signed in) and `lastUsedAt` its
+      // newest activity — so the two fold in opposite directions over the same set.
+      if (row.createdAt < seen.createdAt) seen.createdAt = row.createdAt;
+      if (used > seen.lastUsedAt) seen.lastUsedAt = used;
+      if (seen.label === null && row.label) seen.label = row.label;
+    }
+
+    return [...byFamily.values()]
+      .filter(
+        (s) => now.getTime() - s.lastUsedAt.getTime() <= REFRESH_IDLE_TTL_MS,
+      )
+      .sort((a, b) => b.lastUsedAt.getTime() - a.lastUsedAt.getTime());
+  }
+
+  /**
+   * Revoke ONE family, but only if it belongs to this user in this workspace (#1078 §5).
+   *
+   * The ownership read is the entire security of the Settings revoke button. `revokeFamily` takes a
+   * bare `familyId` — a global handle — so a route that passed the client's parameter straight to
+   * it would let any signed-in user sign out any other user's laptop by guessing (or, worse,
+   * observing) a family id. The `(tenantId, userId)` filter here is what makes that a 404.
+   *
+   * Returns false when the family does not exist, is already fully revoked, or is somebody else's —
+   * ONE answer for all three, so this cannot be used to probe whether a family id is real.
+   */
+  async revokeUserFamily(
+    tenantId: string,
+    userId: string,
+    familyId: string,
+    now: Date = new Date(),
+  ): Promise<boolean> {
+    const owned = await getPrisma().cliRefreshToken.findFirst({
+      where: { tenantId, userId, familyId, revokedAt: null },
+      select: { id: true },
+    });
+    if (!owned) return false;
+    await this.revokeFamily(familyId, now);
+    return true;
+  }
+
   /** The already-rotated branch: grace-window sibling, or reuse ⇒ kill the family. */
   private async afterRotation(
     row: RefreshRow,
@@ -261,6 +388,9 @@ export class CliRefreshTokenService {
         userId: row.userId,
         tokenHash: hashToken(token),
         familyId: row.familyId,
+        // INHERITED, like `expiresAt`: the device hint identifies the family, so a session must not
+        // lose its name the first time it refreshes.
+        label: row.label,
         expiresAt: row.expiresAt,
         createdAt: now,
       },
@@ -272,6 +402,7 @@ export class CliRefreshTokenService {
       familyId: row.familyId,
       refreshToken: token,
       expiresAt: row.expiresAt,
+      label: row.label,
     };
   }
 }
@@ -289,6 +420,7 @@ interface RefreshRow {
   tenantId: string;
   userId: string;
   familyId: string;
+  label: string | null;
   createdAt: Date;
   expiresAt: Date;
   lastUsedAt: Date | null;

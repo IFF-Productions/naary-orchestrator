@@ -5,6 +5,7 @@ import { AuthGuard } from "./auth.guard";
 import { CliAuthRequestService } from "./cli-auth-request.service";
 import { CliAuthController } from "./cli-auth.controller";
 import { CliRefreshTokenService } from "./cli-refresh-token.service";
+import { CliSessionsController } from "./cli-sessions.controller";
 import { FirebaseVerifier } from "./firebase-verifier";
 import { MeController } from "./me.controller";
 import { TokensController } from "./tokens.controller";
@@ -15,7 +16,14 @@ import { TokensController } from "./tokens.controller";
  *  deployments are unchanged. */
 @Global()
 @Module({
-  controllers: [MeController, TokensController, CliAuthController],
+  controllers: [
+    MeController,
+    TokensController,
+    CliAuthController,
+    // `/cli-sessions` — #1078 §5's Settings surface. Workspace-scoped (NOT @UserScoped) and
+    // read/revoked strictly for the signed-in user.
+    CliSessionsController,
+  ],
   providers: [
     ApiTokenService,
     // `/auth/cli/{start,approve,deny,exchange,refresh}` — the #1078 slice 3 handshake.
