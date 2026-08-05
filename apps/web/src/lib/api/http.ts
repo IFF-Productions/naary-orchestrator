@@ -170,19 +170,33 @@ export function subscribeActiveEnvironment(onChange: () => void): () => void {
   return () => envListeners.delete(onChange);
 }
 
-export async function http<T>(path: string, init?: RequestInit): Promise<T> {
+/**
+ * The headers EVERY call to the control plane carries: JSON content type, the bearer (fresh
+ * Firebase ID token, else the pasted `nry_` token) and the active workspace/environment scope.
+ *
+ * Extracted because the hand-rolled fetches below and in ./cli-auth — the ones that exist to read
+ * a field `http()` throws away — were each re-deriving this block. A copy that drifts loses the
+ * WORKSPACE header silently, and the server then falls back to the caller's sole/claim workspace:
+ * a request quietly answered for the wrong tenant, which is the one failure mode this app must
+ * never have. One definition, three callers.
+ */
+export async function apiHeaders(): Promise<Record<string, string>> {
   const token = await getBearerToken();
+  return {
+    "content-type": "application/json",
+    ...(token ? { authorization: `Bearer ${token}` } : {}),
+    ...(activeWorkspaceId ? { "x-workspace-id": activeWorkspaceId } : {}),
+    ...(activeEnvironmentId ? { "x-environment-id": activeEnvironmentId } : {}),
+  };
+}
+
+export async function http<T>(path: string, init?: RequestInit): Promise<T> {
   const url = `${BASE}${path}`;
   const requestInit: RequestInit = {
     ...init,
     cache: NO_STORE,
     headers: {
-      "content-type": "application/json",
-      ...(token ? { authorization: `Bearer ${token}` } : {}),
-      ...(activeWorkspaceId ? { "x-workspace-id": activeWorkspaceId } : {}),
-      ...(activeEnvironmentId
-        ? { "x-environment-id": activeEnvironmentId }
-        : {}),
+      ...(await apiHeaders()),
       ...init?.headers,
     },
   };
@@ -276,18 +290,10 @@ export async function introspectPost<T>(
   path: string,
   body: Record<string, unknown>,
 ): Promise<T> {
-  const token = await getBearerToken();
   const res = await fetch(`${BASE}${path}`, {
     method: "POST",
     cache: NO_STORE,
-    headers: {
-      "content-type": "application/json",
-      ...(token ? { authorization: `Bearer ${token}` } : {}),
-      ...(activeWorkspaceId ? { "x-workspace-id": activeWorkspaceId } : {}),
-      ...(activeEnvironmentId
-        ? { "x-environment-id": activeEnvironmentId }
-        : {}),
-    },
+    headers: await apiHeaders(),
     body: JSON.stringify(body),
   });
   if (res.status === 401) throw new UnauthorizedError();

@@ -106,6 +106,14 @@ export const router = createRouter([
             ],
           },
           {
+            // The `naary auth` consent screen (#1078 §2 slice 3). A SIBLING of /app, like the
+            // canvas: a focused decision page with no shell navigation to wander into — and,
+            // because AppShell's mode gating doesn't reach here, one a Simple-mode user can use
+            // to authorize a CLI login too.
+            path: "/app/cli-login",
+            ...lazy(() => import("./screens/app/CliLogin"), "CliLogin"),
+          },
+          {
             path: "/app",
             element: <AppShell />,
             children: [

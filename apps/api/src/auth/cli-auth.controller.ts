@@ -338,7 +338,14 @@ export class CliAuthController {
 
 /** Map a decision failure to an HTTP error. These are shown to a SIGNED-IN human who is looking at
  *  the code in their own terminal, so they are specific on purpose — unlike the exchange's opaque
- *  failure, none of them tells an anonymous caller anything about a credential. */
+ *  failure, none of them tells an anonymous caller anything about a credential.
+ *
+ *  `reason` is the machine-readable twin of `message`, added for the SPA approve page: expired,
+ *  already-used and unknown are three DIFFERENT things a human must be told apart ("something went
+ *  wrong" on a security screen is the worst possible copy), and branching a UI on English prose
+ *  breaks the first time the prose is edited. It discloses nothing the message doesn't already —
+ *  which is only safe because this route is authenticated and owner/admin-gated; the ANONYMOUS
+ *  exchange above must keep its single opaque failure, and deliberately has no `reason`. */
 function decisionError(
   reason: "unknown" | "expired" | "already_decided",
 ): BadRequestException {
@@ -351,6 +358,7 @@ function decisionError(
   return new BadRequestException({
     statusCode: 400,
     error: "cli_login_unavailable",
+    reason,
     message,
   });
 }

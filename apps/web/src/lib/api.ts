@@ -19,6 +19,7 @@
  * user is signed in, else the pasted `nry_` API token (see getBearerToken). The
  * server resolves tenantId from the token, so the client never sends it.
  */
+import { cliAuthApi } from "./api/cli-auth";
 import { companiesApi } from "./api/companies";
 import { configApi } from "./api/config";
 import { evalsApi } from "./api/evals";
@@ -30,6 +31,11 @@ import { runsApi } from "./api/runs";
 import { workersApi } from "./api/workers";
 import { workspacesApi } from "./api/workspaces";
 
+export {
+  CliLoginError,
+  type CliLoginDecision,
+  type CliLoginFailureReason,
+} from "./api/cli-auth";
 export {
   AccessNotAllowedError,
   getActiveEnvironment,
@@ -45,6 +51,7 @@ export * from "./api/types";
 export type { WorkerRow } from "./api/workers";
 
 export const api = {
+  ...cliAuthApi,
   ...evalsApi,
   ...graphsApi,
   ...runsApi,
