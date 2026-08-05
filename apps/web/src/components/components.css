@@ -808,6 +808,19 @@
   width: 440px;
   max-width: calc(100vw - 32px);
   margin: auto;
+  /* A dialog taller than the viewport would centre itself and push its own top above the edge,
+     unreachable — `margin: auto` in a flex overlay overflows in BOTH directions, so there is
+     nothing to scroll back to. The drawer next door has had `overflow-y: auto` all along; the
+     dialog never had content long enough to need it.
+
+     NOTE, so nobody credits this with more than it does: it did NOT fix the clipped-title I saw
+     while building the broker form. Measured there — 619px tall in a 900px viewport, scrollTop 0,
+     scrollHeight === clientHeight — the dialog was not overflowing at all; it was positioned at
+     top: -4.5px, i.e. the `position: fixed` overlay is resolving against a transformed ancestor
+     rather than the viewport. That is a separate, pre-existing bug on that screen and wants its
+     own fix. This rule is still right on its own terms. */
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
   animation: naaryPopIn 0.22s ease;
 }
 .drawer {
