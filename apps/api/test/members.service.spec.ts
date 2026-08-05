@@ -37,6 +37,7 @@ vi.mock("@naary/db", () => ({
 
 import type { Principal } from "../src/auth/tenant.decorator";
 import type { AuditService } from "../src/audit/audit.service";
+import type { CliRefreshTokenService } from "../src/auth/cli-refresh-token.service";
 import type { ExecutionsService } from "../src/executions/executions.service";
 import type { MailerService } from "../src/mail/mailer.service";
 import type { MembershipService } from "../src/membership/membership.service";
@@ -55,12 +56,19 @@ const heldApprovals = vi.fn().mockResolvedValue({
   runs: [],
 });
 const record = vi.fn().mockResolvedValue(undefined);
+/** #1117 — offboarding kills the user's CLI refresh families. Exercised for real (through the
+ *  REAL service, ending in a rejected rotate) in members.cli-session-revocation.spec.ts; here it
+ *  is a quiet stub, because every remove/demote in this file would otherwise call into it. */
+const revokeUserSessions = vi
+  .fn()
+  .mockResolvedValue({ families: 0, tokens: 0 });
 const svc = new MembersService(
   { invalidate } as unknown as MembershipService,
   { sendInvitation } as unknown as MailerService,
   { invalidateTenant } as unknown as PermissionsService,
   { heldApprovals } as unknown as ExecutionsService,
   { record } as unknown as AuditService,
+  { revokeUserSessions } as unknown as CliRefreshTokenService,
 );
 
 /** The invite email is fire-and-forget (void) — flush microtasks so the async IIFE settles. */

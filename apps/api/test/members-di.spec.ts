@@ -7,11 +7,13 @@ import { Test } from "@nestjs/testing";
 import { describe, expect, it } from "vitest";
 import { AuditModule } from "../src/audit/audit.module";
 import { AuditService } from "../src/audit/audit.service";
+import { CliRefreshTokenService } from "../src/auth/cli-refresh-token.service";
 import { ExecutionsService } from "../src/executions/executions.service";
 import { GraphsModule } from "../src/graphs/graphs.module";
 import { MembersModule } from "../src/members/members.module";
 import { MembershipModule } from "../src/membership/membership.module";
 import { PermissionsModule } from "../src/permissions/permissions.module";
+import { SsoModule } from "../src/sso/sso.module";
 import { MembersService } from "../src/members/members.service";
 
 /**
@@ -25,15 +27,23 @@ import { MembersService } from "../src/members/members.service";
  * ExecutionsService (#1053) is the one that DOES come through an import line, but it drags
  * ExecutionsModule's own graph behind it — so this also pins that MembersModule → ExecutionsModule
  * stays resolvable. `.compile()` runs no lifecycle hooks, so nothing here connects to Temporal.
+ *
+ * CliRefreshTokenService (#1117) is the newest of the invisible ones: MembersModule imports
+ * AuthModule explicitly for it, so the dependency is visible rather than riding @Global. That
+ * import is why SsoModule appears below — AuthModule registers AuthGuard as an EAGER APP_GUARD,
+ * so compiling it instantiates the guard and every one of its six dependencies (auth-guard-di
+ * .spec.ts is the same list). That is the point, not an inconvenience: a MembersModule that
+ * imports AuthModule fails to compile here the moment the guard's graph breaks.
  */
 describe("MembersService DI", () => {
-  it("resolves PermissionsService, AuditService and ExecutionsService", async () => {
+  it("resolves PermissionsService, AuditService, ExecutionsService and CliRefreshTokenService", async () => {
     const ref = await Test.createTestingModule({
       imports: [
         PermissionsModule,
         MembershipModule,
         AuditModule,
         GraphsModule,
+        SsoModule,
         MembersModule,
       ],
     }).compile();
@@ -41,6 +51,9 @@ describe("MembersService DI", () => {
     expect(ref.get(AuditService)).toBeInstanceOf(AuditService);
     expect(ref.get(ExecutionsService, { strict: false })).toBeInstanceOf(
       ExecutionsService,
+    );
+    expect(ref.get(CliRefreshTokenService, { strict: false })).toBeInstanceOf(
+      CliRefreshTokenService,
     );
   });
 });

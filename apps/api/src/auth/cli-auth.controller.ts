@@ -239,16 +239,27 @@ export class CliAuthController {
    * reuse) is slice 2's `CliRefreshTokenService.rotate`. This route's own job is to hand it the
    * presented token and render exactly one failure for every way it can say no.
    *
-   * KNOWN GAP, tracked separately — it is a revocation surface, not a hole in this handshake:
-   * rotation re-checks the TOKEN but not the MEMBERSHIP, so a user removed from the workspace (or
-   * demoted from owner) keeps rotating until the family's 90-day cap. That is weaker than
-   * `members.service.ts`'s "revocation is immediate", because a CliRefreshToken is keyed to a
-   * userId and outlives the Membership row. §5 already schedules the fix — "Settings should list
-   * CLI sessions… with a revoke that kills the family" — and `revokeFamily` exists and is unused
-   * outside reuse detection, waiting for exactly that caller. Not closed here because the right
-   * fix is member-removal calling `revokeFamily`, which belongs with the surface that shows the
-   * sessions, and because a membership re-check on this path would also have to answer for the
-   * legacy claim-tenant owners `AuthGuard` still backfills.
+   * MEMBERSHIP IS STILL NOT RE-CHECKED HERE, and that is now a deliberate division of labour
+   * rather than the gap #1117 described. Offboarding PUSHES: `MembersService.removeMember` and a
+   * demotion in `changeRole` call `CliRefreshTokenService.revokeUserSessions`, which kills the
+   * user's families for that workspace — so the row this route reads is already `revokedAt` and
+   * the first branch in `rotate` refuses it. Keeping the check on the write side is what lets
+   * this route stay ignorant of `Membership`, which matters because the legacy claim-tenant
+   * owners `AuthGuard` still backfills lazily (auth.guard.ts) can have NO Membership row at the
+   * instant they refresh; a fail-closed read here would lock exactly them out of the CLI.
+   *
+   * TWO RESIDUALS, both bounded and neither a rotation problem:
+   *  - the ACCESS token already minted. It is an `nry_` ApiToken with a 12h `expiresAt` and no
+   *    `userId` column, so it cannot be attributed to the removed user and is not deleted; it
+   *    stops working when it expires. Closing that window needs an owner column on ApiToken,
+   *    written at exchange + refresh — a schema change, deliberately not smuggled in here.
+   *  - a user offboarded by a path that does not delete a Membership. There is none today:
+   *    `removeMember` is the only `membership.deleteMany` in the codebase, and SCIM
+   *    de-provisioning routes through it.
+   *
+   * #1078 §5's Settings surface ("list CLI sessions… with a revoke that kills the family") and
+   * slice 4's `naary logout` are still outstanding — both are callers of the same
+   * `revokeFamily`/`revokeUserSessions` pair, not new mechanism.
    */
   @Public()
   @Throttle({ default: { limit: 30, ttl: 60_000 } })

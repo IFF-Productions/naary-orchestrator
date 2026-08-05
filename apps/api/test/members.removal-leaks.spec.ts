@@ -207,6 +207,7 @@ vi.mock("@naary/db", () => ({ getPrisma: () => prisma }));
 
 import type { Principal } from "../src/auth/tenant.decorator";
 import type { AuditService } from "../src/audit/audit.service";
+import type { CliRefreshTokenService } from "../src/auth/cli-refresh-token.service";
 import type { ExecutionsService } from "../src/executions/executions.service";
 import type { MailerService } from "../src/mail/mailer.service";
 import type { MembershipCache } from "../src/membership/membership-cache";
@@ -239,6 +240,11 @@ const svc = new MembersService(
   { invalidateTenant } as unknown as PermissionsService,
   { heldApprovals } as unknown as ExecutionsService,
   { record: vi.fn().mockResolvedValue(undefined) } as unknown as AuditService,
+  // #1117 — irrelevant to the group leak this file pins; its own coverage is
+  // members.cli-session-revocation.spec.ts.
+  {
+    revokeUserSessions: vi.fn().mockResolvedValue({ families: 0, tokens: 0 }),
+  } as unknown as CliRefreshTokenService,
 );
 
 const asOwner: Principal = { tenantId: "t-1", userId: "u-own", role: "owner" };

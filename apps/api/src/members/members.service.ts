@@ -2,11 +2,13 @@ import {
   ConflictException,
   ForbiddenException,
   Injectable,
+  Logger,
   NotFoundException,
 } from "@nestjs/common";
 import { getPrisma } from "@naary/db";
 import type { Principal } from "../auth/tenant.decorator";
 import { AuditService } from "../audit/audit.service";
+import { CliRefreshTokenService } from "../auth/cli-refresh-token.service";
 import { appBaseUrl } from "../connections/connect-return";
 import {
   NO_HELD_APPROVALS,
@@ -72,6 +74,8 @@ function assertOwnerForElevated(
  */
 @Injectable()
 export class MembersService {
+  private readonly logger = new Logger(MembersService.name);
+
   constructor(
     private readonly memberships: MembershipService,
     private readonly mailer: MailerService,
@@ -80,6 +84,9 @@ export class MembersService {
     private readonly executions: ExecutionsService,
     /** #1053 — the path-INDEPENDENT surface (see {@link removeMember}). */
     private readonly audit: AuditService,
+    /** #1117 — offboarding must kill the user's CLI rotation families (see
+     *  {@link revokeCliSessions}). From the @Global AuthModule. */
+    private readonly cliSessions: CliRefreshTokenService,
   ) {}
 
   /**
@@ -197,6 +204,26 @@ export class MembersService {
    * Change an active member's role. Owner|admin; involving admin/owner (either the
    * target's current role or the new one) is owner-only; the last owner cannot be
    * demoted (409).
+   *
+   * A DEMOTION ALSO KILLS THE TARGET'S CLI SESSIONS (#1117), and that is not belt-and-braces:
+   * a CLI access token is an `nry_` `ApiToken` row, and `AuthGuard`'s `nry_` branch resolves the
+   * principal from the TOKEN — tenant from the token row, `role: "owner"` stamped, no `userId`,
+   * no `Membership` read anywhere (auth.guard.ts, the `token.startsWith("nry_")` branch). So a
+   * CLI session's authority is NOT re-derived per request from current membership the way a
+   * Firebase/SSO session's is; demoting an owner leaves their CLI minting owner-stamped tokens
+   * off a refresh family that never looks at the role. Nothing else in this method would notice.
+   *
+   * The predicate is A REAL CHANGE INTO a role outside the {@link ELEVATED} set that gates who
+   * may hold an elevated role — the same set `CliAuthController.assertMayApprove` enforces — so
+   * it reads as "you no longer qualify to hold a CLI session, so you don't hold one."
+   *  - owner→admin is deliberately NOT a revocation: an admin may approve a CLI login and that
+   *    token already stamps owner, so there is no authority they could not re-obtain in one
+   *    command.
+   *  - `previousRole !== role` is what keeps a NO-OP write from being a revocation. Re-saving an
+   *    unchanged `member` would otherwise sign that member out of a CLI session they legitimately
+   *    hold — a restricted-token workspace stamps `member`, and a family can outlive a demotion
+   *    whose revoke failed non-fatally. Retrying such a failure means re-applying the DEMOTION,
+   *    which still matches this predicate; it does not mean re-saving any role at all.
    */
   async changeRole(
     tenantId: string,
@@ -210,6 +237,9 @@ export class MembersService {
       where: { userId_tenantId: { userId, tenantId } },
     });
     if (!target) throw new NotFoundException("No such member.");
+    // Captured BEFORE the update: the demotion check below runs after it, and "what were they
+    // before?" must not be re-read from a row the write may have moved on.
+    const previousRole = target.role;
     assertOwnerForElevated(caller, role, target.role);
     if (target.role === "owner" && role !== "owner") {
       await this.assertNotLastOwner(tenantId, "demoted");
@@ -226,6 +256,13 @@ export class MembersService {
     // admin→member makes it gated — and the permissions cache keys per subject, so a
     // stale entry outlives the role change either way.
     this.permissions.invalidateTenant(tenantId);
+    // …and, on a demotion, the CLI — which does NOT re-read the role per request (see the
+    // docstring). Non-fatal and last, for the same reasons as in `removeMember`: the role change
+    // has committed and must not be reported as failed, and the two in-memory invalidations are
+    // free while this is a DB round-trip.
+    if (previousRole !== role && !ELEVATED.has(role)) {
+      await this.revokeCliSessions(tenantId, caller, userId, "demoted");
+    }
     return activeView(row);
   }
 
@@ -316,6 +353,13 @@ export class MembersService {
     // window, not a single-process nicety. Tenant-wide because a removal also changes what
     // the group's REMAINING subjects resolve to.
     this.permissions.invalidateTenant(tenantId);
+    // …and their CLI rotation families (#1117). A `CliRefreshToken` is keyed to a userId with a
+    // 90-day absolute cap, so it OUTLIVED the Membership just deleted: a removed user kept
+    // rotating for up to a quarter, collecting a fresh 12h owner-stamped `nry_` token each time,
+    // which is precisely what "revocation is immediate" above claimed did not happen. The two
+    // in-memory invalidations run first because they are synchronous and free; this one is a DB
+    // round-trip and no cache depends on it.
+    await this.revokeCliSessions(tenantId, caller, userId, "removed");
 
     // Everything past this point is REPORTING. The removal has committed; findHeldApprovals
     // is documented never to throw, and this catch is the second belt on that promise —
@@ -331,6 +375,69 @@ export class MembersService {
     }
     this.recordStranded(tenantId, caller, userId, strandedApprovals);
     return { removed: true, strandedApprovals };
+  }
+
+  /**
+   * Kill the user's CLI rotation families in this workspace (#1117) — the offboarding half of
+   * "revocation is immediate", for both {@link removeMember} and a demotion in
+   * {@link changeRole}.
+   *
+   * ONE PATH. It delegates to `CliRefreshTokenService.revokeUserSessions`, which resolves the
+   * user's live families and revokes each through the same `revokeFamily` reuse detection uses —
+   * there is deliberately no second `cliRefreshToken.updateMany` in this file. Tenant-scoped, so
+   * a consultant removed from one workspace keeps their CLI session in the others.
+   *
+   * NON-FATAL, DELIBERATELY, and it is the ordering that earns it. Both callers have already
+   * COMMITTED their write when they get here, so throwing would report a failure for a removal
+   * (or a role change) that definitely happened — and on the SCIM path that means an IdP retrying
+   * a de-provision it already achieved, or worse, recording it as failed while the member really
+   * is gone. A removal that half-happens is the worse bug; a live refresh family is bounded by
+   * the same caps it always had. Ordering it BEFORE the delete instead would trade this for a
+   * user whose CLI is signed out while they are still a member — recoverable, but it would make
+   * a transient DB error block de-provisioning, which #1053 already ruled out for this method.
+   *
+   * A failure is therefore not swallowed quietly: it logs at ERROR **and** writes an AuditEvent,
+   * because the workspace-visible record is the only surface a directory-sync caller leaves
+   * behind, and "the family is still live" is exactly the state someone must be able to find
+   * later. Retrying is a re-run of the same change — re-applying the removal, or the demotion.
+   * The audit write is itself fire-and-forget — an audit
+   * row must never be the reason a completed removal reports an error, same as
+   * {@link recordStranded}.
+   */
+  private async revokeCliSessions(
+    tenantId: string,
+    caller: Principal,
+    userId: string,
+    verb: "removed" | "demoted",
+  ): Promise<void> {
+    try {
+      const { families, tokens } = await this.cliSessions.revokeUserSessions(
+        tenantId,
+        userId,
+      );
+      if (families > 0) {
+        this.logger.log(
+          `Revoked ${families} CLI refresh famil${families === 1 ? "y" : "ies"} ` +
+            `(${tokens} live token(s)) for a ${verb} member of tenant=${tenantId}`,
+        );
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.logger.error(
+        `CLI session revocation FAILED for a ${verb} member of tenant=${tenantId}: ${message}. ` +
+          `Their CLI refresh family is still live — re-apply the change to retry.`,
+      );
+      void this.audit
+        .record({
+          tenantId,
+          actor: caller.subject ?? caller.userId ?? "api-token",
+          action: `A member was ${verb}, but revoking their CLI sessions failed — their CLI may keep working until it expires`,
+          method: verb === "removed" ? "DELETE" : "PATCH",
+          path: `/tenants/${tenantId}/members/${userId}`,
+          statusCode: 200,
+        })
+        .catch(() => undefined);
+    }
   }
 
   /**

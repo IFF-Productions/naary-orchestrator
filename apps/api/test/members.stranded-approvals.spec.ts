@@ -134,6 +134,7 @@ vi.mock("@naary/db", () => ({ getPrisma: () => prisma }));
 
 import type { Principal } from "../src/auth/tenant.decorator";
 import type { AuditService } from "../src/audit/audit.service";
+import type { CliRefreshTokenService } from "../src/auth/cli-refresh-token.service";
 import { ExecutionsService } from "../src/executions/executions.service";
 import type { MailerService } from "../src/mail/mailer.service";
 import type { MembershipService } from "../src/membership/membership.service";
@@ -175,6 +176,10 @@ const svc = new MembersService(
   { invalidateTenant: vi.fn() } as unknown as PermissionsService,
   executions,
   { record: auditRecord } as unknown as AuditService,
+  // #1117 — not what this file pins; see members.cli-session-revocation.spec.ts.
+  {
+    revokeUserSessions: vi.fn().mockResolvedValue({ families: 0, tokens: 0 }),
+  } as unknown as CliRefreshTokenService,
 );
 
 const asOwner: Principal = { tenantId: "t-1", userId: "u-own", role: "owner" };
