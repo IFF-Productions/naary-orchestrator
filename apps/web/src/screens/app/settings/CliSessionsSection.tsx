@@ -63,15 +63,23 @@ export function CliSessionsSection() {
   const [sessions, setSessions] = useState<CliSession[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Whether the LAST read failed — distinct from `error`, which a failed REVOKE also sets. Only a
+  // failed read may suppress the empty state; a failed revoke leaves a list we genuinely fetched.
+  const [readFailed, setReadFailed] = useState(false);
 
   const load = useCallback(async () => {
     try {
       setSessions(await api.listCliSessions());
+      setReadFailed(false);
       setError(null);
     } catch (e) {
       setError(friendlyError(e, "Could not load your CLI sessions."));
-      // A failed load must not leave the skeleton up forever pretending to be busy — but it must
-      // not render the empty state either, which would read as "you have no sessions".
+      // A failed read must not leave the skeleton up forever pretending to be busy — and it must
+      // NOT fall through to the empty state, which the previous version did: setting `[]` here
+      // rendered "No CLI sessions" on a screen someone opens BECAUSE they suspect a session they
+      // did not start. That is the page asserting the exact reassurance it has no evidence for.
+      // `readFailed` keeps the two apart: we asked and there are none, versus we could not ask.
+      setReadFailed(true);
       setSessions((prev) => prev ?? []);
     }
   }, []);
@@ -147,7 +155,35 @@ export function CliSessionsSection() {
             Loading sessions…
           </div>
         )}
-        {sessions?.length === 0 && (
+        {readFailed && sessions?.length === 0 && (
+          <div
+            style={{
+              padding: "16px 18px",
+              fontSize: "var(--text-sm)",
+              color: "var(--ink-3)",
+            }}
+          >
+            Your sessions could not be loaded, so this list is not showing them
+            — it does not mean you have none.{" "}
+            <button
+              type="button"
+              onClick={() => void load()}
+              style={{
+                background: "none",
+                border: "none",
+                padding: 0,
+                font: "inherit",
+                color: "var(--brand)",
+                cursor: "pointer",
+                textDecoration: "underline",
+              }}
+            >
+              Try again
+            </button>
+            .
+          </div>
+        )}
+        {!readFailed && sessions?.length === 0 && (
           <div
             style={{
               padding: "16px 18px",

@@ -19,14 +19,18 @@ export function ago(iso: string, now: number = Date.now()): string {
   const then = Date.parse(iso);
   if (Number.isNaN(then)) return "unknown";
   const delta = now - then;
+  // FLOOR, not round, at every unit. Rounding reads UP across the boundary the next branch was
+  // written for: 59.7 minutes is `< HOUR`, so `Math.round` produced "60 minutes ago" instead of
+  // handing over to "an hour ago", and 6.7 days produced "7 days ago" instead of the absolute date.
+  // Flooring makes each unit hand over exactly where its guard says it does.
   if (delta < 2 * MINUTE) return "just now";
-  if (delta < HOUR) return `${Math.round(delta / MINUTE)} minutes ago`;
+  if (delta < HOUR) return `${Math.floor(delta / MINUTE)} minutes ago`;
   if (delta < DAY) {
-    const h = Math.round(delta / HOUR);
+    const h = Math.floor(delta / HOUR);
     return h === 1 ? "an hour ago" : `${h} hours ago`;
   }
   if (delta < 7 * DAY) {
-    const d = Math.round(delta / DAY);
+    const d = Math.floor(delta / DAY);
     return d === 1 ? "yesterday" : `${d} days ago`;
   }
   return new Date(then).toLocaleDateString();

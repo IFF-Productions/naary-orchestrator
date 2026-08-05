@@ -22,6 +22,30 @@ describe("ago", () => {
     expect(ago(before(5_000), NOW)).toBe("just now");
     expect(ago(before(20 * MINUTE), NOW)).toBe("20 minutes ago");
     expect(ago(before(HOUR), NOW)).toBe("an hour ago");
+  });
+
+  /**
+   * The boundaries, which are exactly where a round-based implementation goes wrong and where
+   * nobody thinks to look. Review on #1123 caught "60 minutes ago" and "7 days ago" — each one a
+   * unit refusing to hand over to the branch written to take it.
+   */
+  it("hands over cleanly at each unit boundary — never '60 minutes' or '7 days'", () => {
+    // Just under an hour must stay in minutes, and must not round up INTO the hour.
+    expect(ago(before(HOUR - 1_000), NOW)).toBe("59 minutes ago");
+    expect(ago(before(HOUR - 1_000), NOW)).not.toContain("60");
+    // Just under a day stays in hours rather than becoming "24 hours"/"yesterday".
+    expect(ago(before(DAY - 1_000), NOW)).toBe("23 hours ago");
+    // Just under a week stays relative; "7 days ago" would mean the absolute-date branch never
+    // gets the input its own guard reserves for it.
+    expect(ago(before(7 * DAY - 1_000), NOW)).toBe("6 days ago");
+    expect(ago(before(7 * DAY - 1_000), NOW)).not.toContain("7 days");
+    // And the far side of each boundary is the next unit, not a repeat of the last.
+    expect(ago(before(DAY), NOW)).toBe("yesterday");
+  });
+
+  it("reads a future timestamp as 'just now' — a skewed clock must not say 'in 3 minutes'", () => {
+    // The server is the only clock that decides anything; this is a display string.
+    expect(ago(new Date(NOW + 3 * MINUTE).toISOString(), NOW)).toBe("just now");
     expect(ago(before(5 * HOUR), NOW)).toBe("5 hours ago");
     expect(ago(before(DAY), NOW)).toBe("yesterday");
     expect(ago(before(4 * DAY), NOW)).toBe("4 days ago");
