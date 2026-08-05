@@ -184,16 +184,30 @@ export function Switch({
  *
  * The inner tile is `aria-hidden` presentation: the button keeps `role="checkbox"`, so this stays
  * ONE control (a nested interactive element is the bug #511's Settings fix was about).
+ *
+ * NAME IT. This renders `role="checkbox"` on a `<button>`, whose accessible name comes ONLY from
+ * `aria-labelledby` / `aria-label` / its own content — and its content is a decorative tick. Two
+ * things that look like they name it do not: a wrapping `<label>` (implicit labelling applies to
+ * form controls, not to a `<button>`), and a labelled ancestor row (that names the ROW; the
+ * checkbox is a separately focusable child). Measured on the built approvals screen before this:
+ * 4 of 4 `role="checkbox"` elements had NO accessible name. Prefer `ariaLabelledBy` pointing at
+ * the visible text that already sits beside the box over duplicating that string.
  */
 export function Checkbox({
   checked,
   onChange,
   hitArea,
+  ariaLabel,
+  ariaLabelledBy,
 }: {
   checked: boolean;
   onChange?: (v: boolean) => void;
   /** Square hit-area size in px. Omit for the default, where the 18px tile IS the target. */
   hitArea?: number;
+  /** Accessible name. Use when there is no visible label to point at. */
+  ariaLabel?: string;
+  /** Id of the visible element that names this box — preferred over `ariaLabel` when one exists. */
+  ariaLabelledBy?: string;
 }) {
   const cls = `check${checked ? " checked" : ""}`;
   if (hitArea === undefined) {
@@ -202,6 +216,8 @@ export function Checkbox({
         type="button"
         role="checkbox"
         aria-checked={checked}
+        aria-label={ariaLabel}
+        aria-labelledby={ariaLabelledBy}
         className={cls}
         onClick={() => onChange?.(!checked)}
       >
@@ -214,6 +230,8 @@ export function Checkbox({
       type="button"
       role="checkbox"
       aria-checked={checked}
+      aria-label={ariaLabel}
+      aria-labelledby={ariaLabelledBy}
       // Moves global.css's `:focus-visible` ring off this transparent box and onto the tile —
       // see the `.check-hit` rules in components.css.
       className="check-hit"

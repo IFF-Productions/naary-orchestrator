@@ -454,8 +454,16 @@ export function Workflows() {
                       cursor: "pointer",
                     }}
                   >
-                    <Checkbox checked={on} />
-                    <Tag color={t.color ?? undefined}>{t.name}</Tag>
+                    {/* The row is the `menuitemcheckbox` and carries the state; this box only
+                        DRAWS it (no `onChange`). Naming it from the tag beside it keeps the
+                        announcement useful for anyone who lands on it directly. */}
+                    <Checkbox
+                      checked={on}
+                      ariaLabelledBy={`tag-filter-${t.id}`}
+                    />
+                    <Tag color={t.color ?? undefined}>
+                      <span id={`tag-filter-${t.id}`}>{t.name}</span>
+                    </Tag>
                     <span
                       style={{
                         marginLeft: "auto",

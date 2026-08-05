@@ -162,9 +162,16 @@ export function WorkflowTagsDialog({
             onClick={() => toggle(t.id)}
           >
             {/* Display-only: the wrapping label handles the click (an onChange here would
-                double-toggle, since the checkbox's click also bubbles to the label). */}
-            <Checkbox checked={selected.has(t.id)} />
-            <Tag color={t.color ?? undefined}>{t.name}</Tag>
+                double-toggle, since the checkbox's click also bubbles to the label). The label
+                does NOT name it either — implicit labelling reaches form controls, not a
+                `<button role="checkbox">` — so it points at the tag name explicitly. */}
+            <Checkbox
+              checked={selected.has(t.id)}
+              ariaLabelledBy={`wf-tag-${t.id}`}
+            />
+            <Tag color={t.color ?? undefined}>
+              <span id={`wf-tag-${t.id}`}>{t.name}</span>
+            </Tag>
             <span style={{ fontSize: "var(--text-xs)", color: "var(--ink-3)" }}>
               {t.workflowCount} workflow{t.workflowCount === 1 ? "" : "s"}
             </span>

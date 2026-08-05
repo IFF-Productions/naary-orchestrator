@@ -97,12 +97,16 @@ export function GrantMatrix({
             <span onClick={(e) => e.stopPropagation()}>
               <Checkbox
                 checked={!createBlocked && draft[v.field]}
+                // Named by the verb label beside it. The row's `role="button"` names the ROW;
+                // this box is a separately focusable child and inherits nothing from it.
+                ariaLabelledBy={`grant-verb-${v.field}`}
                 onChange={(next) =>
                   !createBlocked && onChange({ ...draft, [v.field]: next })
                 }
               />
             </span>
             <span
+              id={`grant-verb-${v.field}`}
               style={{
                 width: 74,
                 flex: "none",
@@ -284,8 +288,12 @@ export function GrantEditorDialog({
                       cursor: "pointer",
                     }}
                   >
-                    <Checkbox checked={on} />
+                    <Checkbox
+                      checked={on}
+                      ariaLabelledBy={`grant-wf-${w.workflowKey}`}
+                    />
                     <span
+                      id={`grant-wf-${w.workflowKey}`}
                       style={{
                         fontSize: "var(--text-sm)",
                         color: "var(--ink)",
@@ -358,7 +366,10 @@ export function GrantEditorDialog({
                           cursor: "pointer",
                         }}
                       >
-                        <Checkbox checked={on} />
+                        <Checkbox
+                          checked={on}
+                          ariaLabelledBy={`grant-tag-${t.id}`}
+                        />
                         <span
                           style={{
                             width: 9,
@@ -369,6 +380,7 @@ export function GrantEditorDialog({
                           }}
                         />
                         <span
+                          id={`grant-tag-${t.id}`}
                           style={{
                             fontSize: "var(--text-sm)",
                             color: "var(--ink)",
