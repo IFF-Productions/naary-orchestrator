@@ -305,6 +305,18 @@ describe("demotion kills the CLI session too (#1117)", () => {
     expect((await cliSessions.rotate(current)).ok).toBe(true);
   });
 
+  it("leaves the session alone when the role did not actually change", async () => {
+    // A no-op PATCH — an admin re-saving an unchanged role — is not a demotion, and must not
+    // sign a plain member out of a CLI session they legitimately hold (a workspace with grants
+    // enforced stamps restricted tokens `member`, and a family can outlive a failed revoke).
+    seedMember("t-1", "u-cli", "member");
+    const current = await rotateOk(await cliLogin("t-1", "u-cli"));
+
+    await svc.changeRole("t-1", asOwner, "u-cli", "member");
+
+    expect((await cliSessions.rotate(current)).ok).toBe(true);
+  });
+
   it("leaves the session alone on a PROMOTION to owner", async () => {
     seedMember("t-1", "u-cli", "admin");
     const current = await rotateOk(await cliLogin("t-1", "u-cli"));

@@ -213,14 +213,17 @@ export class MembersService {
    * Firebase/SSO session's is; demoting an owner leaves their CLI minting owner-stamped tokens
    * off a refresh family that never looks at the role. Nothing else in this method would notice.
    *
-   * The predicate is the NEW role, against the same {@link ELEVATED} set that gates who may hold
-   * elevated roles — and it is the same set `CliAuthController.assertMayApprove` enforces, so it
-   * reads as "you no longer qualify to hold a CLI session, so you don't hold one." owner→admin is
-   * deliberately NOT a revocation: an admin may approve a CLI login and that token already stamps
-   * owner, so there is no authority they could not re-obtain in one command. Written as a plain
-   * `!ELEVATED.has(role)` rather than "was elevated and now isn't" so that a member→member or
-   * member→viewer write also heals a family left alive by an earlier non-fatal revoke failure;
-   * for a user who never used the CLI it is one indexed read that finds nothing.
+   * The predicate is A REAL CHANGE INTO a role outside the {@link ELEVATED} set that gates who
+   * may hold an elevated role — the same set `CliAuthController.assertMayApprove` enforces — so
+   * it reads as "you no longer qualify to hold a CLI session, so you don't hold one."
+   *  - owner→admin is deliberately NOT a revocation: an admin may approve a CLI login and that
+   *    token already stamps owner, so there is no authority they could not re-obtain in one
+   *    command.
+   *  - `previousRole !== role` is what keeps a NO-OP write from being a revocation. Re-saving an
+   *    unchanged `member` would otherwise sign that member out of a CLI session they legitimately
+   *    hold — a restricted-token workspace stamps `member`, and a family can outlive a demotion
+   *    whose revoke failed non-fatally. Retrying such a failure means re-applying the DEMOTION,
+   *    which still matches this predicate; it does not mean re-saving any role at all.
    */
   async changeRole(
     tenantId: string,
@@ -234,6 +237,9 @@ export class MembersService {
       where: { userId_tenantId: { userId, tenantId } },
     });
     if (!target) throw new NotFoundException("No such member.");
+    // Captured BEFORE the update: the demotion check below runs after it, and "what were they
+    // before?" must not be re-read from a row the write may have moved on.
+    const previousRole = target.role;
     assertOwnerForElevated(caller, role, target.role);
     if (target.role === "owner" && role !== "owner") {
       await this.assertNotLastOwner(tenantId, "demoted");
@@ -254,7 +260,7 @@ export class MembersService {
     // docstring). Non-fatal and last, for the same reasons as in `removeMember`: the role change
     // has committed and must not be reported as failed, and the two in-memory invalidations are
     // free while this is a DB round-trip.
-    if (!ELEVATED.has(role)) {
+    if (previousRole !== role && !ELEVATED.has(role)) {
       await this.revokeCliSessions(tenantId, caller, userId, "demoted");
     }
     return activeView(row);
@@ -393,8 +399,8 @@ export class MembersService {
    * A failure is therefore not swallowed quietly: it logs at ERROR **and** writes an AuditEvent,
    * because the workspace-visible record is the only surface a directory-sync caller leaves
    * behind, and "the family is still live" is exactly the state someone must be able to find
-   * later. Retrying is a one-click re-run of the same change (see the `changeRole` docstring on
-   * why an idempotent re-write heals it). The audit write is itself fire-and-forget — an audit
+   * later. Retrying is a re-run of the same change — re-applying the removal, or the demotion.
+   * The audit write is itself fire-and-forget — an audit
    * row must never be the reason a completed removal reports an error, same as
    * {@link recordStranded}.
    */
