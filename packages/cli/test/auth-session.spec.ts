@@ -255,6 +255,25 @@ describe("a 401 mid-command renews the session instead of failing it", () => {
     expect(readConfigFile(cfg).refreshToken).toBe("nryr_first");
   });
 
+  it("keeps the session on a 400 too — that is a proxy or a validation error, not a dead family", async () => {
+    // The server's only "your family is gone" answer is 401. A 400 on this route comes from the
+    // ValidationPipe or from something in the middle; wiping a 90-day refresh token because a
+    // captive portal answered first would be a self-inflicted logout.
+    const cfg = tempConfig({
+      token: "nry_expired",
+      refreshToken: "nryr_first",
+    });
+    const portal: FetchLike = async () => ({
+      ok: false,
+      status: 400,
+      text: async () => "<html>sign in to the wifi</html>",
+    });
+    await expect(
+      refreshSession({ apiUrl: origin, fetch: portal, file: cfg }),
+    ).resolves.toBeUndefined();
+    expect(readConfigFile(cfg).refreshToken).toBe("nryr_first");
+  });
+
   it("does nothing when there is no refresh token to spend", async () => {
     const cfg = tempConfig({ token: "nry_manual" });
     await expect(

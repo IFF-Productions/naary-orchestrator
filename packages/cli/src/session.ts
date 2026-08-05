@@ -134,7 +134,12 @@ export async function refreshSession(
   });
   const raw = await res.text();
 
-  if (res.status === 401 || res.status === 400) {
+  // 401 and ONLY 401. That is the server's single answer for a dead family (its `INVALID_REFRESH`),
+  // and the only status that means the stored credentials are worthless. A 400 on this route comes
+  // from the global ValidationPipe or from something in the middle — a proxy, a captive portal —
+  // and treating that as "session over" would destroy a perfectly good 90-day refresh token
+  // because hotel wifi answered first. Same reasoning as the 429/5xx branch below.
+  if (res.status === 401) {
     // The family is gone: expired, idle-expired, or revoked by reuse detection. Clear the dead
     // credentials so the next command fails with "not logged in" instead of another futile round
     // trip, and tell the user the one thing they can act on.
@@ -158,11 +163,28 @@ export async function refreshSession(
  * Returns false if the call could not be made (offline, server down) — the caller still clears the
  * local file, because a `logout` that refuses to forget the credentials on this laptop because the
  * network is down is the wrong failure.
+ *
+ * A REFRESH TOKEN IS THE PROOF THAT THIS IS OURS TO DESTROY. Without one, the stored `token` was
+ * pasted in by hand (`naary auth login --token`, still the only route open to a plain member) — a
+ * Settings or CI credential that other systems may share. Sending it here would delete it outright,
+ * turning "forget my local session" into "revoke a shared token". So a file with no refresh token
+ * is a local-only logout, and nothing is sent at all. The server refuses to delete a non-CLI token
+ * as well; this is the near half of that same guard.
+ *
+ * `explicit` overrides the file, for the one caller that needs it: re-logging in has to revoke the
+ * session it just REPLACED, which is no longer the one on disk.
  */
-export async function revokeSession(deps: SessionDeps): Promise<boolean> {
+export async function revokeSession(
+  deps: SessionDeps,
+  explicit?: { refreshToken?: string; accessToken?: string },
+): Promise<boolean> {
   const file = deps.file ?? configPath();
-  const cfg = readConfigFile(file);
-  if (!cfg.refreshToken && !cfg.token) return true;
+  const stored = readConfigFile(file);
+  const cfg = explicit ?? {
+    refreshToken: stored.refreshToken,
+    accessToken: stored.token,
+  };
+  if (!cfg.refreshToken) return true;
   try {
     const res = await deps.fetch(
       buildRootUrl(deps.apiUrl, "/auth/cli/logout"),
@@ -174,7 +196,7 @@ export async function revokeSession(deps: SessionDeps): Promise<boolean> {
         },
         body: JSON.stringify({
           refreshToken: cfg.refreshToken,
-          accessToken: cfg.token,
+          accessToken: cfg.accessToken,
         }),
       },
     );

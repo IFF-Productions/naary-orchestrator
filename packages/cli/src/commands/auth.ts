@@ -93,7 +93,29 @@ export async function authLogin(
   }
 
   if (Object.keys(prefs).length) updateConfigFile(prefs, env.configFile);
+  const replaced = readSession(env.configFile);
   saveSession(result.session, env.configFile);
+
+  /**
+   * Retire the session this one replaced. Without it, logging in again leaves the OLD refresh
+   * family live to its 90-day cap with nobody holding it — a credential that can still mint access
+   * tokens and that the user believes they replaced.
+   *
+   * AFTER the new session is stored, never before: revoking up front would destroy a working
+   * session on behalf of a login that might then be denied or time out. Best-effort — the login
+   * succeeded, and a failure to tidy up must not turn it into an error. Skipped when the previous
+   * credential had no refresh token, because then it was hand-pasted and is not ours to revoke.
+   */
+  if (replaced?.refreshToken) {
+    await revokeSession(
+      { apiUrl, fetch: env.fetch, file: env.configFile },
+      {
+        refreshToken: replaced.refreshToken,
+        accessToken: replaced.accessToken,
+      },
+    ).catch(() => false);
+  }
+
   const workspace = result.session.tenantId
     ? ` for workspace ${result.session.tenantId}`
     : "";

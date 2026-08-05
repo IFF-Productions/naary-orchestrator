@@ -159,6 +159,30 @@ describe("naary auth login (browser)", () => {
     });
   });
 
+  it("retires the session it replaced, so a re-login does not leave a live family behind", async () => {
+    writeConfigFile(
+      { token: "nry_old", refreshToken: "nryr_old", tenantId: "tenant-A" },
+      file,
+    );
+    responses = [START_OK, AUTHORIZED, { status: 204 }];
+    expect(await run(["auth", "login"], ctx())).toBe(0);
+
+    const logout = requests.find((r) => r.url.includes("/logout"));
+    expect(logout?.body).toEqual({
+      refreshToken: "nryr_old",
+      accessToken: "nry_old",
+    });
+    // The NEW session is what survives — the tidy-up must not touch it.
+    expect(readConfigFile(file).refreshToken).toBe("nryr_refresh");
+  });
+
+  it("does not revoke a hand-pasted token when a browser login replaces it", async () => {
+    writeConfigFile({ token: "nry_settings" }, file);
+    responses = [START_OK, AUTHORIZED];
+    expect(await run(["auth", "login"], ctx())).toBe(0);
+    expect(requests.some((r) => r.url.includes("/logout"))).toBe(false);
+  });
+
   it("labels the session with this device, so it is revocable in Settings", async () => {
     responses = [START_OK, AUTHORIZED];
     await run(["auth", "login"], ctx());
@@ -174,6 +198,16 @@ describe("naary auth login --token (the hand-pasted path)", () => {
     expect(requests).toHaveLength(0);
     expect(readConfigFile(file).token).toBe("nry_manual");
     expect(out.join("\n")).not.toContain("nry_manual"); // masked, never echoed whole
+  });
+
+  it("logging out of a PASTED token never sends it to the server to be deleted", async () => {
+    // The discriminating case for `revokeByToken`: `--token` is a Settings/CI credential — often
+    // shared with other systems, and the only route open to a plain member. `logout` means "forget
+    // my local session"; deleting that token outright would be a different and much worse thing.
+    await run(["auth", "login", "--token", "nry_settings"], ctx());
+    expect(await run(["auth", "logout"], ctx())).toBe(0);
+    expect(requests).toHaveLength(0);
+    expect(readConfigFile(file).token).toBeUndefined();
   });
 
   it("clears a previous browser session rather than leaving its refresh token behind", async () => {

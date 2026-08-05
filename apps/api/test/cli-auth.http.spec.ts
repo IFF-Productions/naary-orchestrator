@@ -732,6 +732,21 @@ describe("logout", () => {
     expect(await postNoContent("/auth/cli/logout", { refreshToken })).toBe(204);
   });
 
+  it("refuses to delete a hand-made token even when handed it directly", async () => {
+    // The case that discriminates, and the one a browser-login-only test cannot reach: `--token`
+    // is still supported (it is the only route open to a plain member), so a config file can hold
+    // a Settings/CI credential — shared with other systems — and a logout will present it here.
+    // Deleting it would turn "forget my local session" into "revoke a shared token", permanently.
+    const svc = new ApiTokenService();
+    const settings = await svc.mint("tenant-A", "MCP token");
+
+    expect(
+      await postNoContent("/auth/cli/logout", { accessToken: settings.token }),
+    ).toBe(204); // still opaque — no hint that this one was refused
+    expect((await get("/me", asUser(settings.token))).status).toBe(200);
+    expect(tables.apiToken.map((t) => t.label)).toContain("MCP token");
+  });
+
   it("cannot delete a token it was not given", async () => {
     // The presented hash IS the scope on this unauthenticated route. Bob's session is untouched by
     // Alice logging out, and a hand-made Settings token is not collateral damage either.
