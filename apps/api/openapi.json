@@ -606,6 +606,162 @@
         ]
       }
     },
+    "/cli-sessions": {
+      "get": {
+        "operationId": "CliSessionsController_list",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CliSessionView"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "List my active CLI sessions",
+        "tags": [
+          "cli-sessions"
+        ]
+      }
+    },
+    "/cli-sessions/{familyId}": {
+      "delete": {
+        "operationId": "CliSessionsController_revoke",
+        "parameters": [
+          {
+            "name": "familyId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CliSessionRevokedResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Resource not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "summary": "Revoke one of my CLI sessions",
+        "tags": [
+          "cli-sessions"
+        ]
+      }
+    },
     "/tenants/{id}/groups": {
       "get": {
         "description": "Every group in the workspace with its members, attached API tokens, and grants. Owner/admin only.",
@@ -18185,6 +18341,52 @@
             "description": "The current `nry_` access token. Deleted, so the session ends now rather than in 12 hours."
           }
         }
+      },
+      "CliSessionView": {
+        "type": "object",
+        "properties": {
+          "familyId": {
+            "type": "string",
+            "description": "Opaque handle for the rotation family. The id DELETE takes; not a credential."
+          },
+          "label": {
+            "type": "string",
+            "nullable": true,
+            "example": "naary CLI — hassans-macbook",
+            "description": "Device hint from the login handshake, or null for a session created before labels existed."
+          },
+          "createdAt": {
+            "type": "string",
+            "description": "ISO time the human signed in (the FIRST token of the family)."
+          },
+          "lastUsedAt": {
+            "type": "string",
+            "description": "ISO time of the newest activity in the family — in practice its last token refresh."
+          },
+          "expiresAt": {
+            "type": "string",
+            "description": "ISO 90-day absolute expiry. The session dies here regardless of use."
+          }
+        },
+        "required": [
+          "familyId",
+          "label",
+          "createdAt",
+          "lastUsedAt",
+          "expiresAt"
+        ]
+      },
+      "CliSessionRevokedResponse": {
+        "type": "object",
+        "properties": {
+          "revoked": {
+            "type": "boolean",
+            "example": true
+          }
+        },
+        "required": [
+          "revoked"
+        ]
       },
       "GroupMemberResponse": {
         "type": "object",

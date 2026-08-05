@@ -201,6 +201,21 @@ export async function authLogout(
     return 0;
   }
 
+  /**
+   * A hand-pasted token has no server-side session to end — and saying "Session revoked." about a
+   * shared Settings/CI credential that is still perfectly live is the exact false reassurance the
+   * offline branch below exists to avoid. Nothing is sent (see `revokeSession`), so nothing may be
+   * claimed.
+   */
+  if (!session.refreshToken) {
+    clearSession(env.configFile);
+    ctx.io.out(`Cleared the stored token from ${env.configFile}.`);
+    ctx.io.out(
+      "It was not a browser session, so nothing was revoked server-side — delete it in Settings if it should stop working.",
+    );
+    return 0;
+  }
+
   const revoked = await revokeSession({
     apiUrl: config.apiUrl,
     fetch: env.fetch,

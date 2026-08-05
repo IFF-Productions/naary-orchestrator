@@ -208,6 +208,10 @@ describe("naary auth login --token (the hand-pasted path)", () => {
     expect(await run(["auth", "logout"], ctx())).toBe(0);
     expect(requests).toHaveLength(0);
     expect(readConfigFile(file).token).toBeUndefined();
+    // And it must not CLAIM a revocation it did not perform: the token is still live, and telling
+    // someone otherwise is the same false reassurance the offline branch is careful to avoid.
+    expect(out.join("\n")).not.toContain("Session revoked");
+    expect(out.join("\n")).toContain("nothing was revoked server-side");
   });
 
   it("clears a previous browser session rather than leaving its refresh token behind", async () => {
