@@ -7,6 +7,7 @@ import { getPrisma } from "@naary/db";
 import { AuditService } from "../audit/audit.service";
 import type { Principal } from "../auth/tenant.decorator";
 import { MembersService } from "../members/members.service";
+import { SCIM_BASE_PATH } from "./scim-body-parser";
 import { canonical, ScimUsersService } from "./scim-users.service";
 import type { ScimUser } from "./scim-user.response";
 import type { ScimWriteContext } from "./scim.guard";
@@ -50,6 +51,9 @@ function scimPrincipal(ctx: ScimWriteContext): Principal {
     subject: `scim:${ctx.connectionId}`,
   };
 }
+
+/** The route an audited event actually happened on — `/scim/v2/Users/{the id the IdP called}`. */
+const resourcePath = (id: string): string => `${SCIM_BASE_PATH}/Users/${id}`;
 
 /** Bare `local@domain`, no display names, no angle brackets — an IdP asserting a userName we
  *  cannot key on is a bad payload, not a subject we should guess at. */
@@ -197,13 +201,21 @@ export class ScimProvisioningService {
       }
       throw err;
     }
-    this.record(
-      ctx,
-      `SCIM provisioned ${email} as an invited member`,
-      "POST",
-      201,
+    // Recorded AFTER the resource renders, so the 201 in the row is the status the caller
+    // actually received. Auditing "201" before the response can still fail would be the same
+    // class of lie the de-provision post-condition exists to prevent.
+    const user = await this.users.renderByEmail(
+      ctx.tenantId,
+      email,
+      externalId,
     );
-    return this.users.renderByEmail(ctx.tenantId, email, externalId);
+    this.record(ctx, {
+      action: `SCIM provisioned ${email} as an invited member (role "${PROVISIONED_ROLE}")`,
+      method: "POST",
+      path: `${SCIM_BASE_PATH}/Users`,
+      statusCode: 201,
+    });
+    return user;
   }
 
   /**
@@ -274,7 +286,7 @@ export class ScimProvisioningService {
           membership.userId,
         );
       } catch (err) {
-        throw this.refused(ctx, err, email, {
+        throw this.refused(ctx, err, email, id, {
           kind: "member",
           role: membership.role,
         });
@@ -283,12 +295,12 @@ export class ScimProvisioningService {
       // happen, and answering 204 would tell the IdP a terminated user lost access when they
       // did not. Fail loudly instead — a 500 is retried; a false success is never revisited.
       if (await this.membershipFor(ctx.tenantId, email)) {
-        this.record(
-          ctx,
-          `SCIM de-provision of ${email} FAILED: the membership still exists`,
-          "DELETE",
-          500,
-        );
+        this.record(ctx, {
+          action: `SCIM de-provision of ${email} FAILED: the membership still exists`,
+          method: "DELETE",
+          path: resourcePath(id),
+          statusCode: 500,
+        });
         throw new ScimError(
           500,
           "De-provisioning did not remove the membership.",
@@ -307,7 +319,7 @@ export class ScimProvisioningService {
         // The membership (if any) is already gone, so access IS revoked; what remains is a
         // pending invitation for an elevated role that this connection may not revoke. Not a
         // 204: the resource is not fully de-provisioned and the IdP must see that.
-        throw this.refused(ctx, err, email, {
+        throw this.refused(ctx, err, email, id, {
           kind: "invitation",
           role: invitation.role,
         });
@@ -324,12 +336,12 @@ export class ScimProvisioningService {
         select: { id: true },
       });
       if (stillPending) {
-        this.record(
-          ctx,
-          `SCIM de-provision of ${email} FAILED: a pending invitation survives`,
-          "DELETE",
-          500,
-        );
+        this.record(ctx, {
+          action: `SCIM de-provision of ${email} FAILED: a pending invitation survives`,
+          method: "DELETE",
+          path: resourcePath(id),
+          statusCode: 500,
+        });
         throw new ScimError(
           500,
           "De-provisioning did not revoke the pending invitation.",
@@ -342,7 +354,23 @@ export class ScimProvisioningService {
     await prisma.scimIdentity.deleteMany({
       where: { id, tenantId: ctx.tenantId },
     });
-    this.record(ctx, `SCIM de-provisioned ${email}`, "DELETE", 204);
+    // WHAT WAS ACTUALLY REMOVED, not just "de-provisioned". "Removed the member" and "revoked
+    // a pending invitation nobody had accepted" are different facts about a person's access,
+    // and this row is the workspace's only view of a removal no human performed.
+    const removed = [
+      membership
+        ? `removed their membership (role "${membership.role}")`
+        : null,
+      invitation ? "revoked their pending invitation" : null,
+    ]
+      .filter(Boolean)
+      .join(" and ");
+    this.record(ctx, {
+      action: `SCIM de-provisioned ${email}: ${removed}`,
+      method: "DELETE",
+      path: resourcePath(id),
+      statusCode: 204,
+    });
   }
 
   /** The uid to de-provision, resolved from the ONE table that carries live access, scoped to
@@ -371,17 +399,19 @@ export class ScimProvisioningService {
     ctx: ScimWriteContext,
     err: unknown,
     email: string,
+    id: string,
     target: { kind: "member" | "invitation"; role: string },
   ): unknown {
     if (err instanceof ForbiddenException) {
-      this.record(
-        ctx,
-        target.kind === "member"
-          ? `SCIM de-provision of ${email} REFUSED: they hold the elevated role "${target.role}" here — remove them in this workspace`
-          : `SCIM de-provision of ${email} REFUSED: their pending invitation is for the elevated role "${target.role}" — revoke it in this workspace`,
-        "DELETE",
-        403,
-      );
+      this.record(ctx, {
+        action:
+          target.kind === "member"
+            ? `SCIM de-provision of ${email} REFUSED: they hold the elevated role "${target.role}" here — remove them in this workspace`
+            : `SCIM de-provision of ${email} REFUSED: their pending invitation is for the elevated role "${target.role}" — revoke it in this workspace`,
+        method: "DELETE",
+        path: resourcePath(id),
+        statusCode: 403,
+      });
       return ScimError.forbidden(
         "This user holds an elevated role in the workspace and must be removed there. A SCIM connection cannot de-provision an owner or admin.",
       );
@@ -390,12 +420,12 @@ export class ScimProvisioningService {
       // The last-owner guard. Unreachable while scimPrincipal is `admin` (an owner target is
       // refused above first), and kept so that loosening that ceiling cannot turn a 409 into
       // an unhandled 500.
-      this.record(
-        ctx,
-        `SCIM de-provision of ${email} REFUSED: last owner`,
-        "DELETE",
-        409,
-      );
+      this.record(ctx, {
+        action: `SCIM de-provision of ${email} REFUSED: they are this workspace's last owner`,
+        method: "DELETE",
+        path: resourcePath(id),
+        statusCode: 409,
+      });
       return new ScimError(
         409,
         "The last owner of a workspace cannot be removed.",
@@ -404,22 +434,33 @@ export class ScimProvisioningService {
     return err;
   }
 
-  /** Fire-and-forget, like every other audit write: an audit failure must never be the reason
-   *  a completed de-provision reports an error. */
+  /**
+   * Fire-and-forget, like every other audit write: an audit failure must never be the reason a
+   * completed de-provision reports an error.
+   *
+   * EVERY FIELD IS PASSED BY THE CALLER, none defaulted here. `path` used to be the constant
+   * `/scim/v2/Users` for all of them, so the Activity screen could not tell a provision from a
+   * de-provision by route — a log where every entry claims the same path looks specific and
+   * is not, which is exactly the failure this feature's audit trail cannot afford (the whole
+   * argument for auditing a refused de-provision is that the row is what a workspace reads).
+   * The concrete resource id is recorded, not the `:id` route shape, matching what
+   * `MembersService.recordStranded` does with `/tenants/{id}/members/{userId}` — a person
+   * reconciling an IdP's sync log against ours needs the id the IdP actually called.
+   */
   private record(
     ctx: ScimWriteContext,
-    action: string,
-    method: string,
-    statusCode: number,
+    event: {
+      action: string;
+      method: string;
+      path: string;
+      statusCode: number;
+    },
   ): void {
     void this.audit
       .record({
         tenantId: ctx.tenantId,
         actor: `scim:${ctx.connectionId}`,
-        action,
-        method,
-        path: "/scim/v2/Users",
-        statusCode,
+        ...event,
       })
       .catch(() => undefined);
   }

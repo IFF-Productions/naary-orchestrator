@@ -423,7 +423,45 @@ describe("de-provisioning routes through MembersService.removeMember", () => {
       tenantId: "tenant-A",
       actor: "scim:conn-a",
       method: "DELETE",
+      // The REAL route, carrying the id the IdP called — not a constant.
+      path: `/scim/v2/Users/${aId}`,
     });
+  });
+
+  /**
+   * An audit trail where every SCIM event claims the same `path` looks specific and is not —
+   * and this feature's argument for auditing at all is that the row is what a workspace reads
+   * when a de-provision was refused. So provision and de-provision must be distinguishable by
+   * route, and the removal must say WHICH access it took away.
+   */
+  it("distinguishes a provision from a de-provision by route, and says what was removed", async () => {
+    await provisioning.provision(CONN_A, { userName: "newbie@a.example" });
+    const created = audit.record.mock.calls
+      .map((c) => c[0])
+      .find((a) => String(a.action).includes("provisioned newbie@a.example"));
+    expect(created).toMatchObject({ method: "POST", path: "/scim/v2/Users" });
+
+    const aId = await idFor("tenant-A", "shared@x.example");
+    await provisioning.deprovision(CONN_A, aId);
+    const removed = audit.record.mock.calls
+      .map((c) => c[0])
+      .find((a) => String(a.action).includes("de-provisioned"));
+    expect(removed?.path).not.toBe(created?.path);
+    // "removed a membership" and "revoked an invitation nobody accepted" are different facts
+    // about a person's access; a row that says only "de-provisioned" hides which one happened.
+    expect(String(removed?.action)).toContain("removed their membership");
+    expect(String(removed?.action)).toContain('"member"');
+  });
+
+  it("says INVITATION REVOKED, not membership removed, for a subject who never signed in", async () => {
+    const id = await idFor("tenant-A", "pending@a.example");
+    await provisioning.deprovision(CONN_A, id);
+    const entry = audit.record.mock.calls
+      .map((c) => c[0])
+      .find((a) => String(a.action).includes("de-provisioned"));
+    expect(String(entry?.action)).toContain("revoked their pending invitation");
+    expect(String(entry?.action)).not.toContain("removed their membership");
+    expect(entry?.path).toBe(`/scim/v2/Users/${id}`);
   });
 });
 
@@ -565,7 +603,12 @@ describe("elevated roles are out of a connection's reach", () => {
     const entry = audit.record.mock.calls
       .map((c) => c[0])
       .find((a) => String(a.action).includes("REFUSED"));
-    expect(entry).toMatchObject({ tenantId: "tenant-A", actor: "scim:conn-a" });
+    expect(entry).toMatchObject({
+      tenantId: "tenant-A",
+      actor: "scim:conn-a",
+      path: `/scim/v2/Users/${id}`,
+      statusCode: 403,
+    });
     expect(String(entry?.action)).toContain("admin@a.example");
     expect(String(entry?.action)).toContain('"admin"');
     expect(String(entry?.action)).toContain("remove them in this workspace");

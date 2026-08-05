@@ -26,7 +26,7 @@ import { AppModule } from "./app.module";
 import { AllExceptionsFilter } from "./common/all-exceptions.filter";
 import { AppLogger } from "./common/app-logger";
 import { applyCacheHardening } from "./common/cache-headers";
-import { scimBodyParser } from "./scim/scim-body-parser";
+import { mountScimBodyParser } from "./scim/scim-body-parser";
 import { buildOpenApiConfig } from "./swagger/openapi-config";
 import {
   browserCorsOrigins,
@@ -53,8 +53,10 @@ async function bootstrap(): Promise<void> {
   app.use(helmet());
 
   // SCIM writes arrive as `application/scim+json`, which express.json() does not match (#1075
-  // slice 2). Without this the body is empty and every IdP create 400s — see scim-body-parser.ts.
-  app.use(scimBodyParser());
+  // slice 2). Without this the body is empty and every IdP create 400s. Mounted on /scim/v2
+  // ALONE — every other route keeps rejecting a content type it did not ask for, and this must
+  // not become the parser Nest thinks is its own. See scim-body-parser.ts for both traps.
+  mountScimBodyParser(app);
 
   // No ETag, and `Cache-Control: no-store` by DEFAULT (#1038). Without both, an authenticated,
   // per-tenant response is heuristically cacheable and can come back as a 304 the SPA can't use
