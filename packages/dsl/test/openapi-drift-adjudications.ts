@@ -227,13 +227,26 @@ export const ACKNOWLEDGED_DEPRECATED: { action: string; why: string }[] = [
     why:
       "Sentry flags `GET /projects/{org}/{project}/issues/` deprecated in its own document, in " +
       "favour of the org-scoped `listOrganizationIssues` — the same family #946 moved `get_issue` " +
-      "and `update_issue` to, leaving this one behind. Kept for now because it is not a path swap: " +
-      "the project moves from a PATH segment (`projectSlug`) to a `project` QUERY parameter, so it " +
-      "is a `retiredFields` migration of a field authors have bound to (#944's machinery), and the " +
-      "response shape of the org-scoped list has not been compared against the project-scoped one " +
-      "(#945 §4 — output deltas fail silently at run time with no gate anywhere). Tracked in " +
-      "https://github.com/IFF-Productions/naary-orchestrator/issues/1109 (finding 3). The endpoint " +
-      "answers today; Sentry publishes no sunset date for it.",
+      "and `update_issue` to, leaving this one behind. The two response shapes HAVE now been " +
+      "compared, field by field. AUTHORITY for what follows is Sentry's own document — " +
+      "`getsentry/sentry-api-schema` -> `openapi-derefed.json`, the same one pinned as `sentry`'s " +
+      "SOURCES entry — which declares BOTH operations, so this is a like-for-like vendor " +
+      "comparison rather than two sources stitched together; the working is WRITTEN UP in issue " +
+      "#1109, which is a record of the comparison and not evidence for it. Result: 0 of the 25 " +
+      "project-scoped properties disappear and 21 are added, but `annotations` is declared " +
+      "`array of string` on ours and `array of {displayName, url}` on the successor — `required` on " +
+      "both, so neither side is the spec being vague. A saved `body[0].annotations[0]` would go " +
+      "from a string to an object WITHOUT failing (#945 §4 — output deltas fail silently at run " +
+      "time with no gate anywhere). Second blocker, which `retiredFields` cannot see because the " +
+      "key stays valid: `statsPeriod` survives by name and changes MEANING — it selects the stats " +
+      "timeline on ours, and the query's time window on the successor, where the timeline selector " +
+      "is a different parameter (`groupStatsPeriod`). The input half is cheap by comparison " +
+      "(`projectSlug` PATH segment -> `project` QUERY parameter, which accepts slugs, so the value " +
+      "carries across — a #944 `retiredFields` chore). Tracked in " +
+      "https://github.com/IFF-Productions/naary-orchestrator/issues/1109. The endpoint answers " +
+      "today; Sentry publishes no sunset date for it. ONE call settles this: run single-node Test " +
+      "on a `sentry.list_issues` node as it stands and read `body[0].annotations[0]` — if it is " +
+      "already an object, the project-scoped schema is stale and the migration is safe.",
   },
 ];
 
