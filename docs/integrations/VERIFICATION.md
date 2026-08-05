@@ -336,8 +336,16 @@ list in this file exists: a vendor can flag an endpoint on any morning, and fail
 teaches everyone to re-run CI without reading. A *known* deprecation is a written decision naming
 what the migration costs and the issue that owns it; a **new** one fails until someone writes those
 two sentences. `sentry.list_issues` is the single entry — its successor moves the project from a
-path segment to a `project` query parameter, so it is a `retiredFields` migration (#944) with an
-uncompared response shape (#945 §4), tracked in #1109. **Absence of the flag proves nothing**: most
+path segment to a `project` query parameter, which accepts slugs, so the *input* half is a
+`retiredFields` chore (#944). The **response shapes have now been compared** (#1109), and the entry
+is kept for two named reasons rather than for want of a diff: `annotations` is declared `array of
+string` on ours and `array of {displayName, url}` on the successor — `required` on both, and the
+only blocking field, since 0 of our 25 properties disappear and 21 are added — so a saved
+`body[0].annotations[0]` would turn from a string into an object without failing (#945 §4); and
+`statsPeriod` survives BY NAME while changing MEANING (stats-timeline selector → query time window,
+the timeline selector being a separate `groupStatsPeriod`), which `retiredFields` cannot see because
+the key stays valid. One credentialed call settles it — single-node Test (§1.1) on a
+`sentry.list_issues` node as it stands, reading `body[0].annotations[0]`. **Absence of the flag proves nothing**: most
 vendors never set it, and the prose deprecations #1109 found by hand (`posthog.list_events`) are not
 machine-readable at all.
 
