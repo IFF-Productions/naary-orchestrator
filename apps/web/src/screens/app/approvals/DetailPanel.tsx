@@ -58,8 +58,9 @@ export function DetailPanel({
   busy: boolean;
 }) {
   const tone = toneColors(waiting.tone);
+  const touch = useMediaQuery(BELOW_DRAWER_QUERY);
   // >= 44px approve/reject hit area on touch (<= 1024); 42px on desktop.
-  const decideH = useMediaQuery(BELOW_DRAWER_QUERY) ? 44 : 42;
+  const decideH = touch ? 44 : 42;
   // Prefer the REAL pause-time context fields; fall back to the legacy
   // JSON-shaped-instructions derivation for older gates.
   const contextEntries = item.contextFields
@@ -247,6 +248,12 @@ export function DetailPanel({
             fontSize: 11.5,
             color: "var(--ink-faint)",
             fontFamily: "var(--font-sans)",
+            // 185.3 x 15 measured at 390x844 — 15px tall is a bad target on its own terms, not
+            // just against a neighbour. It's the last thing in this block and "Remind now" is the
+            // next block down (18px away), so growing it in NORMAL FLOW pushes that button down
+            // instead of reaching it. Left-aligned so the text does not move. #1076
+            minHeight: touch ? 44 : undefined,
+            justifyContent: "flex-start",
           }}
         >
           <Icon name="external" size={13} />
@@ -332,7 +339,10 @@ export function DetailPanel({
               loading={remindBusy}
               disabled={disabled || remindBusy}
               onClick={onRemind}
-              style={{ marginTop: 10, height: 34, fontSize: 12 }}
+              // Measured 122.2 x 34. The inline `height` beats `.btn`'s 34px AND every media
+              // rule in components.css, so the touch range has to be spelled out here. Vertical
+              // only, in normal flow — its siblings move, they do not overlap. #1076
+              style={{ marginTop: 10, height: touch ? 44 : 34, fontSize: 12 }}
             >
               Remind now
             </Button>
@@ -348,7 +358,9 @@ export function DetailPanel({
             loading={remindBusy}
             disabled={disabled || remindBusy}
             onClick={onRemind}
-            style={{ height: 34, fontSize: 12 }}
+            // Same 34px inline height as the routed variant above, same reason. This is the one
+            // that actually rendered in the 390x844 measurement (a gate with no routing).
+            style={{ height: touch ? 44 : 34, fontSize: 12 }}
           >
             Remind now
           </Button>

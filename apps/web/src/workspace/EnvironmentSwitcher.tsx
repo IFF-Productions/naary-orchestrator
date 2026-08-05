@@ -281,6 +281,17 @@ export function EnvironmentSwitcher() {
             background: "var(--bg)",
             maxWidth: "100%",
             minWidth: 0,
+            // >= 44px hit area in the touch range. This is the ONLY environment control below
+            // 1024 (`segmented` is gated on `!belowDrawer`), and it measured 97.3 x 29.8 there —
+            // components.css claimed to bump it to 44, but `all: unset` above expands to an
+            // INLINE `min-height: unset` that the stylesheet cannot beat. So it goes here.
+            //
+            // Height-only, and safe: the bar lays this out in a `flex-wrap: nowrap` ROW, so its
+            // only neighbours are horizontal (measured 8px to the hamburger at 390px) and cannot
+            // be reached by growing downward. The bar itself is `minHeight: 52` with 6px of
+            // vertical padding — 44 + 12 = 56 — so it gets taller rather than clipping. #1076
+            minHeight: belowDrawer ? 44 : undefined,
+            boxSizing: "border-box",
           }}
         >
           <span

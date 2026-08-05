@@ -32,6 +32,22 @@
  * flow-layout row that would simply reflow (a card getting taller) is still reported unsafe.
  * Read it as "cannot be bumped by a blanket CSS rule", not "cannot be fixed".
  *
+ * `safe` also grows ISOTROPICALLY — it takes the worse of the two deficits and applies it on
+ * whichever axis the neighbour happens to be on. That is why a 34px-tall button in a horizontal
+ * row 8px from its sibling reads unsafe: it "needs" 5px per side and only the X gap is measured,
+ * even though the growth it actually needs is downward, where nothing is. `safe` is NOT changed
+ * (three passes on #511 drew wrong conclusions from a changed probe; keeping it comparable to the
+ * numbers already quoted in issues matters more than it being tight). Instead each small target
+ * now also carries `dx`/`dy` — which axis the nearest neighbour is separated on — and `needX`/
+ * `needY`, the clearance required to grow on that ONE axis. Read those to decide a real fix; read
+ * `safe` to decide whether a blanket CSS rule is possible.
+ *
+ * That directional read and the inert/off-viewport filter below landed TOGETHER, and the effect
+ * quoted here is their JOINT effect — measured on the built app at 390x844, the approvals screen
+ * went from 19 small / 11 unsafe to 16 small / 5 unsafe. Deliberately not split between the two:
+ * both probe edits were in the same run, and attributing the whole delta to either one would be
+ * the same unearned inference this file's header opens by warning about (#1076).
+ *
  *   pnpm --filter @naary/web build-storybook -o /tmp/sb
  *   node apps/web/scripts/responsive-audit.mjs --sb /tmp/sb --width 390 [--filter screens-settings] [--out out.json]
  */
@@ -127,16 +143,27 @@ const PROBE = `(() => {
   }
   // 3. TOUCH TARGETS: interactive elements smaller than MIN, with nearest-neighbour spacing.
   const SEL = 'button,a[href],input,select,textarea,[role=button],[role=checkbox],[role=switch],[role=tab],[role=menuitem],[tabindex]:not([tabindex="-1"])';
+  // A closed slide-out drawer is only TRANSLATED off-screen and marked \`inert\`; its controls are
+  // still laid out. Counting them measures phantoms AND poisons every real control's
+  // nearest-neighbour, because the off-screen panel is a dense stack of links. On the built app
+  // at 390x844 the drawer-OPEN reading of the approvals screen fell from 19 small targets to 6
+  // once inert subtrees and boxes wholly outside the viewport were dropped — see the header for
+  // why that number is quoted jointly with the directional change rather than split (#1076).
+  const usable = (el) => {
+    if (el.closest('[inert]')) return false;
+    const r = el.getBoundingClientRect();
+    return r.right > 0 && r.left < VW;
+  };
   const inter = [...document.querySelectorAll(SEL)].filter((el) => {
     const r = el.getBoundingClientRect();
     const s = getComputedStyle(el);
-    return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none' && !el.disabled;
+    return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none' && !el.disabled && usable(el);
   });
   const boxes = inter.map((el) => ({ el, r: el.getBoundingClientRect() }));
   const small = [];
   for (const { el, r } of boxes) {
     if (r.width >= MIN && r.height >= MIN) continue;
-    let gap = Infinity, who = null, need = 0;
+    let gap = Infinity, who = null, need = 0, ndx = null, ndy = null, nrect = null;
     const grow = (b) => Math.max(0, MIN - b.width) / 2 + Math.max(0, MIN - b.height) / 2 > 0
       ? Math.max(Math.max(0, MIN - b.width), Math.max(0, MIN - b.height)) / 2 : 0;
     for (const o of boxes) {
@@ -144,16 +171,34 @@ const PROBE = `(() => {
       const dx = Math.max(0, Math.max(r.left - o.r.right, o.r.left - r.right));
       const dy = Math.max(0, Math.max(r.top - o.r.bottom, o.r.top - r.bottom));
       const d = Math.hypot(dx, dy);
-      if (d < gap) { gap = d; who = desc(o.el); need = grow(r) + grow(o.r); }
+      if (d < gap) { gap = d; who = desc(o.el); need = grow(r) + grow(o.r); ndx = dx; ndy = dy; nrect = o.r; }
     }
+    // Clearance needed to centre-grow BOTH boxes to MIN on ONE named axis. Growing a control
+    // downward cannot reach a neighbour that is only separated horizontally, so the axis the
+    // pair is actually separated on (the larger of dx/dy) is the one that decides a real fix.
+    const needOn = (axis) => {
+      if (!nrect) return 0;
+      const def = (x) => Math.max(0, MIN - x);
+      const a = axis === 'x' ? def(r.width) : def(r.height);
+      const b = axis === 'x' ? def(nrect.width) : def(nrect.height);
+      return (a + b) / 2;
+    };
     small.push({
       el: desc(el),
       w: Math.round(r.width), h: Math.round(r.height),
       gap: gap === Infinity ? null : Math.round(gap),
       neighbour: who,
+      // Which axis the nearest neighbour is separated on, and the one-axis clearance each side
+      // needs. See the header: 'safe' stays isotropic on purpose; THESE are the actionable pair.
+      dx: ndx === null ? null : Math.round(ndx),
+      dy: ndy === null ? null : Math.round(ndy),
+      needX: Math.round(needOn('x') * 10) / 10,
+      needY: Math.round(needOn('y') * 10) / 10,
       // Safe to CENTRE-grow both this control and its nearest neighbour to MIN without the two
       // hit areas overlapping: each needs (MIN - size)/2 of clearance on the facing side.
       safe: gap === Infinity ? true : gap >= need,
+      // ...and the same question asked only on the axis that separates them.
+      safeOnAxis: gap === Infinity ? true : gap >= (ndx >= ndy ? needOn('x') : needOn('y')),
     });
   }
   // 4. OFFSCREEN: interactive controls no scroll can bring into view.
@@ -265,6 +310,7 @@ const rank = results
     hidden: Math.max(0, ...(r.scrollers ?? []).map((s) => s.hidden)),
     small: r.small?.length ?? 0,
     unsafe: (r.small ?? []).filter((s) => !s.safe).length,
+    unsafeAxis: (r.small ?? []).filter((s) => !s.safeOnAxis).length,
     offscreen: r.offscreen?.length ?? 0,
     gone: (r.offscreen ?? []).filter((o) => o.gone).length,
     maxOff: Math.max(
@@ -279,14 +325,15 @@ const totals = rank.reduce(
     clipped: a.clipped + r.clipped,
     small: a.small + r.small,
     unsafe: a.unsafe + r.unsafe,
+    unsafeAxis: a.unsafeAxis + r.unsafeAxis,
     offscreen: a.offscreen + r.offscreen,
     gone: a.gone + r.gone,
   }),
-  { clipped: 0, small: 0, unsafe: 0, offscreen: 0, gone: 0 },
+  { clipped: 0, small: 0, unsafe: 0, unsafeAxis: 0, offscreen: 0, gone: 0 },
 );
 console.log(`\n=== ${WIDTH}×${HEIGHT} — ${rank.length} stories ===`);
 console.log(
-  `clipped elements: ${totals.clipped}   sub-${MIN_TOUCH}px controls: ${totals.small} (${totals.unsafe} unsafe to bump)`,
+  `clipped elements: ${totals.clipped}   sub-${MIN_TOUCH}px controls: ${totals.small} (${totals.unsafe} unsafe to bump, ${totals.unsafeAxis} of those still unsafe on the neighbour's OWN axis)`,
 );
 console.log(
   `UNREACHABLE controls: ${totals.offscreen} (${totals.gone} wholly offscreen)\n`,

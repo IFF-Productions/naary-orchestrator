@@ -32,10 +32,13 @@ interface ToastItem {
 function FilterChip({
   active,
   onClick,
+  touch,
   children,
 }: {
   active: boolean;
   onClick: () => void;
+  /** Touch presentation (<= 1024) — the chip takes a >= 44px hit height. */
+  touch: boolean;
   children: React.ReactNode;
 }) {
   return (
@@ -45,6 +48,12 @@ function FilterChip({
       style={{
         fontSize: "var(--text-sm)",
         padding: "5px 12px",
+        // Measured 50.7 x 27 at 390x844, in the same row as the select-all box. HEIGHT only:
+        // these chips are horizontal neighbours of each other (9px apart) and of the checkbox,
+        // so downward growth reaches nothing, while widening them would eat that 9px. All three
+        // are already >= 44px wide, so height is the whole deficit anyway. #1076
+        minHeight: touch ? 44 : undefined,
+        boxSizing: "border-box",
         borderRadius: "var(--radius-pill)",
         cursor: "pointer",
         fontFamily: "var(--font-sans)",
@@ -337,12 +346,28 @@ export function Approvals() {
         padding: "8px 20px",
       }}
     >
+      {/* Select-all. THE tight cluster from #1076, and the one place measured in this app where
+          the neighbour spacing really is too small for a bump in place: at 390x844 the 18x18
+          `.check` sat 11px from the "All N" chip, and a 44px hit area centred on an 18px tile
+          needs 13px of clearance per side. Growing the tile would have overlapped the chip — a
+          tap on the filter you can SEE would have toggled the selection instead, which is a
+          worse defect than the small target (#511's Settings fix, #1074's split button).
+
+          `hitArea` instead makes the BUTTON a 44x44 box with the 18px tile centred inside it,
+          unchanged. Because that box is in layout, the chips are PUSHED right by flex reflow
+          rather than overlapped: the overlap is impossible by construction rather than by
+          arithmetic, and the target still measures 44x44 to `getBoundingClientRect` so the
+          audit can verify it. The bar has 350px of usable width at 390 and this row measured
+          254.6px, so the +26px does not reach the `flexWrap: wrap` threshold.
+
+          Touch range only — desktop keeps the tight 18px row it was designed with. */}
       <span
         title={allSelected ? "Clear selection" : "Select all"}
-        style={{ display: "inline-flex", marginRight: 2 }}
+        style={{ display: "inline-flex", marginRight: stacked ? 0 : 2 }}
       >
         <Checkbox
           checked={allSelected}
+          hitArea={stacked ? 44 : undefined}
           onChange={(v) => {
             if (batchBusy) return;
             setSelected(v ? new Set(visibleIds) : new Set());
@@ -353,18 +378,21 @@ export function Approvals() {
         <>
           <FilterChip
             active={filter === "all"}
+            touch={stacked}
             onClick={() => setFilter("all")}
           >
             All {all.length}
           </FilterChip>
           <FilterChip
             active={filter === "overdue"}
+            touch={stacked}
             onClick={() => setFilter("overdue")}
           >
             Overdue {overdueCount}
           </FilterChip>
           <FilterChip
             active={filter === "recent"}
+            touch={stacked}
             onClick={() => setFilter("recent")}
           >
             Recent {recentCount}

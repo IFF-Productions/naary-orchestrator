@@ -9,6 +9,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../auth/AuthProvider";
 import { Button, Icon } from "../components";
 import { clearToken } from "../lib/auth";
+import { BELOW_DRAWER_QUERY, useMediaQuery } from "../lib/useMediaQuery";
 import { useMode } from "../mode";
 import { useTheme } from "../theme";
 import { EnvironmentSwitcher } from "../workspace/EnvironmentSwitcher";
@@ -36,6 +37,10 @@ function Divider() {
 /** Builder/Simple — two variants, one engine; a subset lens, not a separate app. */
 export function VariantSwitcher() {
   const { mode, setMode } = useMode();
+  // Below 1024 this control renders in ONE place: the drawer top (`AppShell`'s `.drawer-context`),
+  // because the wrapped context bar drops it. So the query is a reliable "this is the touch
+  // presentation" signal without threading a prop through both call sites.
+  const touch = useMediaQuery(BELOW_DRAWER_QUERY);
   const variants = [
     ["builder", "Builder"],
     ["simple", "Simple"],
@@ -63,6 +68,10 @@ export function VariantSwitcher() {
             onClick={() => setMode(id)}
             style={{
               all: "unset",
+              // Centres the label once the segment is taller than its text.
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
               fontSize: 11.5,
               padding: "4px 11px",
               borderRadius: 6,
@@ -70,6 +79,15 @@ export function VariantSwitcher() {
               fontWeight: 600,
               color: active ? "var(--ink)" : "var(--ink-faint)",
               background: active ? "var(--card)" : "transparent",
+              // >= 44px hit area in the drawer. Measured 60.8 x 25.8 at 390x844 before this:
+              // `.drawer-context button { min-height: 44px }` could never apply, because the
+              // `all: unset` above is an INLINE declaration that expands to `min-height: unset`.
+              //
+              // Height-only, and safe: the two segments are side by side (measured 3px apart
+              // horizontally), so growing DOWN cannot reach either. The drawer top is a flex
+              // COLUMN with `gap: 10`, so the group below simply moves down 18px.
+              minHeight: touch ? 44 : undefined,
+              boxSizing: "border-box",
             }}
           >
             {label}
