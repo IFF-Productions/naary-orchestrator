@@ -151,6 +151,38 @@ export interface KafkaPublishNodeConfig {
   costUsd?: number;
 }
 
+/**
+ * MQTT Publish — one message to a topic (#1086 slice 3).
+ *
+ * Deliberately NOT modelled on kafkaPublish despite the family resemblance, because the delivery
+ * story is different in a way authors can act on. Kafka acknowledges an OFFSET, so a publish can
+ * report exactly where the message landed. MQTT acknowledges a QoS handshake and nothing else: at
+ * QoS 0 the broker never replies at all, and at QoS 1 it confirms receipt without telling you
+ * where the message went or who received it. So there is no identity to return, and the output
+ * says what was sent rather than pretending to say what arrived.
+ */
+export interface MqttPublishNodeConfig {
+  /** An `mqtt` connection; its URL + credentials are read in-activity. */
+  connectionId: string;
+  /** Topic to publish to. No wildcards — `+`/`#` are for SUBSCRIBING, and a broker rejects them. */
+  topic: string;
+  /** Message body. A non-string is JSON-stringified by the activity, never here. */
+  payload: unknown;
+  /**
+   * 0 = at most once (fire and forget), 1 = at least once (the default), 2 = exactly once.
+   *
+   * 1, not 0: at QoS 0 the broker sends no acknowledgement, so a publish that vanished is
+   * indistinguishable from one that worked — the same reason kafkaPublish defaults `acks` to -1.
+   */
+  qos?: 0 | 1 | 2;
+  /** Ask the broker to keep this as the topic's retained message, delivered to future subscribers. */
+  retain?: boolean;
+  /** Per-publish timeout (ms). */
+  timeoutMs?: number;
+  /** Flat per-call cost metered into the run budget (Arch§4.6). */
+  costUsd?: number;
+}
+
 export interface SqlQueryNodeConfig {
   /** A `postgres`/`mssql` connection; its stored DSN is read in-activity. */
   connectionId: string;

@@ -144,6 +144,13 @@ export interface NodeOutputMap {
   /** What the broker acknowledged. `partition`/`offset` are the message's identity — the same
    *  triple slice 2 uses as a dedupe key, so a downstream node can correlate without a lookup. */
   kafkaPublish: { topic: string; partition: number; offset: string };
+  /**
+   * What was SENT — deliberately not "where it landed". MQTT gives a publisher no message
+   * identity: QoS 0 is unacknowledged entirely, and QoS 1/2 confirm the handshake without saying
+   * anything about delivery to subscribers. Returning a fabricated id would invite exactly the
+   * correlation logic the protocol cannot support.
+   */
+  mqttPublish: { topic: string; qos: number; retained: boolean };
   sqlQuery: { rows: unknown; rowCount: number };
   sqlExec: { rowsAffected: number };
   /** `truncated` is the node's own answer to "did I drop documents?" — surfaced in the

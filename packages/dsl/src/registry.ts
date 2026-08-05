@@ -79,6 +79,7 @@ import type {
   SetNodeConfig,
   SqlExecNodeConfig,
   KafkaPublishNodeConfig,
+  MqttPublishNodeConfig,
   SqlQueryNodeConfig,
   StartNodeConfig,
   StopAndErrorNodeConfig,
@@ -504,6 +505,15 @@ const CONFIG_SCHEMAS = {
     // -1 is the DEFAULT (all in-sync replicas). 0 is expressible but never implied — a publish
     // nobody acknowledges cannot be distinguished from one that failed.
     acks: z.union([z.literal(-1), z.literal(0), z.literal(1)]).optional(),
+    timeoutMs: z.number().optional(),
+    costUsd: z.number().optional(),
+  }),
+  mqttPublish: z.object({
+    connectionId: z.string(),
+    topic: z.string(),
+    payload: z.unknown(),
+    qos: z.union([z.literal(0), z.literal(1), z.literal(2)]).optional(),
+    retain: z.boolean().optional(),
     timeoutMs: z.number().optional(),
     costUsd: z.number().optional(),
   }),
@@ -999,6 +1009,7 @@ export type IntegrationConfig = z.infer<typeof CONFIG_SCHEMAS.integration>;
 export type HttpRequestConfig = z.infer<typeof CONFIG_SCHEMAS.httpRequest>;
 export type GraphQLConfig = z.infer<typeof CONFIG_SCHEMAS.graphQL>;
 export type KafkaPublishConfig = z.infer<typeof CONFIG_SCHEMAS.kafkaPublish>;
+export type MqttPublishConfig = z.infer<typeof CONFIG_SCHEMAS.mqttPublish>;
 export type SqlQueryConfig = z.infer<typeof CONFIG_SCHEMAS.sqlQuery>;
 export type SqlExecConfig = z.infer<typeof CONFIG_SCHEMAS.sqlExec>;
 export type RssReadConfig = z.infer<typeof CONFIG_SCHEMAS.rssRead>;
@@ -1075,6 +1086,7 @@ const _configParity: {
   httpRequest: Exact<HttpRequestConfig, HttpRequestNodeConfig>;
   graphQL: Exact<GraphQLConfig, GraphQLNodeConfig>;
   kafkaPublish: Exact<KafkaPublishConfig, KafkaPublishNodeConfig>;
+  mqttPublish: Exact<MqttPublishConfig, MqttPublishNodeConfig>;
   sqlQuery: Exact<SqlQueryConfig, SqlQueryNodeConfig>;
   sqlExec: Exact<SqlExecConfig, SqlExecNodeConfig>;
   firestoreQuery: Exact<FirestoreQueryConfig, FirestoreQueryNodeConfig>;
@@ -1136,6 +1148,7 @@ const _configParity: {
   httpRequest: true,
   graphQL: true,
   kafkaPublish: true,
+  mqttPublish: true,
   sqlQuery: true,
   sqlExec: true,
   firestoreQuery: true,

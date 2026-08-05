@@ -47,6 +47,7 @@ import {
   ConnectionService,
   MissingConnectionTokenError,
   resolveAuthHeader,
+  resolveMqttConnection,
 } from "../src/index";
 
 // In-memory stand-in for the encrypted SecretStore (its encryption is tested in
@@ -239,5 +240,70 @@ describe("ConnectionService", () => {
     // remove must still purge it env-agnostically (not skip because the row is missing).
     await svc.remove("t1", view.id);
     expect(secretMap.get(`t1::e1::conn:${view.id}`)).toBeUndefined();
+  });
+});
+
+/**
+ * MQTT URL validation happens at RESOLUTION, where the connection can be named.
+ *
+ * Review on #1095: a URL can parse with no hostname (`mqtts://:8883`), and the failure then
+ * surfaced from inside the egress guard as an SSRF-shaped error about an empty host — naming
+ * neither the connection nor what was wrong with it.
+ */
+describe("resolveMqttConnection — configuration errors name the connection", () => {
+  const store = (blob: string) => ({ get: async () => blob }) as never;
+
+  beforeEach(() => {
+    conns.set("c-mqtt", {
+      id: "c-mqtt",
+      tenantId: "t1",
+      type: "mqtt",
+      environmentId: "e1",
+    });
+  });
+
+  it("rejects a URL that parses but carries no host", async () => {
+    // Review suggested `mqtts://:8883` — that one actually THROWS in `new URL` (mqtt is a
+    // non-special scheme, so an empty authority with a port is invalid) and lands on the
+    // "isn't a URL" branch instead. These are the inputs that genuinely parse with an empty
+    // hostname, which is what the guard is for; checked against Node rather than assumed.
+    for (const url of ["mqtt://", "mqtt:///x", "mqtt://?a=1"]) {
+      await expect(
+        resolveMqttConnection("t1", "c-mqtt", store(JSON.stringify({ url }))),
+      ).rejects.toThrow(/no host/i);
+    }
+  });
+
+  it("still rejects a URL that cannot be parsed at all", async () => {
+    await expect(
+      resolveMqttConnection(
+        "t1",
+        "c-mqtt",
+        store(JSON.stringify({ url: "mqtts://:8883" })),
+      ),
+    ).rejects.toThrow(/isn't a URL/i);
+  });
+
+  it("rejects an unsupported scheme, naming it", async () => {
+    await expect(
+      resolveMqttConnection(
+        "t1",
+        "c-mqtt",
+        store(JSON.stringify({ url: "https://broker:8883" })),
+      ),
+    ).rejects.toThrow(/unsupported MQTT scheme 'https'/i);
+  });
+
+  it("accepts each supported scheme", async () => {
+    for (const url of [
+      "mqtt://b:1883",
+      "mqtts://b:8883",
+      "ws://b:8080",
+      "wss://b:8081",
+    ]) {
+      await expect(
+        resolveMqttConnection("t1", "c-mqtt", store(JSON.stringify({ url }))),
+      ).resolves.toMatchObject({ url });
+    }
   });
 });

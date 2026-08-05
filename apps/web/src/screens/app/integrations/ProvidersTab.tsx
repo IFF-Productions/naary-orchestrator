@@ -15,6 +15,7 @@ import {
   type ProviderCredential,
 } from "../../../lib/api";
 import {
+  BrokerForm,
   DatabaseForm,
   FirestoreForm,
   SigningForm,
@@ -93,6 +94,16 @@ const CONNECTION_GROUPS: {
     types: ["smtp"],
     icon: "card",
     color: "var(--node-http)",
+  },
+  {
+    // Kafka and MQTT share a card: both store an encrypted JSON blob rather than a DSN, and an
+    // author picking one is picking a broker, not a storage engine.
+    id: "broker",
+    name: "Message brokers",
+    kind: "Kafka Publish/Trigger · MQTT Publish nodes",
+    types: ["kafka", "mqtt"],
+    icon: "workflow",
+    color: "var(--node-poll, #4f9ad6)",
   },
   {
     id: "signing",
@@ -519,7 +530,9 @@ export function ProvidersTab({
                 ? "Connect Cloud Firestore"
                 : addGroup === "smtp"
                   ? "Configure SMTP (email)"
-                  : "Add a signing key"
+                  : addGroup === "broker"
+                    ? "Connect a message broker"
+                    : "Add a signing key"
           }
         >
           {groupDef?.id === "sql" && (
@@ -530,6 +543,9 @@ export function ProvidersTab({
           )}
           {groupDef?.id === "smtp" && (
             <SmtpForm tenant={tenant} onChanged={onChanged} />
+          )}
+          {groupDef?.id === "broker" && (
+            <BrokerForm tenant={tenant} onChanged={onChanged} />
           )}
           {groupDef?.id === "signing" && (
             <SigningForm tenant={tenant} onChanged={onChanged} />

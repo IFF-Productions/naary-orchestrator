@@ -11,6 +11,7 @@ export type ConnectionType =
   | "mysql"
   | "firestore"
   | "kafka"
+  | "mqtt"
   | "signing"
   | "smtp";
 export type AuthMode =
@@ -388,4 +389,89 @@ export async function resolveSmtpUri(
   );
   if (!uri) throw new MissingConnectionTokenError(connectionId);
   return uri;
+}
+
+/**
+ * An MQTT connection's broker URL + credentials (#1086 slice 3).
+ *
+ * A single `url` rather than Kafka's broker LIST, because that is the difference between the two
+ * protocols and not a stylistic one: an MQTT client talks to ONE broker, and the scheme carries
+ * the transport (`mqtts://` = TLS, `wss://` = websocket). Squeezing that into Kafka's shape would
+ * lose the scheme, which is the part that decides whether the credential crosses the network in
+ * the clear.
+ */
+export interface MqttConnectionConfig {
+  /** `mqtt://`, `mqtts://`, `ws://` or `wss://` URL, with an optional port. */
+  url: string;
+  username?: string;
+  password?: string;
+  /**
+   * Stable client id. It matters more here than Kafka's `clientId` attribution does: an MQTT
+   * broker keys a PERSISTENT SESSION — the subscription and its undelivered QoS-1 messages —
+   * on exactly this string. A client id that changes between connections silently starts a new
+   * session and abandons whatever the old one was holding.
+   */
+  clientId?: string;
+}
+
+/** Resolve an `mqtt` connection. Same invariants as {@link resolveKafkaConnection}: read
+ *  in-activity, never returned across a boundary, never logged (Tier-1 §4). */
+export async function resolveMqttConnection(
+  tenantId: string,
+  connectionId: string,
+  store: SecretStore = new SecretStore(),
+): Promise<MqttConnectionConfig> {
+  const conn = await getPrisma().connection.findFirst({
+    where: { id: connectionId, tenantId },
+    select: { type: true, environmentId: true },
+  });
+  if (!conn) throw new Error(`Unknown connection '${connectionId}'`);
+  if (conn.type !== "mqtt") {
+    throw new Error(`Connection '${connectionId}' is not an MQTT connection`);
+  }
+  const raw = await store.get(
+    tenantId,
+    conn.environmentId,
+    connectionSecretKey(connectionId),
+  );
+  if (!raw) throw new MissingConnectionTokenError(connectionId);
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    // Never echoes `raw` — it is the credential (see resolveKafkaConnection).
+    throw new Error(
+      `Connection '${connectionId}' has a malformed MQTT configuration (expected JSON).`,
+    );
+  }
+  const cfg = parsed as MqttConnectionConfig;
+  if (typeof cfg?.url !== "string" || !cfg.url.trim()) {
+    throw new Error(`Connection '${connectionId}' has no MQTT broker URL.`);
+  }
+  // The SCHEME is validated here rather than left to the client, because the client's failure for
+  // an unknown scheme is a stack trace from inside a socket factory that names neither the
+  // connection nor the scheme.
+  let scheme: string;
+  try {
+    scheme = new URL(cfg.url).protocol.replace(":", "");
+  } catch {
+    throw new Error(
+      `Connection '${connectionId}' has an MQTT URL that isn't a URL (expected mqtts://host:port).`,
+    );
+  }
+  // A URL can PARSE with no hostname (`mqtts://:8883`), and the failure then surfaces from inside
+  // the egress guard as an SSRF-shaped error about an empty host — which names neither the
+  // connection nor what is wrong with it.
+  if (!new URL(cfg.url).hostname) {
+    throw new Error(
+      `Connection '${connectionId}' has an MQTT URL with no host (expected mqtts://host:port).`,
+    );
+  }
+  if (!["mqtt", "mqtts", "ws", "wss"].includes(scheme)) {
+    throw new Error(
+      `Connection '${connectionId}' has an unsupported MQTT scheme '${scheme}' (expected mqtt, mqtts, ws or wss).`,
+    );
+  }
+  return { ...cfg, url: cfg.url.trim() };
 }

@@ -1090,3 +1090,242 @@ export function ConnectForm({
     </>
   );
 }
+
+/**
+ * Connect a message BROKER — Kafka or MQTT (#1086).
+ *
+ * One form for both because they store the same SHAPE of secret: an encrypted JSON blob, not a
+ * DSN. Neither protocol has a standard connection string — Kafka's brokers/SASL/TLS are
+ * independent knobs and MQTT's transport rides the URL scheme — so inventing a URL format would
+ * mean writing a parser we'd have to stay bug-compatible with forever (see `KafkaConnectionConfig`).
+ *
+ * This existed nowhere until now: `kafkaPublish` shipped in #1087 with a canvas picker that could
+ * only ever show connections created through the API, because the Integrations screen had no way
+ * to make one. The node was reachable and the credential was not.
+ */
+export function BrokerForm({
+  tenant,
+  onChanged,
+}: {
+  tenant: string;
+  onChanged: () => Promise<void> | void;
+}) {
+  const [engine, setEngine] = useState<"kafka" | "mqtt">("kafka");
+  const [label, setLabel] = useState("");
+  // Kafka
+  const [brokers, setBrokers] = useState("");
+  const [ssl, setSsl] = useState(true);
+  const [mechanism, setMechanism] = useState<
+    "" | "plain" | "scram-sha-256" | "scram-sha-512"
+  >("");
+  // MQTT
+  const [url, setUrl] = useState("");
+  const [clientId, setClientId] = useState("");
+  // Shared credential fields
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  const brokerList = brokers
+    .split(/[\s,]+/)
+    .map((b) => b.trim())
+    .filter(Boolean);
+
+  async function submit() {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const config =
+        engine === "kafka"
+          ? {
+              brokers: brokerList,
+              ssl,
+              ...(mechanism
+                ? { sasl: { mechanism, username: username.trim(), password } }
+                : {}),
+            }
+          : {
+              url: url.trim(),
+              ...(username.trim() ? { username: username.trim() } : {}),
+              ...(password ? { password } : {}),
+              ...(clientId.trim() ? { clientId: clientId.trim() } : {}),
+            };
+      await api.createConnection(tenant, {
+        type: engine,
+        label: label.trim(),
+        // Non-secret DISPLAY value. The real endpoint rides inside the encrypted blob — the same
+        // split DatabaseForm makes, where the DSN never touches serverUrl.
+        serverUrl: engine === "kafka" ? (brokerList[0] ?? "") : url.trim(),
+        authMode: "connection_string",
+        token: JSON.stringify(config),
+      });
+      setLabel("");
+      setBrokers("");
+      setUrl("");
+      setUsername("");
+      setPassword("");
+      setClientId("");
+      setMsg("Connected ✓");
+      await onChanged();
+    } catch (e) {
+      setMsg(
+        e instanceof Error && /400/.test(e.message)
+          ? "Check the fields."
+          : "Could not connect the broker.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const ready = Boolean(
+    label.trim() && (engine === "kafka" ? brokerList.length > 0 : url.trim()),
+  );
+
+  return (
+    <>
+      <div style={{ marginBottom: 10 }}>
+        <span style={fieldLabel}>Broker</span>
+        <select
+          style={fieldStyle}
+          value={engine}
+          onChange={(e) => setEngine(e.target.value as "kafka" | "mqtt")}
+        >
+          <option value="kafka">Kafka</option>
+          <option value="mqtt">MQTT</option>
+        </select>
+      </div>
+      <div style={{ marginBottom: 10 }}>
+        <span style={fieldLabel}>Label</span>
+        <input
+          style={fieldStyle}
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          placeholder={engine === "kafka" ? "prod-kafka" : "factory-mqtt"}
+        />
+      </div>
+
+      {engine === "kafka" ? (
+        <>
+          <div style={{ marginBottom: 10 }}>
+            <span style={fieldLabel}>Bootstrap brokers</span>
+            <input
+              style={fieldStyle}
+              value={brokers}
+              onChange={(e) => setBrokers(e.target.value)}
+              placeholder="b1.example.com:9092, b2.example.com:9092"
+            />
+            <div style={{ ...introStyle, marginTop: 6 }}>
+              One is enough — the client discovers the rest of the cluster.
+              Comma or space separated.
+            </div>
+          </div>
+          <label
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              marginBottom: 10,
+              fontSize: "var(--text-sm)",
+              color: "var(--ink-2)",
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={ssl}
+              onChange={(e) => setSsl(e.target.checked)}
+            />
+            Use TLS
+          </label>
+          <div style={{ marginBottom: 10 }}>
+            <span style={fieldLabel}>SASL mechanism</span>
+            <select
+              style={fieldStyle}
+              value={mechanism}
+              onChange={(e) => setMechanism(e.target.value as typeof mechanism)}
+            >
+              <option value="">None</option>
+              <option value="plain">PLAIN</option>
+              <option value="scram-sha-256">SCRAM-SHA-256</option>
+              <option value="scram-sha-512">SCRAM-SHA-512</option>
+            </select>
+          </div>
+        </>
+      ) : (
+        <>
+          <div style={{ marginBottom: 10 }}>
+            <span style={fieldLabel}>Broker URL</span>
+            <input
+              style={fieldStyle}
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              placeholder="mqtts://broker.example.com:8883"
+            />
+            <div style={{ ...introStyle, marginTop: 6 }}>
+              The scheme decides the transport — <code>mqtts://</code> and{" "}
+              <code>wss://</code> are encrypted, <code>mqtt://</code> and{" "}
+              <code>ws://</code> are not.
+            </div>
+          </div>
+          <div style={{ marginBottom: 10 }}>
+            <span style={fieldLabel}>Client id (optional)</span>
+            <input
+              style={fieldStyle}
+              value={clientId}
+              onChange={(e) => setClientId(e.target.value)}
+              placeholder="naary-prod"
+            />
+            <div style={{ ...introStyle, marginTop: 6 }}>
+              Brokers key a persistent session on this exact string, so leave it
+              stable — changing it starts a new session and abandons whatever
+              the old one was holding.
+            </div>
+          </div>
+        </>
+      )}
+
+      {(engine === "mqtt" || mechanism) && (
+        <div style={{ display: "flex", gap: 10, marginBottom: 10 }}>
+          <div style={{ flex: 1 }}>
+            <span style={fieldLabel}>Username</span>
+            <input
+              style={fieldStyle}
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+            />
+          </div>
+          <div style={{ flex: 1 }}>
+            <span style={fieldLabel}>Password</span>
+            <input
+              style={fieldStyle}
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+            />
+          </div>
+        </div>
+      )}
+
+      <div style={{ ...introStyle, marginBottom: 12 }}>
+        Stored encrypted and never shown again. The broker host is checked
+        against the egress allowlist at run time, so it must be publicly
+        resolvable.
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <Button
+          variant="primary"
+          disabled={busy || !ready}
+          onClick={() => void submit()}
+        >
+          {busy ? "Connecting…" : "Connect"}
+        </Button>
+        {msg && (
+          <span style={{ fontSize: "var(--text-sm)", color: "var(--ink-2)" }}>
+            {msg}
+          </span>
+        )}
+      </div>
+    </>
+  );
+}

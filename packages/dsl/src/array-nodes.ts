@@ -157,7 +157,8 @@ export function resolveCompareDatasets(
     } else {
       const aItem = aBy.get(k);
       if (JSON.stringify(aItem) === JSON.stringify(bItem)) same.push(bItem);
-      else changed.push({ key: getByPath(bItem, config.key), a: aItem, b: bItem });
+      else
+        changed.push({ key: getByPath(bItem, config.key), a: aItem, b: bItem });
     }
   }
   const removed = a.filter((item) => !bBy.has(keyOf(item)));

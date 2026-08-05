@@ -281,6 +281,7 @@ export type ConnectionType =
   | "mysql"
   | "firestore"
   | "kafka"
+  | "mqtt"
   | "signing"
   | "smtp";
 export type ConnectionAuthMode =

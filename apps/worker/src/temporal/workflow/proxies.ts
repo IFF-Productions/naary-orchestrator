@@ -175,6 +175,17 @@ export const { callKafkaPublish } = wf.proxyActivities<typeof activities>({
   retry: { maximumAttempts: 1 },
 });
 
+// Same at-most-once reasoning as kafkaPublish, and MQTT makes it sharper: a QoS-1 publish whose
+// PUBACK is lost may well have been delivered, and MQTT's own "at least once" guarantee describes
+// the BROKER's redelivery to subscribers — not ours to the broker. Retrying here would put a second
+// copy on the topic. (QoS 2's exactly-once handshake could relax this; it needs a stable packet id
+// across attempts, which a fresh activity does not have — the same blocker as Kafka's idempotent
+// producer.)
+export const { callMqttPublish } = wf.proxyActivities<typeof activities>({
+  startToCloseTimeout: "60 seconds",
+  retry: { maximumAttempts: 1 },
+});
+
 // A WRITE is NOT idempotent — a retry after a partial/ambiguous first attempt could
 // double-write. So sqlExec runs AT-MOST-ONCE (maximumAttempts: 1), like callSendEmail:
 // a failure fails the node rather than risk applying the statement twice.
