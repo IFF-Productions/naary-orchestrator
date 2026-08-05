@@ -19,6 +19,10 @@ import {
   expandItems as realExpandItems,
   offloadCtxEntry as realOffloadCtxEntry,
 } from "../src/temporal/activities/items";
+import {
+  describeServerHealth,
+  isServerUnreachableFailure,
+} from "./local-test-env";
 
 // Mutable knobs the mockActivities read; tests fix these per-scenario. (Reassigning
 // an ESM import binding is illegal, so they hang off this one exported object.)
@@ -1427,6 +1431,14 @@ const WORKER_BACKOFF_MS = [0, 250, 750];
  * Deliberately NARROW: any other Worker.create failure (a bad workflow bundle, a dead connection)
  * throws on the first attempt, because retrying a real misconfiguration three times only delays
  * the report and muddies it.
+ *
+ * ONE of those "other" failures is now CLASSIFIED on its way out rather than retried (#1101): when
+ * the server that `beforeAll` successfully started has gone away mid-file, `Worker.create` reports
+ * "Namespace default was not found or otherwise could not be described … ConnectionRefused". That
+ * reads exactly like an ordinary test failure — every test in the file goes red at a line of
+ * application code — and classifying it took a local repro plus a log grep. It is NOT retried: a
+ * dead dev server does not come back, so a retry would only spend three attempts to report the same
+ * thing, and blanket-retrying would hide the very trend the warning above deliberately logs.
  */
 export async function makeWorker(
   env: TestWorkflowEnvironment,
@@ -1444,6 +1456,16 @@ export async function makeWorker(
         activities: mockActivities,
       });
     } catch (e) {
+      // Checked BEFORE the overlap match, because the two are disjoint and this one is terminal:
+      // there is no point queueing three attempts against a server that is no longer listening.
+      if (isServerUnreachableFailure(e)) {
+        throw new Error(
+          `INFRASTRUCTURE: the Temporal test server started for this spec is no longer reachable — ` +
+            `it came up in beforeAll and went away mid-file, so NEITHER startup retry could apply. ` +
+            `NOT a test failure (#1101). Health: ${await describeServerHealth(env)}. ` +
+            `Last error: ${String(e)}`,
+        );
+      }
       if (!WORKER_REGISTRATION_OVERLAP_RE.test(String(e))) throw e;
       lastErr = e;
       // Logged on purpose, matching local-test-env.ts: a spec that passed on its third attempt
@@ -1454,10 +1476,13 @@ export async function makeWorker(
       );
     }
   }
+  // The overlap check happens in the local core WITHOUT contacting the server, so an exhausted
+  // retry here can still be a server that went away (#1101) with a stale registration masking it.
+  // The health line costs one TCP connect and tells the two apart in the log.
   throw new Error(
     `INFRASTRUCTURE: a worker could not register on "${TASK_QUEUE}" after ${WORKER_MAX_ATTEMPTS} ` +
       `attempts — the predecessor never released it. NOT a test failure (#1073). ` +
-      `Last error: ${String(lastErr)}`,
+      `Health: ${await describeServerHealth(env)}. Last error: ${String(lastErr)}`,
   );
 }
 

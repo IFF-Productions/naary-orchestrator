@@ -24,8 +24,14 @@
  *
  * When retries are exhausted the failure is rethrown as an explicitly INFRASTRUCTURE error, so a red
  * CI log answers "flake or real?" by itself instead of leaving it to be judged (#709's AC).
+ *
+ * A THIRD failure mode is only OBSERVED here, not retried: the server starts fine and then goes away
+ * MID-FILE (#1101). Neither retry above can catch that by construction — there was nothing wrong at
+ * startup. See `isServerUnreachableFailure` / `describeServerHealth` below, and the note on what the
+ * SDK does and does not expose about the child process.
  */
-import { createServer } from "node:net";
+import { createServer, connect } from "node:net";
+import { freemem, loadavg, totalmem } from "node:os";
 import { TestWorkflowEnvironment } from "@temporalio/testing";
 
 /** Ask the OS for a currently-free port (bind :0, read it back, release). */
@@ -80,6 +86,135 @@ export function isRetryableStartupFailure(error: unknown): boolean {
   return BIND_RACE_RE.test(text) || STARTUP_TIMEOUT_RE.test(text);
 }
 
+/* ------------------------------------------------------------------------------------------------
+ * #1101 — the server dies MID-FILE, and the SDK throws the reason away.
+ *
+ * WHAT THE SDK ACTUALLY EXPOSES (checked against @temporalio/testing + @temporalio/core-bridge
+ * 1.21.1 — this is a finding, not an assumption, and it is why the code below probes instead of
+ * asking):
+ *
+ *   - `TestWorkflowEnvironment.server` is `protected`, and its type is `native.EphemeralServer`,
+ *     which is declared as `{ type: 'ephemeral-server' }` — an OPAQUE Neon handle. Casting past
+ *     `protected` gains nothing; there is no pid, exit code, or status on the other side.
+ *   - The Neon bridge (core-bridge `src/testing.rs`) exports exactly three functions for it:
+ *     `newEphemeralServer`, `ephemeralServerGetTarget`, `ephemeralServerShutdown`. Rust's own
+ *     `EphemeralServer::child_process_id()` exists in sdk-core but is NOT bridged to JS.
+ *   - The child's stdout/stderr ARE forwarded — but by two Rust threads writing to the Node
+ *     process's NATIVE fd 1/2, not through `process.stdout.write`. Vitest never sees them, so they
+ *     arrive unlabelled and unattributed to any spec, and the dev server's default log level is
+ *     `warn`, so a SIGKILL (OOM reaper) prints nothing whatsoever.
+ *
+ * So: the exit code and stderr the issue hoped for are NOT reachable from TypeScript. What IS
+ * reachable is `env.address` (public `readonly`), which is enough to answer the one question the
+ * next occurrence needs — "was the server itself gone, or was the client confused?" — plus the
+ * host-resource reading that the issue's own OOM/pressure hypothesis turns on.
+ * ---------------------------------------------------------------------------------------------- */
+
+/**
+ * When each environment's address became reachable, so a failure can report HOW LONG the server
+ * survived. "Died 40s into the file" and "died 0.3s after beforeAll returned" are different bugs and
+ * the distinction is invisible without this. Keyed by address; entries are tiny and a test process
+ * is short-lived, so no eviction.
+ */
+const startedAt = new Map<string, number>();
+
+/** A single host-resource reading. Portable (node:os only) — no platform tools, works on the Linux
+ *  and Windows runners alike. */
+function resourceSnapshot(): string {
+  const free = freemem();
+  const total = totalmem();
+  const pct = total > 0 ? Math.round((free / total) * 100) : 0;
+  const rssMb = Math.round(process.memoryUsage().rss / 1024 / 1024);
+  // loadavg() is all zeros on Windows; report it anyway rather than branching — a zero triple is
+  // itself a readable "this was Windows" signal.
+  const load = loadavg()
+    .map((n) => n.toFixed(2))
+    .join("/");
+  return `freemem=${Math.round(free / 1024 / 1024)}MB/${Math.round(total / 1024 / 1024)}MB (${pct}%), rss=${rssMb}MB, load=${load}`;
+}
+
+/**
+ * Can we still open a TCP connection to the server's gRPC port? This is the whole diagnostic: a
+ * refused connect says the PROCESS is gone (nothing is listening), while a successful connect says
+ * the process is alive and the failure is above the transport — which are opposite investigations.
+ *
+ * Short timeout on purpose: this runs on an ALREADY-failing path, and a slow probe would turn one
+ * red test into a timed-out one.
+ */
+function probeAddress(address: string, timeoutMs = 750): Promise<string> {
+  const idx = address.lastIndexOf(":");
+  const host = idx === -1 ? address : address.slice(0, idx);
+  const port = Number(idx === -1 ? NaN : address.slice(idx + 1));
+  if (!Number.isFinite(port))
+    return Promise.resolve(`unparseable (${address})`);
+  return new Promise((resolve) => {
+    const socket = connect({ host, port });
+    const done = (verdict: string): void => {
+      socket.destroy();
+      resolve(verdict);
+    };
+    socket.setTimeout(timeoutMs, () => done("UNREACHABLE (probe timed out)"));
+    socket.once("connect", () => done("still accepting connections"));
+    socket.once("error", (e: NodeJS.ErrnoException) =>
+      done(`UNREACHABLE (${e.code ?? e.message})`),
+    );
+  });
+}
+
+/**
+ * A one-line verdict on the server behind `env`, for embedding in an INFRASTRUCTURE error message.
+ * Never throws — it is only ever called while reporting another failure, and a diagnostic that can
+ * replace the failure it was describing is worse than none.
+ */
+export async function describeServerHealth(env: {
+  address: string;
+}): Promise<string> {
+  try {
+    const started = startedAt.get(env.address);
+    const alive =
+      started === undefined
+        ? "unknown"
+        : `${((Date.now() - started) / 1000).toFixed(1)}s`;
+    const probe = await probeAddress(env.address);
+    return `server ${env.address}: ${probe}; ${alive} since it came up; ${resourceSnapshot()}`;
+  } catch (e) {
+    return `server ${env.address}: health probe itself failed (${String(e)})`;
+  }
+}
+
+/**
+ * The MID-RUN transport failure from #1101 — the server was reachable at `beforeAll` and is not
+ * reachable now:
+ *
+ *   TransportError: Namespace default was not found or otherwise could not be described:
+ *     Status { code: Unavailable, message: "tcp connect error",
+ *       ConnectError("tcp connect error", 127.0.0.1:36407, Os { code: 111, kind: ConnectionRefused }) }
+ *
+ * DELIBERATELY NOT `isRetryableStartupFailure`. That predicate's regexes would match this string,
+ * but its NAME and contract are about whether STARTUP is worth another attempt; sharing it would
+ * mean a future narrowing of the retry policy silently re-classifies mid-run failures, and vice
+ * versa. Two questions, two predicates.
+ *
+ * Anchored on the namespace-describe phrase (what `Worker.create` reports when it cannot reach the
+ * server) and on the transport symptoms — NOT on bare `Unavailable`, which `Status { code: … }`
+ * also carries for legitimate server-side conditions that are genuine test failures.
+ */
+const SERVER_UNREACHABLE_RE =
+  /namespace .*(was not found|could not be described)|tcp connect error|connection ?refused|os error 111/i;
+
+/**
+ * Did this failure happen because the Temporal server is not there any more? Exported so the
+ * classification is pinned by unit test against the REAL string from the #1101 incident, exactly as
+ * `isRetryableStartupFailure` pins #709 and #342.
+ *
+ * Must be FALSE for the #1073 worker-registration overlap, which is a different infrastructure
+ * failure with its own bounded retry in `interpreter-harness.ts` — classifying it here would steal
+ * it from a retry that actually works.
+ */
+export function isServerUnreachableFailure(error: unknown): boolean {
+  return SERVER_UNREACHABLE_RE.test(String(error));
+}
+
 const MAX_ATTEMPTS = 3;
 /** Wait before attempt N. Index 0 is unused (the first attempt is immediate). */
 const BACKOFF_MS = [0, 750, 2000];
@@ -100,7 +235,11 @@ async function withStartRetry(
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     if (attempt > 0) await sleep(BACKOFF_MS[attempt]);
     try {
-      return await start();
+      const env = await start();
+      // #1101: stamp the moment this address became reachable, so a later mid-file transport
+      // failure can report how long the server actually survived.
+      startedAt.set(env.address, Date.now());
+      return env;
     } catch (e) {
       if (!isRetryableStartupFailure(e)) throw e;
       const text = String(e);
