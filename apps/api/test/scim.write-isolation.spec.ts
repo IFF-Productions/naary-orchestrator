@@ -553,15 +553,44 @@ describe("elevated roles are out of a connection's reach", () => {
     },
   );
 
-  /** The refusal MUST be visible in the workspace: a 403 that only reaches the IdP's sync log
-   *  means nobody here learns a terminated admin still has access. */
-  it("records the refusal as an AuditEvent", async () => {
+  /**
+   * The refusal MUST be visible in the workspace: a 403 that only reaches the IdP's sync log
+   * means nobody here learns a terminated admin still has access. And since a human reads this
+   * sentence on the Activity screen, it is asserted as a SENTENCE — it has to name the person,
+   * the role and the action the reader must take.
+   */
+  it("records the refusal as an AuditEvent that says who, what role, and what to do", async () => {
     const id = await idFor("tenant-A", "admin@a.example");
     await provisioning.deprovision(CONN_A, id).catch(() => undefined);
     const entry = audit.record.mock.calls
       .map((c) => c[0])
       .find((a) => String(a.action).includes("REFUSED"));
     expect(entry).toMatchObject({ tenantId: "tenant-A", actor: "scim:conn-a" });
+    expect(String(entry?.action)).toContain("admin@a.example");
+    expect(String(entry?.action)).toContain('"admin"');
+    expect(String(entry?.action)).toContain("remove them in this workspace");
+  });
+
+  it("403s de-provisioning someone whose PENDING INVITATION is for an elevated role", async () => {
+    db.invitation.rows.push({
+      id: "i-admin",
+      tenantId: "tenant-A",
+      email: "future-admin@a.example",
+      role: "admin",
+      acceptedAt: null,
+      createdAt: NOW,
+      groupIds: [],
+    });
+    const id = await idFor("tenant-A", "future-admin@a.example");
+    await expect(provisioning.deprovision(CONN_A, id)).rejects.toMatchObject({
+      status: 403,
+    });
+    expect(db.invitation.rows.find((r) => r.id === "i-admin")).toBeTruthy();
+    const entry = audit.record.mock.calls
+      .map((c) => c[0])
+      .find((a) => String(a.action).includes("REFUSED"));
+    expect(String(entry?.action)).toContain("pending invitation");
+    expect(String(entry?.action)).toContain("revoke it in this workspace");
   });
 });
 

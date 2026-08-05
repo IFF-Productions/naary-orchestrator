@@ -252,7 +252,8 @@ export class ScimProvisioningService {
         acceptedAt: null,
         email: { equals: email, mode: "insensitive" },
       },
-      select: { id: true },
+      // `role` is read for the refusal message, not for a decision — see `refused`.
+      select: { id: true, role: true },
     });
 
     if (!membership && !invitation) {
@@ -273,7 +274,10 @@ export class ScimProvisioningService {
           membership.userId,
         );
       } catch (err) {
-        throw this.refused(ctx, err, email, membership.role);
+        throw this.refused(ctx, err, email, {
+          kind: "member",
+          role: membership.role,
+        });
       }
       // POST-CONDITION, not a log line. If the membership survives, the de-provision did not
       // happen, and answering 204 would tell the IdP a terminated user lost access when they
@@ -303,7 +307,10 @@ export class ScimProvisioningService {
         // The membership (if any) is already gone, so access IS revoked; what remains is a
         // pending invitation for an elevated role that this connection may not revoke. Not a
         // 204: the resource is not fully de-provisioned and the IdP must see that.
-        throw this.refused(ctx, err, email, "an invited");
+        throw this.refused(ctx, err, email, {
+          kind: "invitation",
+          role: invitation.role,
+        });
       }
       // The same post-condition, for the same reason: a surviving `acceptedAt: null` row is a
       // re-entry hole, and a 204 over one would report a de-provision that the user's next
@@ -354,20 +361,24 @@ export class ScimProvisioningService {
   /**
    * Turn a `MembersService` refusal into a SCIM error AND an AuditEvent.
    *
-   * The audit row is the point. A 403 that only reaches the IdP's sync log means the workspace
-   * never learns that a terminated admin still has access — the failure mode that makes the
-   * `admin` ceiling in {@link scimPrincipal} dangerous instead of merely conservative.
+   * The audit row is the point, and it is READ BY A HUMAN on the Activity screen: it is the
+   * only place a workspace learns that a terminated admin was NOT removed. A 403 that reaches
+   * nothing but the IdP's sync log is what would make the `admin` ceiling in
+   * {@link scimPrincipal} dangerous instead of merely conservative, so the sentence has to say
+   * exactly which person, which role, and what the reader must do.
    */
   private refused(
     ctx: ScimWriteContext,
     err: unknown,
     email: string,
-    role: string,
+    target: { kind: "member" | "invitation"; role: string },
   ): unknown {
     if (err instanceof ForbiddenException) {
       this.record(
         ctx,
-        `SCIM de-provision of ${email} REFUSED: ${role} is an elevated role — remove them in this workspace`,
+        target.kind === "member"
+          ? `SCIM de-provision of ${email} REFUSED: they hold the elevated role "${target.role}" here — remove them in this workspace`
+          : `SCIM de-provision of ${email} REFUSED: their pending invitation is for the elevated role "${target.role}" — revoke it in this workspace`,
         "DELETE",
         403,
       );
