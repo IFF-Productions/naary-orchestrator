@@ -58,8 +58,11 @@ export interface StepDetail {
   /**
    * True when the usage ledger says this node's TOKEN counts were the rule-6 fallback ESTIMATE —
    * the provider reported no usage, so the worker booked an estimate rather than a zero (#1060).
-   * Undefined/false ⇒ make no claim: the node either billed nothing metered, or the run predates
-   * the flag. Comes from the run state's `nodeUsage` map, never from the node's output.
+   * Comes from the run state's `nodeUsage` map, never from the node's output.
+   *
+   * False/undefined means only NOT MARKED. It is what a genuinely MEASURED ledger row produces,
+   * and equally what a node that billed nothing metered or a run predating the flag produces —
+   * this card cannot tell those apart and does not try (see `nodeEstimated`).
    */
   costEstimated?: boolean;
   /** The step's output from the run ctx (undefined = none yet). */

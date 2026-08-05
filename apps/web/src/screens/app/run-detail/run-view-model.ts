@@ -273,16 +273,30 @@ export function nodeTimeOf(
 }
 
 /**
- * Did this node's spend come from ESTIMATED token counts? (#1069)
+ * Should this node's spend be MARKED as resting on estimated token counts? (#1069)
  *
  * Shape-checked read of the run state's `nodeUsage` map — the usage ledger's provenance for the
  * nodes that billed, joined on (executionId, nodeId). The node's own output cannot answer this:
  * once a rule-6 fallback estimate has become a token count, it is the same integer a measurement
  * would have been.
  *
- * Returns `true` ONLY on an explicit `estimated: true`. Absent, malformed, or `false` all mean the
- * UI says nothing — including the false case, which is a real "measured" but needs no marker,
- * because marking one kind of claim is what distinguishes it from the other.
+ * BOOLEAN, NOT A TRI-STATE — deliberately, and worth not re-litigating. Three distinct situations
+ * come in: an explicit `estimated: true`, an explicit `estimated: false` (a real measurement), and
+ * no entry at all (a node that billed nothing metered, a run predating #1060, or a ledger read
+ * that failed). Only the first is a claim this screen makes, so the other two are the same answer
+ * to the only question asked here: no mark.
+ *
+ * Collapsing them is what keeps the UI honest rather than what costs it accuracy. If "measured"
+ * rendered as its own badge, its ABSENCE would start meaning "not measured" — and we'd be
+ * asserting that over every unmetered node and every pre-flag run, which is precisely the
+ * overstatement this change exists to remove. Marking one kind of claim, and only that kind, is
+ * what makes the mark mean something.
+ *
+ * The three-way distinction is NOT lost: it survives intact on the wire, where an absent key and
+ * `{ estimated: false }` are different values (`RunStateView.nodeUsage`, pinned by
+ * apps/api/test/executions.usage-provenance.spec.ts). A future surface that genuinely wants to
+ * say "provably metered" reads the map directly; this predicate is one question asked of it, not
+ * a lossy narrowing of the data.
  */
 export function nodeEstimated(
   nodeUsage: Record<string, unknown> | null | undefined,

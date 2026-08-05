@@ -24,10 +24,13 @@ export interface TimelineStep {
   /** Real per-step cost (the node output's costUsd); null → "—". */
   cost: string | null;
   /**
-   * The ledger says this step's TOKEN counts were the rule-6 fallback ESTIMATE, so the cost
-   * derived from them is approximate (#1069). Renders as a "~" on the cost column — the row is
-   * 66px of mono, so the qualifier has to be one character; the step card spells it out.
-   * Undefined ⇒ no claim (nothing metered, or a run predating the flag), never "measured".
+   * True when the ledger says this step's TOKEN counts were the rule-6 fallback ESTIMATE, so the
+   * cost derived from them is approximate (#1069). Renders as a "~" on the cost column — the row
+   * is 72px of mono, so the qualifier has to be one character; the step card spells it out.
+   *
+   * False/undefined is simply NOT MARKED — it covers a measured step, a step that billed nothing
+   * metered, and a run predating the flag alike. It is not a claim of its own, and callers do not
+   * distinguish those cases (see `nodeEstimated` for why the read collapses them).
    */
   costEstimated?: boolean;
 }

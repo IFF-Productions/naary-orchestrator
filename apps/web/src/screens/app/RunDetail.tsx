@@ -478,7 +478,8 @@ function RunView({ id }: { id: string }) {
           durationMs: t ? Math.max(0, t.f - t.s) : null,
           cost: stepCostText(state?.ctx[nid]),
           // #1069: whether that cost rests on ESTIMATED tokens — a ledger fact, joined by nodeId.
-          // Absent ⇒ left undefined, which the timeline and the log rows both read as "no claim".
+          // Boolean, not a tri-state: `nodeEstimated` answers only "does this row get marked?",
+          // and a node with no ledger entry answers that the same way a measured one does.
           costEstimated: nodeEstimated(state?.nodeUsage, nid),
         };
       }),
