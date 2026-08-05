@@ -16,7 +16,9 @@ const graph: GraphDef = {
   startNodeId: "start",
   nodes: [
     { id: "start", type: "start" },
-    { id: "notify", type: "email", config: { to: "ops@example.com" } },
+    // "email" is not a node type — the email node is `sendEmail`. The fixture named a type
+    // that has never existed; nothing checked it before #1099.
+    { id: "notify", type: "sendEmail", config: { to: "ops@example.com" } },
   ],
   edges: [{ from: "start", to: "notify" }],
 };

@@ -1,0 +1,38 @@
+// Typecheck this package's SOURCE **and** its `test/` files.
+//
+// Why a second project rather than adding `test/**/*.ts` to the sibling tsconfig.json: that
+// file is the BUILD config (`composite: true`, `outDir: "dist"`, referenced by the root
+// tsconfig). Keeping its `include` at `src/**` is what mechanically guarantees `dist/` can
+// never gain test files — a stronger guarantee than "we remembered to set rootDir". This
+// project is typecheck-only (`noEmit`, `composite: false`) and emits nothing at all.
+//
+// It runs via this package's `typecheck` script, which the root `pnpm typecheck`
+// (`tsc -b && pnpm -r run typecheck`) fans out to and CI gates on. Before #1099 these files
+// were checked by NOTHING: `tsc -b` only ever saw `src/**`, vitest transpiles specs through
+// swc (which STRIPS types without checking them), and `pnpm -r run typecheck` silently skips
+// any package that has no `typecheck` script.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "composite": false,
+    "noEmit": true,
+    // The build config pins rootDir to "src". Widen to the repo root: test/ sits outside src,
+    // and a couple of drift specs deliberately reach across package boundaries into another
+    // workspace's source (see packages/contracts/test/terminal-statuses.drift.spec.ts). Safe
+    // precisely because this project emits nothing, so rootDir has no layout consequence.
+    "rootDir": "../..",
+    // Model the runtime the TESTS actually run in, which is NOT the runtime the package SHIPS
+    // to. The build config compiles src to CommonJS (module: node16) because that is the
+    // published artifact; vitest loads specs through swc as ESM on Node 24. So specs legitimately
+    // use `import.meta`, extensionless relative imports and ES2022 library methods — all of which
+    // work under vitest and are errors under node16/CJS. Describing the test runtime here is what
+    // makes the check reflect reality. src loses nothing: this package is in the root
+    // tsconfig.json `references` list, so `tsc -b` still compiles src under the strict
+    // node16/es2021 build settings on every `pnpm typecheck` and `pnpm build`.
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "lib": ["es2022"],
+    "types": ["node", "vitest/globals"]
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts"]
+}

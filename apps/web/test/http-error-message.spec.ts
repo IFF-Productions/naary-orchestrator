@@ -28,7 +28,17 @@ function failWith(status: number, body: unknown) {
   );
 }
 
-const err = (p: Promise<unknown>) => p.catch((e) => e as HttpError);
+// Returns the rejection, typed. `p.catch((e) => e as HttpError)` widened back to `unknown`
+// (the resolved branch is still in the union), so every `e.message` read below was a type
+// error — invisible until #1099 put these files under a typechecker.
+const err = async (p: Promise<unknown>): Promise<HttpError> => {
+  try {
+    await p;
+  } catch (e) {
+    return e as HttpError;
+  }
+  throw new Error("expected the request to reject, but it resolved");
+};
 
 describe("http() error message", () => {
   it("leads with the server's reason and keeps the request context", async () => {

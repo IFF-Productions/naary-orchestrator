@@ -7,6 +7,7 @@ vi.mock("../src/lib/firebase-lazy", () => ({
 }));
 
 import { graphsApi } from "../src/lib/api/graphs";
+import type { GraphDef } from "@naary/dsl";
 
 /** A fetch() Response whose body streams `sse` as one or more UTF-8 chunks. */
 function sseResponse(sse: string, chunkSize = 9) {
@@ -113,7 +114,9 @@ describe("graphsApi.generateGraphStream (live frames)", () => {
 // a replacement workflow back.
 // ---------------------------------------------------------------------------
 describe("graphsApi.generateGraphStream (`previous` ⇒ edit)", () => {
-  const GRAPH = {
+  // Annotated, not inferred: without it `type` widens to `string` and the fixture is not a
+  // GraphDef, so passing it to generateGraphStream did not typecheck.
+  const GRAPH: GraphDef = {
     startNodeId: "s",
     nodes: [{ id: "s", type: "start" }],
     edges: [],

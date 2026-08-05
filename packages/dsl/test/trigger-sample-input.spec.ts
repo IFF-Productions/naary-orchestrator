@@ -75,7 +75,7 @@ describe("trigger sample input (#983)", () => {
   });
 
   it("is not fooled by a hostile deserialized node type", () => {
-    for (const evil of ["__proto__", "constructor", "toString"] as NodeType[]) {
+    for (const evil of ["__proto__", "constructor", "toString"] as unknown as NodeType[]) {
       expect(acceptsSampleInput(evil), evil).toBe(false);
     }
   });

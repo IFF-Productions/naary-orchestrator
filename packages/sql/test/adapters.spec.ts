@@ -141,7 +141,9 @@ describe("postgresAdapter.runWrite", () => {
           ? { rows: [], rowCount: 2 }
           : { rows: [], rowCount: 0 };
       },
-      end: async () => calls.push("END"),
+      end: async () => {
+        calls.push("END");
+      },
     });
     const res = await postgresAdapter.runWrite("dsn", "UPDATE t SET x=1", [], {
       timeoutMs: 1000,
@@ -159,7 +161,9 @@ describe("postgresAdapter.runWrite", () => {
         if (text.startsWith("UPDATE")) throw new Error("constraint");
         return { rows: [], rowCount: 0 };
       },
-      end: async () => calls.push("END"),
+      end: async () => {
+        calls.push("END");
+      },
     });
     await expect(
       postgresAdapter.runWrite("dsn", "UPDATE t SET x=1", [], {
@@ -178,7 +182,9 @@ describe("mysqlAdapter", () => {
         log.push(sql);
         return [rowsOrResult, []] as [unknown, unknown];
       },
-      end: async () => log.push("end"),
+      end: async () => {
+        log.push("end");
+      },
     };
   }
 

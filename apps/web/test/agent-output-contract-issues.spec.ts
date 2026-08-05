@@ -50,7 +50,10 @@ const EDGES: CanvasEdge[] = [
     id: "e2",
     source: "classify",
     target: "review",
-    condition: { path: "classify.output.flagged", op: "eq", value: true },
+    // A CANVAS edge, so the condition is an EdgeConditionDraft and its `value` is the raw
+    // text the user typed — `compileGraph` is what turns "true" into a boolean (see the
+    // round-trip test below). The fixture said `true`, which is not an EdgeConditionDraft.
+    condition: { path: "classify.output.flagged", op: "eq", value: "true" },
   },
   { id: "e3", source: "classify", target: "end" },
 ];

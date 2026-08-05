@@ -439,7 +439,7 @@ describe("canvas top bar — desktop tier (#997)", () => {
     // rather than lowering the name, so the unfrozen factors cannot sum to under 1 and trip
     // §9.7 3b the way the pill's own factor did.
     expect(meta).toMatch(/flexShrink: (\d+)/);
-    expect(Number(meta.match(/flexShrink: (\d+)/)[1])).toBeGreaterThan(1);
+    expect(Number(meta.match(/flexShrink: (\d+)/)?.[1])).toBeGreaterThan(1);
     // A tooltip that omits the very string that got truncated is not a fallback, so BOTH branches
     // name the key now — the draft one used not to.
     expect(meta.match(/Workflow key: \$\{activeKey\}/g)?.length).toBe(2);

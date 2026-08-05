@@ -36,7 +36,7 @@ describe("node config registry (TYPED-DSL Phase 1)", () => {
   it("is not fooled by prototype-chain keys in a hostile deserialized type", () => {
     // A graph parsed from untrusted JSON could carry type:"__proto__"/"constructor". These live
     // on Object.prototype, so `in`/`[type]` would report/return them — the own-property check must not.
-    for (const evil of ["__proto__", "constructor", "toString"] as NodeType[]) {
+    for (const evil of ["__proto__", "constructor", "toString"] as unknown as NodeType[]) {
       expect(hasConcreteConfig(evil), evil).toBe(false);
       // still returns a usable zod schema (the permissive fallback), never a prototype method
       expect(nodeConfigSchema(evil).safeParse({}).success, evil).toBe(true);

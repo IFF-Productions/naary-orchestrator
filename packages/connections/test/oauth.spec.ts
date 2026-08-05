@@ -8,6 +8,7 @@ import {
   type OAuthConfig,
 } from "../src/oauth";
 import { connectionSecretKey } from "../src/connection.service";
+import type { SecretStore } from "@naary/secrets";
 
 const CONN = "conn-1";
 /** #592 seam: the token endpoint is a fake host — skip the real DNS egress guard. */
@@ -21,15 +22,28 @@ const baseCfg: OAuthConfig = {
 };
 
 function fakeStore(cfg: OAuthConfig) {
-  const put = vi.fn(async () => {});
+  // Spell out put's real (tenantId, environmentId, key, value) signature. It used to be
+  // `vi.fn(async () => {})`, which typed `put.mock.calls[0]` as the empty tuple — so every
+  // `put.mock.calls[0][3]` assertion below was a type error nothing checked (#1099).
+  const put = vi.fn(
+    async (
+      _tenantId: string,
+      _environmentId: string,
+      _key: string,
+      _value: string,
+    ) => {},
+  );
   const prunePrefixOlderThan = vi.fn(async () => 0);
   return {
+    // `SecretStore` is a class, so a structural literal cannot satisfy it. Cast to the real
+    // type rather than `as never` — `never` cannot be spread, which broke the revoked-store
+    // variant further down.
     store: {
       get: async () => JSON.stringify(cfg),
       put,
       remove: async () => {},
       prunePrefixOlderThan,
-    } as never,
+    } as unknown as SecretStore,
     put,
     prunePrefixOlderThan,
   };

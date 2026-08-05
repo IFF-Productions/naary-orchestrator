@@ -26,8 +26,13 @@ describe("encodeValue — every Firestore type", () => {
   it("encodes an integer as a STRING — the wire-format trap", () => {
     // This is the single most important assertion in the file. integerValue is a JSON
     // STRING, not a JSON number; emitting a number here makes Firestore reject the write.
-    expect(encodeValue(5)).toEqual({ integerValue: "5" });
-    expect(encodeValue(5).integerValue).toBeTypeOf("string");
+    const five = encodeValue(5);
+    expect(five).toEqual({ integerValue: "5" });
+    // `FirestoreValue` is a union, so the property has to be narrowed before it can be read.
+    // The `in` check is also the assertion "this variant, not some other one".
+    if (!("integerValue" in five))
+      throw new Error("expected an integerValue variant");
+    expect(five.integerValue).toBeTypeOf("string");
     expect(encodeValue(0)).toEqual({ integerValue: "0" });
     expect(encodeValue(-42)).toEqual({ integerValue: "-42" });
   });
@@ -35,7 +40,10 @@ describe("encodeValue — every Firestore type", () => {
   it("encodes a non-integral number as a double", () => {
     expect(encodeValue(5.5)).toEqual({ doubleValue: 5.5 });
     expect(encodeValue(-0.25)).toEqual({ doubleValue: -0.25 });
-    expect(encodeValue(5.5).doubleValue).toBeTypeOf("number");
+    const half = encodeValue(5.5);
+    if (!("doubleValue" in half))
+      throw new Error("expected a doubleValue variant");
+    expect(half.doubleValue).toBeTypeOf("number");
   });
 
   it("gates on isSafeInteger, NOT isInteger — 1e21 must not become '1e+21'", () => {
