@@ -90,9 +90,11 @@ describe("budget_threshold formatter", () => {
     const content = card.attachments[0].content;
     const factSet = content.body.find((b) => b.type === "FactSet");
     // `find` returns `| undefined`, so the old `as { facts: ... }` cast did not typecheck
-    // (insufficient overlap). Assert presence instead — a missing FactSet is itself a failure.
-    expect(factSet, "card body should contain a FactSet").toBeDefined();
-    expect(factSet?.facts).toEqual([
+    // (insufficient overlap). Narrow by throwing rather than reaching through `?.`: a missing
+    // FactSet then says so, instead of degrading into `undefined` and failing the toEqual
+    // below with a diff against the whole expected array.
+    if (!factSet) throw new Error("card body should contain a FactSet");
+    expect(factSet.facts).toEqual([
       { title: "Threshold", value: "80%" },
       { title: "Monthly cap", value: "$400.00" },
       { title: "Spend (incl. reserved)", value: "$321.40" },
