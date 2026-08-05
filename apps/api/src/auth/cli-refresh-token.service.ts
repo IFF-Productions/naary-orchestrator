@@ -175,8 +175,9 @@ export class CliRefreshTokenService {
     return this.afterRotation(fresh, now);
   }
 
-  /** Revoke every live token in a rotation family. Used by reuse detection (and, in slice 4, by
-   *  `naary logout`). Idempotent: already-revoked rows are left with their original timestamp. */
+  /** Revoke every live token in a rotation family. Used by reuse detection, by offboarding via
+   *  {@link revokeUserSessions} (#1117), and, in slice 4, by `naary logout`. Idempotent:
+   *  already-revoked rows are left with their original timestamp. */
   async revokeFamily(
     familyId: string,
     now: Date = new Date(),
@@ -186,6 +187,45 @@ export class CliRefreshTokenService {
       data: { revokedAt: now },
     });
     return res.count;
+  }
+
+  /**
+   * Revoke EVERY live family this user holds in ONE workspace — the offboarding surface (#1117).
+   *
+   * A `CliRefreshToken` is keyed to a `userId` and carries a 90-day absolute cap, so it outlives
+   * the `Membership` it was minted from: without this, removing a member (or demoting them out of
+   * the roles that may hold a CLI session) left them rotating a fresh 12h `nry_` token every day
+   * for up to a quarter, which is not what `members.service.ts` promises.
+   *
+   * TENANT-SCOPED, and that is the whole reason this exists rather than callers passing a bare
+   * `userId`: the same human can hold a CLI session in several workspaces, and being removed from
+   * one must not sign them out of the others. The `(tenantId, userId)` index is exactly this read.
+   *
+   * It resolves families and delegates to {@link revokeFamily} rather than issuing its own
+   * `updateMany`, so there stays ONE way a family dies — reuse detection, logout and offboarding
+   * all leave the same state, and a future change to what revocation means (an audit row, a
+   * metric) has one place to land. A family never spans users or tenants — successors copy
+   * `tenantId`/`userId` unchanged from the row they supersede — so revoking by id inside a
+   * tenant-scoped read cannot reach outside it.
+   *
+   * Idempotent, and a no-op (zero queries past the read) for the overwhelmingly common case of a
+   * user who never used the CLI.
+   */
+  async revokeUserSessions(
+    tenantId: string,
+    userId: string,
+    now: Date = new Date(),
+  ): Promise<{ families: number; tokens: number }> {
+    const live = await getPrisma().cliRefreshToken.findMany({
+      where: { tenantId, userId, revokedAt: null },
+      select: { familyId: true },
+    });
+    const familyIds = [...new Set(live.map((r) => r.familyId))];
+    let tokens = 0;
+    for (const familyId of familyIds) {
+      tokens += await this.revokeFamily(familyId, now);
+    }
+    return { families: familyIds.length, tokens };
   }
 
   /** The already-rotated branch: grace-window sibling, or reuse ⇒ kill the family. */

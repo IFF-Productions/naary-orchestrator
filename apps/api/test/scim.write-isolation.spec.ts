@@ -152,6 +152,13 @@ function table(
         return row;
       },
     ),
+    /** MUTATES the stored rows — #1117's revocation is only observable because a later
+     *  `rotate()` reads the `revokedAt` this writes. */
+    updateMany: vi.fn(async ({ where, data }: { where: Row; data: Row }) => {
+      const hit = rows.filter((r) => matches(r, where));
+      for (const r of hit) Object.assign(r, data);
+      return { count: hit.length };
+    }),
     deleteMany: vi.fn(async ({ where }: { where: Row }) => {
       const keep = rows.filter((r) => !matches(r, where));
       const count = rows.length - keep.length;
@@ -172,11 +179,20 @@ const db = {
   permissionGroup: table([]),
   scimIdentity: table([], [["id"], ["tenantId", "email"]]),
   tenantSettings: table([]),
+  // #1117 — CLI rotation families. `tokenHash` is the unique `rotate()` looks up by; the three
+  // nullable columns default to NULL exactly as Postgres does, which is how "still live" is
+  // spelled in every query on this path.
+  cliRefreshToken: table([], [["id"], ["tokenHash"]], {
+    lastUsedAt: null,
+    rotatedAt: null,
+    revokedAt: null,
+  }),
   $transaction: vi.fn(async (ops: Promise<unknown>[]) => Promise.all(ops)),
 };
 
 vi.mock("@naary/db", () => ({ getPrisma: () => db }));
 
+import { CliRefreshTokenService } from "../src/auth/cli-refresh-token.service";
 import { NO_HELD_APPROVALS } from "../src/executions/executions.approval-holds";
 import { MembersService } from "../src/members/members.service";
 import { ScimProvisioningService } from "../src/scim/scim-provisioning.service";
@@ -194,12 +210,17 @@ const audit = {
   record: vi.fn(async (_input: Record<string, unknown>) => {}),
 };
 
+/** REAL (#1117), like MembersService itself: de-provisioning must kill the subject's CLI
+ *  rotation families, and that only means anything if a later rotate() is refused. */
+const cliSessions = new CliRefreshTokenService();
+
 const members = new MembersService(
   memberships as never,
   mailer as never,
   permissions as never,
   executions as never,
   audit as never,
+  cliSessions,
 );
 const users = new ScimUsersService();
 const provisioning = new ScimProvisioningService(
@@ -232,6 +253,7 @@ function seed(): void {
     db.permissionGroup,
     db.scimIdentity,
     db.tenantSettings,
+    db.cliRefreshToken,
   ]) {
     t.rows.length = 0;
     for (const fn of Object.values(t)) {
@@ -403,6 +425,33 @@ describe("de-provisioning routes through MembersService.removeMember", () => {
     expect(memberships.invalidate).toHaveBeenCalledWith("uid-shared-a");
     expect(permissions.invalidateTenant).toHaveBeenCalledWith("tenant-A");
     expect(executions.heldApprovals).toHaveBeenCalled();
+  });
+
+  /**
+   * #1117 — and the reason it is asserted HERE rather than only in members.cli-session-
+   * revocation.spec.ts: a directory sync is the offboarding path nobody watches, and it inherits
+   * the CLI revocation only because it routes through `removeMember`. This file's own trap makes
+   * the negative half sharp: `shared@x.example` holds a CLI session in BOTH workspaces, so a
+   * revoke that resolved families by `userId` alone — or by email — would sign them out of
+   * tenant B on a tenant-A de-provision.
+   */
+  it("kills the subject's CLI refresh family — and only in the de-provisioned workspace", async () => {
+    const inA = await cliSessions.issue("tenant-A", "uid-shared-a");
+    const inB = await cliSessions.issue("tenant-B", "uid-shared-b");
+    // Both live before the de-provision, so neither assertion below can pass vacuously.
+    expect((await cliSessions.rotate(inA.refreshToken)).ok).toBe(true);
+
+    const aId = await idFor("tenant-A", "shared@x.example");
+    await provisioning.deprovision(CONN_A, aId);
+
+    // A terminated employee's CLI is dead on the next refresh, not in 90 days.
+    const next = await cliSessions.rotate(inA.refreshToken);
+    expect(next).toMatchObject({ ok: false });
+    expect(
+      db.cliRefreshToken.rows.filter((r) => r.revokedAt !== null),
+    ).not.toHaveLength(0);
+    // Tenant B never asked for this and must be untouched.
+    expect((await cliSessions.rotate(inB.refreshToken)).ok).toBe(true);
   });
 
   it("scopes the group delete by tenant, never by uid alone", async () => {
