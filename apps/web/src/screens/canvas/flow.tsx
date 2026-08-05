@@ -70,6 +70,7 @@ export function isEntryKind(kind: NodeType): boolean {
     kind === "scheduleTrigger" ||
     kind === "pollTrigger" ||
     kind === "kafkaTrigger" ||
+    kind === "mqttTrigger" ||
     kind === "errorTrigger" ||
     kind === "formTrigger" ||
     kind === "chatTrigger"

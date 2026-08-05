@@ -160,6 +160,102 @@ export function renderTriggerSections(c: ConfigSectionCtx) {
         </>
       )}
 
+      {kind === "mqttTrigger" && (
+        <>
+          <Labeled label="MQTT connection">
+            <ConnectionSelect
+              connections={connections}
+              types={CONNECTION_TYPES[kind] ?? []}
+              value={str("connectionId")}
+              onChange={(id) => onChange({ connectionId: id })}
+            />
+          </Labeled>
+          <div
+            style={{
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-3)",
+              marginTop: -6,
+              lineHeight: 1.5,
+            }}
+          >
+            Starts ONE run per message. Messages are collected on the interval
+            below, so a message waits up to that long before its run starts. The
+            broker keeps a session for this trigger while it is not connected,
+            so anything published in between is waiting at the next check —
+            provided it was sent at QoS 1.
+          </div>
+
+          <Labeled label="Topic filter">
+            <input
+              value={str("topic")}
+              onChange={(e) => onChange({ topic: e.target.value })}
+              style={inputStyle}
+              placeholder="sensors/+/temp"
+            />
+          </Labeled>
+          <div
+            style={{
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-3)",
+              marginTop: -6,
+              lineHeight: 1.5,
+            }}
+          >
+            Wildcards are allowed here: <code>+</code> matches one level,{" "}
+            <code>#</code> matches the rest. Two workflows can watch the same
+            topic — unlike a Kafka consumer group, each gets its own session and
+            so each sees EVERY matching message, not a share of them. Changing
+            this filter starts a fresh session: anything queued under the old
+            one is left behind.
+          </div>
+
+          <Labeled label="Check every (seconds)">
+            <input
+              type="number"
+              value={num("intervalSeconds") ?? 30}
+              onChange={(e) =>
+                onChange({ intervalSeconds: Number(e.target.value) })
+              }
+              style={inputStyle}
+              placeholder="30"
+            />
+          </Labeled>
+
+          <Labeled label="Messages per check (max)">
+            <input
+              type="number"
+              value={num("maxMessages") ?? 50}
+              onChange={(e) =>
+                onChange({ maxMessages: Number(e.target.value) })
+              }
+              style={inputStyle}
+              placeholder="50"
+            />
+          </Labeled>
+
+          <Labeled label="Deliver at QoS 0 (fire and forget)">
+            <input
+              type="checkbox"
+              checked={config.qos === 0}
+              onChange={(e) => onChange({ qos: e.target.checked ? 0 : 1 })}
+            />
+          </Labeled>
+          <div
+            style={{
+              fontSize: "var(--text-xs)",
+              color: "var(--ink-3)",
+              marginTop: -6,
+              lineHeight: 1.5,
+            }}
+          >
+            Leave this off unless you know you want it. A broker does not queue
+            QoS 0 messages for a client that is away, so with it on you only
+            receive what happens to arrive during a check — which is a few
+            seconds in every interval.
+          </div>
+        </>
+      )}
+
       {kind === "scheduleTrigger" && (
         <>
           <Labeled label="Cron expression">

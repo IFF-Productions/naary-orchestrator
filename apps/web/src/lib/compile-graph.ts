@@ -35,6 +35,7 @@ const ENTRY_TYPES: ReadonlySet<NodeType> = new Set<NodeType>([
   "chatTrigger",
   "pollTrigger",
   "kafkaTrigger",
+  "mqttTrigger",
   "errorTrigger",
 ]);
 

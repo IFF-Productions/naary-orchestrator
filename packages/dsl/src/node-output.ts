@@ -55,6 +55,33 @@ export interface NodeOutputMap {
     headers: Record<string, string>;
     timestamp: string;
   };
+  /**
+   * One MQTT message. `payload` follows kafkaTrigger's rule — parsed when the body was JSON, the
+   * raw string otherwise, since a sensor topic carrying a bare number is normal.
+   *
+   * THERE IS NO MESSAGE ID HERE, and its absence is the design. MQTT's `packetId` is scoped to one
+   * session and RE-USED as soon as it is acknowledged, so two unrelated messages minutes apart
+   * routinely share one. Exposing it would invite exactly one use — treating it as an identity —
+   * and that mistake is silent data LOSS (the second message looks like a duplicate of the first),
+   * not a visible duplicate. `dup` carries the only honest part of that information.
+   */
+  mqttTrigger: {
+    /** The concrete topic the message was published to — not the filter that matched it. */
+    topic: string;
+    payload: unknown;
+    /** Delivery QoS of this message (≤ the subscription's). */
+    qos: number;
+    /** The broker's RETAIN flag: true ⇒ this is the topic's stored last-known value, replayed on
+     *  subscribe, and may be much older than the run. A brand-new trigger's first drain is where
+     *  this shows up; branch on it if a stale value would be wrong to act on. */
+    retain: boolean;
+    /** The broker's DUP flag: it believes it may have delivered this message before. MQTT gives no
+     *  id to dedupe on, so this is the only warning an author gets — and it is the broker's
+     *  opinion, not a guarantee either way. */
+    dup: boolean;
+    /** When the drain RECEIVED it (ISO-8601). Not a publish time: MQTT 3.1.1 carries none. */
+    receivedAt: string;
+  };
 
   // --- AI / tools (structured, cost-accumulating) ---
   agent: {

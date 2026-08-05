@@ -53,6 +53,7 @@ import type {
   NumberConfig,
   PollTriggerConfig,
   KafkaTriggerConfig,
+  MqttTriggerConfig,
   RandomConfig,
   RenameKeysConfig,
   RespondToWebhookConfig,
@@ -89,6 +90,7 @@ export interface NodeConfigMap {
   errorTrigger: ErrorTriggerConfig;
   pollTrigger: PollTriggerConfig;
   kafkaTrigger: KafkaTriggerConfig;
+  mqttTrigger: MqttTriggerConfig;
   scheduleTrigger: ScheduleTriggerConfig;
   formTrigger: FormTriggerConfig;
   chatTrigger: ChatTriggerConfig;

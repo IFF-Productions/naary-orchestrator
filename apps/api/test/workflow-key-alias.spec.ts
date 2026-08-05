@@ -201,6 +201,7 @@ function scheduleStub() {
     syncPollSchedule: vi.fn(async () => undefined),
     syncCronSchedule: vi.fn(async () => undefined),
     syncKafkaSchedule: vi.fn(async () => undefined),
+    syncMqttSchedule: vi.fn(async () => undefined),
     teardownForWorkflow: vi.fn(async () => undefined),
   };
 }

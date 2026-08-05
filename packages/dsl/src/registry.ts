@@ -70,6 +70,7 @@ import type {
   McpServerTriggerNodeConfig,
   PollTriggerNodeConfig,
   KafkaTriggerNodeConfig,
+  MqttTriggerNodeConfig,
   RandomNodeConfig,
   RenameKeysNodeConfig,
   RespondToWebhookNodeConfig,
@@ -298,6 +299,17 @@ const CONFIG_SCHEMAS = {
     maxMessages: z.number().optional(),
     maxWaitMs: z.number().optional(),
     fromBeginning: z.boolean().optional(),
+  }),
+  mqttTrigger: z.object({
+    ...triggerSampleInput,
+    connectionId: z.string(),
+    topic: z.string(),
+    // 0 or 1 only. 2 is out of scope (#1086 §6), and offering it would imply an exactly-once
+    // handshake this pipeline does not implement.
+    qos: z.union([z.literal(0), z.literal(1)]).optional(),
+    intervalSeconds: z.number().optional(),
+    maxMessages: z.number().optional(),
+    maxWaitMs: z.number().optional(),
   }),
 
   // --- AI ---
@@ -1001,6 +1013,7 @@ export type ScheduleTriggerConfig = z.infer<
 >;
 export type PollTriggerConfig = z.infer<typeof CONFIG_SCHEMAS.pollTrigger>;
 export type KafkaTriggerConfig = z.infer<typeof CONFIG_SCHEMAS.kafkaTrigger>;
+export type MqttTriggerConfig = z.infer<typeof CONFIG_SCHEMAS.mqttTrigger>;
 export type AgentConfig = z.infer<typeof CONFIG_SCHEMAS.agent>;
 export type CodeAgentConfig = z.infer<typeof CONFIG_SCHEMAS.codeAgent>;
 export type TextToSpeechConfig = z.infer<typeof CONFIG_SCHEMAS.textToSpeech>;
@@ -1079,6 +1092,7 @@ const _configParity: {
   mcpServerTrigger: Exact<McpServerTriggerConfig, McpServerTriggerNodeConfig>;
   pollTrigger: Exact<PollTriggerConfig, PollTriggerNodeConfig>;
   kafkaTrigger: Exact<KafkaTriggerConfig, KafkaTriggerNodeConfig>;
+  mqttTrigger: Exact<MqttTriggerConfig, MqttTriggerNodeConfig>;
   codeAgent: Exact<CodeAgentConfig, CodeAgentNodeConfig>;
   textToSpeech: Exact<TextToSpeechConfig, TextToSpeechNodeConfig>;
   mcpTool: Exact<McpToolConfig, McpToolNodeConfig>;
@@ -1141,6 +1155,7 @@ const _configParity: {
   mcpServerTrigger: true,
   pollTrigger: true,
   kafkaTrigger: true,
+  mqttTrigger: true,
   codeAgent: true,
   textToSpeech: true,
   mcpTool: true,

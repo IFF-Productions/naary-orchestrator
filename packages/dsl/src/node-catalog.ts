@@ -82,6 +82,17 @@ export const NODE_CATALOG: Record<NodeType, NodeCatalogEntry> = {
     config:
       "{ connectionId, topic, groupId, intervalSeconds?, maxMessages?, maxWaitMs?, fromBeginning?, sampleInput? }",
   },
+  mqttTrigger: {
+    group: "trigger",
+    entry: true,
+    sampleInput: true,
+    summary:
+      "One run per MQTT message, drained on an interval over a persistent QoS-1 session; output is " +
+      "the message {topic, payload, qos, retain, dup, receivedAt}. `topic` is a FILTER — wildcards " +
+      "(+ / #) are allowed, unlike mqttPublish.",
+    config:
+      "{ connectionId, topic, qos?, intervalSeconds?, maxMessages?, maxWaitMs?, sampleInput? }",
+  },
   scheduleTrigger: {
     group: "trigger",
     entry: true,

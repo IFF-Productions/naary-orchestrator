@@ -193,10 +193,17 @@ export {
   callKafkaConsume,
   callKafkaCommit,
 } from "./activities/kafka";
-export { __mqttDeps, callMqttPublish } from "./activities/mqtt";
+export {
+  __mqttDeps,
+  callMqttPublish,
+  callMqttConsume,
+} from "./activities/mqtt";
 export type {
   MqttPublishActivityConfig,
   MqttPublishResult,
+  MqttConsumeActivityConfig,
+  MqttConsumeResult,
+  MqttDrainedMessage,
 } from "./activities/mqtt";
 
 export type {

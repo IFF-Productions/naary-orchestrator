@@ -159,6 +159,8 @@ const NODE_IPATH: Partial<Record<NodeType, string>> = {
   kafkaPublish: "M4 7h16M4 12h10M4 17h16M17 9l3 3-3 3",
   // Mirror of kafkaPublish's glyph with the arrow reversed — it consumes rather than produces.
   kafkaTrigger: "M20 7H4m16 5H10m10 5H4M7 9l-3 3 3 3",
+  // Same consume-arrow idea as kafkaTrigger, over the antenna/waves MQTT is drawn with.
+  mqttTrigger: "M5 12a7 7 0 0 1 7-7m-7 7a7 7 0 0 0 7 7m2-7h6m-3-3 3 3-3 3",
   // Radio waves out of a point — the MQTT publish/broadcast shape.
   mqttPublish:
     "M12 18a1 1 0 1 0 0-2 1 1 0 0 0 0 2zM8.5 13.5a5 5 0 0 1 7 0M5.5 10.5a9 9 0 0 1 13 0",
