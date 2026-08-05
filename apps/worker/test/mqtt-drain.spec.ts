@@ -171,13 +171,23 @@ function fakeMqtt(
   };
 
   const mod = {
+    /** Deliver the backlog, then fail the SUBSCRIBE — the real ordering, since a session's queued
+     *  messages arrive after CONNACK and before the SUBACK. */
+    failSubscribeAfterDelivery: false,
+    /** Emit a socket `error` once the backlog has been delivered, i.e. after connect resolved. */
+    emitErrorAfterDelivery: false,
     connect(_url: string, options: Record<string, unknown>) {
       record.options = options;
       const once: Record<string, (arg: unknown) => void> = {};
+      const on: Record<string, (arg: unknown) => void> = {};
       const client = {
         handleMessage: (_p: unknown, done: (e?: Error) => void) => done(),
         once(event: string, fn: (arg: unknown) => void) {
           once[event] = fn;
+          return client;
+        },
+        on(event: string, fn: (arg: unknown) => void) {
+          on[event] = fn;
           return client;
         },
         connect() {
@@ -191,6 +201,16 @@ function fakeMqtt(
         },
         async subscribeAsync(topic: string, o: unknown) {
           record.subscriptions.push({ topic, opts: o });
+          if (mod.failSubscribeAfterDelivery || mod.emitErrorAfterDelivery) {
+            // A session's backlog lands before the SUBACK, so deliver FIRST and only then fail.
+            // That is the ordering that makes the bug interesting: messages are already acked.
+            await deliver();
+            if (mod.failSubscribeAfterDelivery) {
+              throw new Error("simulated broker failure during subscribe");
+            }
+            on.error?.(new Error("simulated socket failure mid-drain"));
+            return [];
+          }
           // The burst arrives after the SUBACK in the ordinary case.
           void deliver();
           return [];
@@ -223,7 +243,7 @@ function fakeMqtt(
       return client;
     },
   };
-  return { mod: mod as never, record };
+  return { mod, record };
 }
 
 describe("callMqttConsume — the session client, and the ack discipline", () => {
@@ -251,7 +271,7 @@ describe("callMqttConsume — the session client, and the ack discipline", () =>
 
   it("connects with clean:false, MQTT 3.1.1, and the DERIVED client id", async () => {
     const { mod, record } = fakeMqtt([]);
-    vi.spyOn(__mqttDeps, "loadMqtt").mockResolvedValue(mod);
+    vi.spyOn(__mqttDeps, "loadMqtt").mockResolvedValue(mod as never);
     await callMqttConsume(cfg(), META);
 
     // The whole slice in three options. `clean: true` here would tell the broker to discard the
@@ -268,7 +288,7 @@ describe("callMqttConsume — the session client, and the ack discipline", () =>
 
   it("subscribes at QoS 1 by default — the broker queues nothing at QoS 0", async () => {
     const { mod, record } = fakeMqtt([]);
-    vi.spyOn(__mqttDeps, "loadMqtt").mockResolvedValue(mod);
+    vi.spyOn(__mqttDeps, "loadMqtt").mockResolvedValue(mod as never);
     await callMqttConsume(cfg(), META);
     expect(record.subscriptions).toEqual([
       { topic: "sensors/+/temp", opts: { qos: 1 } },
@@ -281,7 +301,7 @@ describe("callMqttConsume — the session client, and the ack discipline", () =>
       { payload: "21.5" },
       { payload: "not,json,at,all" },
     ]);
-    vi.spyOn(__mqttDeps, "loadMqtt").mockResolvedValue(mod);
+    vi.spyOn(__mqttDeps, "loadMqtt").mockResolvedValue(mod as never);
     const res = await callMqttConsume(cfg(), META);
 
     expect(res.messages[0].payload).toEqual({ tempC: 21.5 });
@@ -299,7 +319,7 @@ describe("callMqttConsume — the session client, and the ack discipline", () =>
       { payload: "b" },
       { payload: "c" },
     ]);
-    vi.spyOn(__mqttDeps, "loadMqtt").mockResolvedValue(mod);
+    vi.spyOn(__mqttDeps, "loadMqtt").mockResolvedValue(mod as never);
     const res = await callMqttConsume(cfg({ maxMessages: 2 }), META);
 
     expect(res.messages.map((m) => m.payload)).toEqual(["a", "b"]);
@@ -318,7 +338,7 @@ describe("callMqttConsume — the session client, and the ack discipline", () =>
       { payload: big },
       { payload: big },
     ]);
-    vi.spyOn(__mqttDeps, "loadMqtt").mockResolvedValue(mod);
+    vi.spyOn(__mqttDeps, "loadMqtt").mockResolvedValue(mod as never);
     const res = await callMqttConsume(cfg({ maxMessages: 100 }), META);
 
     expect(res.stoppedAt?.reason).toBe("maxBytes");
@@ -331,7 +351,7 @@ describe("callMqttConsume — the session client, and the ack discipline", () =>
     // A single oversized message must come through. Refusing it would leave it at the head of the
     // session queue to be refused again on every drain, blocking everything behind it.
     const { mod } = fakeMqtt([{ payload: "y".repeat(900 * 1024) }]);
-    vi.spyOn(__mqttDeps, "loadMqtt").mockResolvedValue(mod);
+    vi.spyOn(__mqttDeps, "loadMqtt").mockResolvedValue(mod as never);
     const res = await callMqttConsume(cfg(), META);
     expect(res.messages).toHaveLength(1);
   });
@@ -340,7 +360,7 @@ describe("callMqttConsume — the session client, and the ack discipline", () =>
     const { mod } = fakeMqtt([{ payload: "22.0", retain: true }], {
       sessionPresent: false,
     });
-    vi.spyOn(__mqttDeps, "loadMqtt").mockResolvedValue(mod);
+    vi.spyOn(__mqttDeps, "loadMqtt").mockResolvedValue(mod as never);
     const res = await callMqttConsume(cfg(), META);
 
     expect(res.messages).toHaveLength(1);
@@ -363,7 +383,7 @@ describe("callMqttConsume — the session client, and the ack discipline", () =>
       ],
       { sessionPresent: true },
     );
-    vi.spyOn(__mqttDeps, "loadMqtt").mockResolvedValue(mod);
+    vi.spyOn(__mqttDeps, "loadMqtt").mockResolvedValue(mod as never);
     const res = await callMqttConsume(cfg(), META);
 
     expect(res.messages.map((m) => m.payload)).toEqual([22.5]);
@@ -375,7 +395,7 @@ describe("callMqttConsume — the session client, and the ack discipline", () =>
 
   it("reports sessionPresent — the only place a discarded backlog is ever visible", async () => {
     const { mod } = fakeMqtt([], { sessionPresent: true });
-    vi.spyOn(__mqttDeps, "loadMqtt").mockResolvedValue(mod);
+    vi.spyOn(__mqttDeps, "loadMqtt").mockResolvedValue(mod as never);
     expect((await callMqttConsume(cfg(), META)).sessionPresent).toBe(true);
   });
 
@@ -383,14 +403,61 @@ describe("callMqttConsume — the session client, and the ack discipline", () =>
     // `end(true)` would discard unwritten PUBACKs. The broker would then redeliver those messages
     // — and MQTT having no dedupe key, every one of them becomes a second run.
     const { mod, record } = fakeMqtt([{ payload: "a" }]);
-    vi.spyOn(__mqttDeps, "loadMqtt").mockResolvedValue(mod);
+    vi.spyOn(__mqttDeps, "loadMqtt").mockResolvedValue(mod as never);
     await callMqttConsume(cfg(), META);
     expect(record.endedForcefully).toBe(false);
   });
 
+  it("KEEPS what it acknowledged when the drain fails part-way, and says it failed", async () => {
+    // The failure the activity must never turn into loss. A persistent session's backlog starts
+    // arriving immediately after CONNACK — before our SUBSCRIBE is even sent — so a `subscribeAsync`
+    // that throws has usually already had messages acknowledged behind it. The broker will not send
+    // those again, so throwing here would destroy them outright: no run started, no retry able to
+    // recover them.
+    const { mod, record } = fakeMqtt([{ payload: "a" }, { payload: "b" }]);
+    // Deliver the backlog, THEN fail — the real ordering.
+    mod.failSubscribeAfterDelivery = true;
+    vi.spyOn(__mqttDeps, "loadMqtt").mockResolvedValue(mod as never);
+
+    const res = await callMqttConsume(cfg(), META);
+
+    expect(res.messages.map((m) => m.payload)).toEqual(["a", "b"]);
+    expect(record.acked).toEqual(["a", "b"]);
+    // And NOT reported as a clean read. Without this the batch is indistinguishable from a
+    // complete one, which is how a half-drain becomes invisible.
+    expect(res.stoppedAt).toEqual({ reason: "error", taken: 2 });
+  });
+
+  it("still THROWS when it failed before taking anything — nothing to preserve", async () => {
+    // The other half of the rule. With no acknowledged messages there is nothing to salvage, so the
+    // drain must fail visibly rather than report a clean empty read that looks like a quiet broker.
+    const { mod } = fakeMqtt([]);
+    mod.failSubscribeAfterDelivery = true;
+    vi.spyOn(__mqttDeps, "loadMqtt").mockResolvedValue(mod as never);
+
+    await expect(callMqttConsume(cfg(), META)).rejects.toThrow();
+  });
+
+  it("does not swallow a broker error that arrives AFTER the connect succeeded", async () => {
+    // The connect promise's `once("error")` is still attached once it has resolved, so without a
+    // durable listener a mid-drain socket error would be delivered there and used to reject an
+    // already-settled promise — a no-op. The drain would sit out its full wait and report success.
+    const { mod, record } = fakeMqtt([{ payload: "a" }]);
+    mod.emitErrorAfterDelivery = true;
+    vi.spyOn(__mqttDeps, "loadMqtt").mockResolvedValue(mod as never);
+
+    const res = await callMqttConsume(cfg({ maxWaitMs: 30_000 }), META);
+
+    expect(res.messages.map((m) => m.payload)).toEqual(["a"]);
+    expect(record.acked).toEqual(["a"]);
+    expect(res.stoppedAt).toEqual({ reason: "error", taken: 1 });
+    // It also ends the drain immediately rather than waiting out `maxWaitMs` on a dead socket —
+    // this test would take 30s if the error only stopped the drain by timing out.
+  }, 10_000);
+
   it("returns an empty batch rather than hanging when nothing arrives", async () => {
     const { mod } = fakeMqtt([]);
-    vi.spyOn(__mqttDeps, "loadMqtt").mockResolvedValue(mod);
+    vi.spyOn(__mqttDeps, "loadMqtt").mockResolvedValue(mod as never);
     const res = await callMqttConsume(cfg(), META);
     expect(res.messages).toEqual([]);
     // `null` here means "nothing more arrived in the window" — NOT Kafka's "the topic is empty".

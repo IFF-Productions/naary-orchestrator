@@ -310,14 +310,22 @@ export interface MqttConsumeResult {
    */
   droppedRetainedReplays: number;
   /**
-   * Which bound ended the drain, and after how many messages.
+   * What ended the drain, and after how many messages.
+   *
+   * `"error"` means the broker connection failed PART-WAY THROUGH, after this drain had already
+   * acknowledged the messages it is returning. They are handed back rather than thrown away (see
+   * `callMqttConsume`), so this is the only signal that the batch is a survivor of a failure rather
+   * than a clean read — without it, a half-drained batch is indistinguishable from a complete one.
    *
    * `null` means the broker sent nothing more for `maxWaitMs` — which is NOT the claim Kafka's
    * `null` makes. Kafka can say "the topic is exhausted"; MQTT has no queryable backlog, so all
    * this can honestly report is "nothing more arrived in the window". A quiet broker and a
    * silently-broken subscription look the same from here.
    */
-  stoppedAt: { reason: "maxMessages" | "maxBytes"; taken: number } | null;
+  stoppedAt: {
+    reason: "maxMessages" | "maxBytes" | "error";
+    taken: number;
+  } | null;
 }
 
 const DEFAULT_MAX_MESSAGES = 50;
@@ -441,6 +449,8 @@ export async function callMqttConsume(
   let accepting = true;
   let sessionPresent = false;
   let finish = (): void => undefined;
+  /** A broker failure seen AFTER the connect succeeded — see the durable listener below. */
+  let midDrainError: unknown = null;
 
   // `done()` sends the PUBACK and pumps the parser; `done(err)` skips the PUBACK and still pumps
   // the parser. Both keep the client alive — NOT calling it at all is what stalls it.
@@ -522,6 +532,16 @@ export async function callMqttConsume(
     );
     sessionPresent = connack.sessionPresent;
 
+    // A DURABLE error listener, and it fixes a real hole. The connect promise's `once("error")` is
+    // still attached at this point (it never fired), so a socket error AFTER the connect resolved
+    // would be delivered to it and used to reject an already-settled promise — a no-op. The drain
+    // would then sit out its full `maxWaitMs` and return its partial batch as an ordinary success,
+    // with the broker failure reported precisely nowhere.
+    client.on("error", (e) => {
+      midDrainError = e;
+      finish();
+    });
+
     // AWAIT the SUBACK. A fire-and-forget subscribe followed by a disconnect can leave a session
     // holding no subscription at all — after which the broker queues nothing, every drain comes
     // back empty, and nothing anywhere reports an error.
@@ -533,12 +553,31 @@ export async function callMqttConsume(
         clearTimeout(timer);
         resolve();
       };
-      // A bound may already have been hit while the SUBACK was in flight (the session's backlog
-      // arrives before it), in which case nothing further would ever call `finish` — so check now.
-      if (!accepting) finish();
+      // A bound may already have been hit, or the connection already failed, while the SUBACK was
+      // in flight (the session's backlog arrives before it) — in which case nothing further would
+      // ever call `finish`, so check now.
+      if (!accepting || midDrainError) finish();
     });
+    if (midDrainError) throw midDrainError;
   } catch (e) {
-    throw classifyMqttError(e, meta);
+    // NEVER DISCARD AN ACKNOWLEDGED MESSAGE. Everything in `messages` has been PUBACKed, so the
+    // broker considers it delivered and will not send it again. Throwing here would destroy those
+    // messages outright: no run is ever started for them and no retry can recover them.
+    //
+    // The realistic path is not exotic. A persistent session's backlog starts arriving immediately
+    // after CONNACK — before our SUBSCRIBE is even sent — so a `subscribeAsync` that fails has
+    // usually already had messages acknowledged behind it.
+    //
+    // So a part-drained batch is RETURNED, flagged as ending in an error, and the drain workflow
+    // starts runs for it. The messages that were never taken are unacknowledged and stay queued in
+    // the session for the next drain. Nothing is lost either way.
+    //
+    // A failure with nothing taken still throws: there is nothing to preserve, and the drain should
+    // fail visibly rather than report a clean empty read.
+    if (messages.length === 0) throw classifyMqttError(e, meta);
+    // Overwrites any bound already recorded: "the connection broke" is the more actionable of the
+    // two, and a caller that sees `maxMessages` would reasonably assume a healthy, capped drain.
+    stoppedAt = { reason: "error", taken: messages.length };
   } finally {
     // `false`, and it is load-bearing rather than tidy. The PUBACKs for everything this drain took
     // are only QUEUED by the time we get here; a forced close discards the unwritten ones, the

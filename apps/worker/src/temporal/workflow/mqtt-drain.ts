@@ -65,7 +65,20 @@ export interface MqttDrainResult {
 const { callMqttConsume } = wf.proxyActivities<typeof activities>({
   // A drain waits `maxWaitMs` for messages by design, so the timeout is generous.
   startToCloseTimeout: "2 minutes",
-  retry: { maximumAttempts: 3 },
+  // ONE ATTEMPT — the opposite of the Kafka drain's `maximumAttempts: 3`, and the difference is
+  // the ack. A retried Kafka consume re-reads the very same messages, because nothing is committed
+  // until after the runs are started; retrying there costs a round trip and risks nothing.
+  //
+  // Here the activity has already PUBACKed everything it took, so the broker will not send those
+  // messages again. A second attempt therefore cannot see them — it drains only what is left, and
+  // if it succeeds the drain returns a green result for a batch that is missing the messages the
+  // first attempt acknowledged. That turns a visible failure into silent loss, which is precisely
+  // the failure mode this slice is documented as avoiding.
+  //
+  // Failing loudly costs nothing: unacknowledged messages stay queued in the persistent session,
+  // so the next scheduled drain picks them up (proven against a real broker in
+  // mqtt-drain.integration.spec.ts). A failed drain loses nothing that was not already lost.
+  retry: { maximumAttempts: 1 },
 });
 
 /**
@@ -179,9 +192,19 @@ export function mqttRunId(p: {
  * the loss window is specific rather than vague: the worker dies, or the activity's result fails
  * to reach Temporal, in the moment between the broker receiving the PUBACKs and the activity
  * completing. Those messages are acknowledged, so the broker will not send them again, and no run
- * was ever started for them. It is a window of milliseconds and it is real. Anything that fails
- * EARLIER is safe by construction: the activity acknowledges only what it takes, so a drain that
- * throws before or during the batch leaves those messages queued in the session for next time.
+ * was ever started for them. It is a window of milliseconds and it is real.
+ *
+ * Everything around that window is arranged to keep it from growing:
+ *
+ *  - The consume activity is NOT RETRIED (see the proxy above). A retry cannot re-read an
+ *    acknowledged message, so a second attempt that succeeded would return a batch missing
+ *    whatever the first attempt acked — a green result hiding a loss.
+ *  - A drain that fails part-way still RETURNS what it acknowledged, flagged `stoppedAt.reason:
+ *    "error"`, and the runs below are started for it. Throwing that batch away would be the same
+ *    loss, just earlier.
+ *  - Messages the drain never took are never acknowledged, so they stay queued in the session and
+ *    arrive at the next drain. That is the recovery path a failed drain relies on, and it is
+ *    verified against a real broker rather than assumed.
  *
  * `startChild`, not `executeChild`: the drain must not wait for the runs — a graph that pauses for
  * a human approval would otherwise hold the drain (and the broker session) open for days.

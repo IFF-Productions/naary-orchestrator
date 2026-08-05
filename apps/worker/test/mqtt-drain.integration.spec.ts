@@ -304,6 +304,81 @@ describe("mqttDrain — real broker, real Temporal", () => {
     });
   }, 300_000);
 
+  it("survives a drain that fails MID-FLIGHT: keeps what it acked, next drain gets the rest", async () => {
+    // The recovery story the whole "loss is possible, but narrow" claim rests on, tested against a
+    // real broker instead of argued. A drain is made to fail after the session's backlog has already
+    // arrived and been acknowledged — the realistic ordering, since a persistent session starts
+    // delivering immediately after CONNACK, before our SUBSCRIBE is even sent.
+    //
+    // Two things must hold, and they pull in opposite directions:
+    //   1. The messages it ACKED must still produce runs. The broker will never send them again, so
+    //      discarding them on the error would be permanent, unrecoverable loss.
+    //   2. The messages it never took must NOT have been acked, so the next drain still gets them.
+    //
+    // Only the real broker can settle (2): "we skipped the PUBACK" and "the broker kept it for us"
+    // are different claims.
+    const topic = `${TOPIC}/midfail`;
+    const realLoadMqtt = activities.__mqttDeps.loadMqtt;
+    const worker = await makeWorker();
+    try {
+      await worker.runUntil(async () => {
+        await env.client.workflow.execute(mqttDrain, {
+          args: [
+            drainInput({ topic, maxWaitMs: 1_000, workflowKey: "midfail" }),
+          ],
+          taskQueue: TASK_QUEUE,
+          workflowId: "mqtt-midfail-0",
+        });
+
+        await publishOffline(topic, ["one", "two", "three"]);
+
+        // Fail the SUBSCRIBE, but only after giving the backlog time to arrive and be acked.
+        activities.__mqttDeps.loadMqtt = (async () => ({
+          ...mqtt,
+          connect: (u: string, o: Record<string, unknown>) => {
+            const client = mqtt.connect(u, o);
+            const realSubscribe = client.subscribeAsync.bind(client);
+            client.subscribeAsync = (async (...args: unknown[]) => {
+              const granted = await (
+                realSubscribe as (...a: unknown[]) => Promise<unknown>
+              )(...args);
+              await new Promise((r) => setTimeout(r, 1_200));
+              throw new Error("simulated broker failure mid-drain");
+            }) as typeof client.subscribeAsync;
+            return client;
+          },
+        })) as typeof activities.__mqttDeps.loadMqtt;
+
+        // maxMessages: 2 of the 3 published, so there is a deliberate remainder to recover.
+        const failed = await env.client.workflow.execute(mqttDrain, {
+          args: [drainInput({ topic, maxMessages: 2, workflowKey: "midfail" })],
+          taskQueue: TASK_QUEUE,
+          workflowId: "mqtt-midfail-1",
+        });
+
+        // (1) The acknowledged messages survived the failure and got their runs.
+        expect(failed.drained).toBe(2);
+        expect(failed.started).toBe(2);
+        // And the batch is not passed off as a clean read.
+        expect(failed.stoppedAt).toEqual({ reason: "error", taken: 2 });
+
+        activities.__mqttDeps.loadMqtt = realLoadMqtt;
+
+        // (2) The message it never took was never acked, so the broker still had it.
+        const recovered = await env.client.workflow.execute(mqttDrain, {
+          args: [drainInput({ topic, workflowKey: "midfail" })],
+          taskQueue: TASK_QUEUE,
+          workflowId: "mqtt-midfail-2",
+        });
+        expect(recovered.drained).toBe(1);
+        expect(recovered.started).toBe(1);
+        expect(recovered.sessionPresent).toBe(true);
+      });
+    } finally {
+      activities.__mqttDeps.loadMqtt = realLoadMqtt;
+    }
+  }, 300_000);
+
   it("registers under the name the schedule starts it by", () => {
     // The API's schedule action names the workflow as a STRING; a rename here would strand every
     // mqttTrigger schedule with "workflow type not registered" at fire time, which nothing else in
