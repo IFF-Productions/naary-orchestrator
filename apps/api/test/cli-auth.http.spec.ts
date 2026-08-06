@@ -220,8 +220,10 @@ beforeAll(async () => {
         useValue: {
           listForUser: async (userId: string) => {
             const u = Object.values(USERS).find((x) => x.userId === userId);
-            return u ? [{ tenantId: u.tenantId, role: u.role }] : [];
+            return u ? [{ tenantId: u.tenantId, role: u.role, active: true }] : [];
           },
+          // #1115 — nobody in this fixture is de-provisioned.
+          deactivatedTenantIds: async () => new Set<string>(),
           acceptPendingInvitations: async () => undefined,
           ensureMembership: async () => undefined,
           touchLastActive: async () => undefined,

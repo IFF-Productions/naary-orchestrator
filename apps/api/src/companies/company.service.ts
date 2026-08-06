@@ -529,6 +529,11 @@ export class CompanyService {
             where: {
               email: { equals: clean, mode: "insensitive" },
               tenantId: { in: tenantIds },
+              // #1115: a DEACTIVATED membership is not an account this company can see. Adding
+              // its uid to CompanyMembership would hand a de-provisioned person company-level
+              // authority through a table the workspace `active` flag does not reach — the one
+              // way a soft de-provision could end up GRANTING something.
+              active: true,
             },
             orderBy: { createdAt: "desc" },
             select: { userId: true },
@@ -710,6 +715,11 @@ export class CompanyService {
    * Is the user the OWNER of the workspace? Reads the (userId, tenantId) Membership. Membership
    * rows are lazily backfilled on /me/workspaces, so a claim-provisioned owner may not have one
    * yet — accept the AuthGuard-resolved active-workspace role as owner-proof for that case.
+   *
+   * A DEACTIVATED row proves nothing (#1115): this is an authority read, and the guard has
+   * already refused to issue a principal for that workspace. The `ctx` fallback is safe for the
+   * same reason — an `activeRole` only exists because the guard resolved one, which it will not
+   * do for a deactivated membership.
    */
   private async isWorkspaceOwner(
     userId: string,
@@ -718,9 +728,9 @@ export class CompanyService {
   ): Promise<boolean> {
     const m = await getPrisma().membership.findUnique({
       where: { userId_tenantId: { userId, tenantId } },
-      select: { role: true },
+      select: { role: true, active: true },
     });
-    if (m?.role === "owner") return true;
+    if (m?.role === "owner" && m.active !== false) return true;
     return ctx.activeTenantId === tenantId && ctx.activeRole === "owner";
   }
 }

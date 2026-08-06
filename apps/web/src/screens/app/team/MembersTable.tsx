@@ -69,6 +69,38 @@ function RoleChip({ role }: { role: string }) {
   );
 }
 
+/**
+ * "Deactivated" — a member whose `Membership.active` is false (#1115: a SCIM soft
+ * de-provision).
+ *
+ * They stay in the members list, keeping their role chip, because that is the truth: the row
+ * and their permission groups are intact and reactivating restores both. Without this badge the
+ * screen would show a perfectly ordinary member who cannot sign in, and an admin asked to fix it
+ * would have nothing to go on — which matters because REMOVING them here is the documented
+ * escape hatch when the directory's allowlist no longer covers their domain.
+ */
+function DeactivatedChip() {
+  return (
+    <span
+      title="Deactivated by this workspace's directory (SCIM). They keep their role and permission groups, and cannot sign in until reactivated."
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        fontSize: "var(--text-xs)",
+        fontWeight: "var(--weight-semibold)",
+        color: "var(--ink-3)",
+        border: "1px solid var(--line-mid)",
+        background: "var(--panel)",
+        borderRadius: "var(--radius-pill)",
+        padding: "3px 10px",
+      }}
+    >
+      Deactivated
+    </span>
+  );
+}
+
 interface MenuItem {
   label: string;
   danger?: boolean;
@@ -494,6 +526,7 @@ export function MembersTable({
                     }}
                   >
                     <RoleChip role={m.role} />
+                    {m.active === false && <DeactivatedChip />}
                     {approveCell}
                     {lastActiveCell}
                   </div>
@@ -515,8 +548,16 @@ export function MembersTable({
                 }}
               >
                 {identity}
-                <div>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                    flexWrap: "wrap",
+                  }}
+                >
                   <RoleChip role={m.role} />
+                  {m.active === false && <DeactivatedChip />}
                 </div>
                 {approveCell}
                 {lastActiveCell}

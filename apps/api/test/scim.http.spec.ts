@@ -258,28 +258,42 @@ describe("GET /scim/v2/* through the real guard chain", () => {
     expect(JSON.stringify(res.body)).not.toContain("b.example");
   });
 
-  it("serves ServiceProviderConfig only to an authenticated connection, and advertises no writes", async () => {
+  /**
+   * `patch: true` IS A CONTRACT, not a config line (#1115): an IdP reads this document to decide
+   * what to send, so this assertion is the wire-level half of "PATCH is implemented". It said
+   * `false` for two slices precisely because nothing behind it worked.
+   */
+  it("serves ServiceProviderConfig only to an authenticated connection, and advertises PATCH now that it exists", async () => {
     expect((await get("/scim/v2/ServiceProviderConfig")).status).toBe(401);
     const res = await get("/scim/v2/ServiceProviderConfig", {
       authorization: `Bearer ${SCIM_TOKEN_A}`,
     });
     expect(res.status).toBe(200);
-    expect(res.body.patch).toEqual({ supported: false });
+    expect(res.body.patch).toEqual({ supported: true });
     expect(res.body.bulk).toMatchObject({ supported: false });
   });
 
-  /** Slice 2 adds exactly two verbs. PATCH and PUT stay UNROUTED — and unadvertised, per the
-   *  ServiceProviderConfig assertion above — because `active: false` has no home in this data
-   *  model yet (see ScimProvisioningService's docstring). */
-  it("routes no method beyond POST and DELETE (PATCH/PUT are still absent)", async () => {
-    for (const method of ["PATCH", "PUT"]) {
+  /** PATCH is routed since #1115 — an empty `Operations` list is a 400 from the parser, and that
+   *  is what proves the ROUTE exists: an unrouted method 404s before any body is read. PUT is
+   *  still absent, because replacing a whole User means accepting attributes we do not store. */
+  it("routes PATCH but still no PUT", async () => {
+    const patched = await fetch(`${base}/scim/v2/Users/some-id`, {
+      method: "PATCH",
+      headers: {
+        authorization: `Bearer ${SCIM_TOKEN_A}`,
+        "content-type": "application/scim+json",
+      },
+      body: JSON.stringify({ Operations: [] }),
+    });
+    expect(patched.status).toBe(400);
+    {
       const res = await fetch(`${base}/scim/v2/Users/some-id`, {
-        method,
+        method: "PUT",
         headers: {
           authorization: `Bearer ${SCIM_TOKEN_A}`,
           "content-type": "application/scim+json",
         },
-        body: JSON.stringify({ Operations: [] }),
+        body: JSON.stringify({ userName: "x@a.example" }),
       });
       expect(res.status).toBe(404);
     }

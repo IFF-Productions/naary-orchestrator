@@ -15,7 +15,19 @@ interface Subject {
   email: string;
   /** Firebase uid, once they have signed in and hold a Membership. */
   userId: string | null;
-  /** true = accepted Membership; false = still-pending Invitation. */
+  /**
+   * Does this subject have access RIGHT NOW?
+   *
+   * Three states collapse into this one boolean, and the collapse is the honest one because it
+   * is the only question an IdP is asking:
+   *  - a LIVE `Membership` (`active: true`)                         ⇒ true;
+   *  - a `Membership` deactivated by `PATCH active: false` (#1115)  ⇒ false;
+   *  - a still-pending `Invitation` (provisioned, never signed in)  ⇒ false.
+   *
+   * The last two differ in how you get from here to `true` — reactivate vs sign in — but they
+   * agree on the fact the IdP reconciles against, and answering `true` for either would tell a
+   * directory that a person it de-provisioned still has access.
+   */
   active: boolean;
   createdAt: Date;
 }
@@ -66,7 +78,15 @@ export class ScimUsersService {
     const [members, invites] = await Promise.all([
       prisma.membership.findMany({
         where: { tenantId },
-        select: { userId: true, email: true, createdAt: true },
+        // `active` is SELECTED, not filtered on (#1115): a deactivated member must still appear
+        // in the reconcile GET — as `active: false` — or the IdP reads them as deleted and
+        // re-creates them on its next sync, undoing the de-provision it just performed.
+        select: {
+          userId: true,
+          email: true,
+          createdAt: true,
+          active: true,
+        },
       }),
       prisma.invitation.findMany({
         // `acceptedAt: null` is what makes it PENDING — an accepted invitation is already
@@ -94,7 +114,7 @@ export class ScimUsersService {
       byEmail.set(canonical(m.email), {
         email: canonical(m.email),
         userId: m.userId,
-        active: true,
+        active: m.active !== false,
         createdAt: m.createdAt,
       });
     }
@@ -155,7 +175,8 @@ export class ScimUsersService {
     return this.resolveIdentity(tenantId, subject, externalId);
   }
 
-  /** The live state behind an identity row: a Membership (active) or a pending Invitation. */
+  /** The live state behind an identity row: a Membership (live or deactivated — #1115) or a
+   *  pending Invitation. */
   private async subjectFor(
     tenantId: string,
     email: string,
@@ -163,13 +184,20 @@ export class ScimUsersService {
     const prisma = getPrisma();
     const member = await prisma.membership.findFirst({
       where: { tenantId, email: { equals: email, mode: "insensitive" } },
-      select: { userId: true, email: true, createdAt: true },
+      select: {
+        userId: true,
+        email: true,
+        createdAt: true,
+        active: true,
+      },
     });
     if (member?.email) {
       return {
         email: canonical(member.email),
         userId: member.userId,
-        active: true,
+        // Reported, not filtered — see `list`. This is also what makes a PATCH's own response
+        // body honest: the IdP compares it against what it sent.
+        active: member.active !== false,
         createdAt: member.createdAt,
       };
     }

@@ -910,6 +910,16 @@ model Membership {
   tenantId     String
   role         String    @default("member") // 'owner' | 'admin' | 'member'
   email        String? // the user's email at join time (directory convenience)
+  // SOFT DE-PROVISION (#1115 decision (b)). false = the row still exists, carrying the
+  // person's role and their GroupMember rows, but it grants NO access: the AuthGuard denies
+  // them, MembershipService.listForUser filters them out, and every Membership-implies-
+  // authority read in the API excludes them. Reactivation is a pure flip that restores the
+  // person AND their groups — which is the whole reason this column exists rather than
+  // mapping SCIM `active: false` onto a delete.
+  // NOT NULL DEFAULT true so the column is expand/contract safe: an OLD API image's INSERTs
+  // omit it (⇒ true) and its SELECTs name their columns, so it keeps authenticating normally
+  // against a database that already has this column.
+  active       Boolean   @default(true)
   createdAt    DateTime  @default(now())
   // Last time this user made an authenticated request in this workspace (the guard stamps
   // it, DB-side-throttled). NULL = never seen since the column was added. Telemetry only —

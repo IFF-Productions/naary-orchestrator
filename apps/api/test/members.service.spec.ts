@@ -139,6 +139,9 @@ describe("MembersService.list", () => {
         email: "a@x.com",
         role: "owner",
         status: "active",
+        // #1115 — the Team screen has to be able to show a deactivated member AS deactivated,
+        // because workspace-side removal is the documented escape hatch.
+        active: true,
         createdAt: now.toISOString(),
         lastActiveAt: now.toISOString(),
       },

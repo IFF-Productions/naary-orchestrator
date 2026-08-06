@@ -17,6 +17,9 @@ import { IS_USER_SCOPED_KEY } from "../src/auth/user-scoped.decorator";
 const verify = vi.fn();
 const firebaseVerify = vi.fn();
 const listForUser = vi.fn();
+/** #1115 — the workspaces where this user's Membership is DEACTIVATED. Defaults to an empty
+ *  set in `beforeEach`, so every pre-#1115 test keeps its exact behaviour. */
+const deactivatedTenantIds = vi.fn();
 const ensureMembership = vi.fn();
 const acceptPendingInvitations = vi.fn();
 const touchLastActive = vi.fn();
@@ -38,6 +41,7 @@ function makeGuard(): AuthGuard {
   } as unknown as FirebaseVerifier;
   const memberships = {
     listForUser,
+    deactivatedTenantIds,
     ensureMembership,
     acceptPendingInvitations,
     touchLastActive,
@@ -78,6 +82,7 @@ beforeEach(() => {
   verify.mockReset();
   firebaseVerify.mockReset();
   listForUser.mockReset().mockResolvedValue([]);
+  deactivatedTenantIds.mockReset().mockResolvedValue(new Set<string>());
   ensureMembership.mockReset().mockResolvedValue(undefined);
   acceptPendingInvitations.mockReset().mockResolvedValue(undefined);
   touchLastActive.mockReset().mockResolvedValue(undefined);

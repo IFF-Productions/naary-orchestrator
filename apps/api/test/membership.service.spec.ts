@@ -38,15 +38,15 @@ beforeEach(() => {
 
 describe("MembershipService", () => {
   it("reads through the cache: DB on a miss, cached on the next call", async () => {
-    findMany.mockResolvedValue([{ tenantId: "t1", role: "owner" }]);
+    findMany.mockResolvedValue([{ tenantId: "t1", role: "owner", active: true }]);
     const svc = makeService();
 
     expect(await svc.listForUser("u1")).toEqual([
-      { tenantId: "t1", role: "owner" },
+      { tenantId: "t1", role: "owner", active: true },
     ]);
     // second call is served from the cache — the DB is not hit again
     expect(await svc.listForUser("u1")).toEqual([
-      { tenantId: "t1", role: "owner" },
+      { tenantId: "t1", role: "owner", active: true },
     ]);
     expect(findMany).toHaveBeenCalledOnce();
   });
@@ -63,9 +63,9 @@ describe("MembershipService", () => {
       userId_tenantId: { userId: "u1", tenantId: "t1" },
     });
     // cache was busted, so the next read hits the DB again
-    findMany.mockResolvedValue([{ tenantId: "t1", role: "owner" }]);
+    findMany.mockResolvedValue([{ tenantId: "t1", role: "owner", active: true }]);
     expect(await svc.listForUser("u1")).toEqual([
-      { tenantId: "t1", role: "owner" },
+      { tenantId: "t1", role: "owner", active: true },
     ]);
     expect(findMany).toHaveBeenCalledTimes(2);
   });
@@ -88,9 +88,9 @@ describe("MembershipService", () => {
       email: "a@b.co",
     });
     // cache busted → the new workspace is visible on the next read
-    findMany.mockResolvedValue([{ tenantId: ws.tenantId, role: "owner" }]);
+    findMany.mockResolvedValue([{ tenantId: ws.tenantId, role: "owner", active: true }]);
     expect(await svc.listForUser("u1")).toEqual([
-      { tenantId: ws.tenantId, role: "owner" },
+      { tenantId: ws.tenantId, role: "owner", active: true },
     ]);
     expect(findMany).toHaveBeenCalledTimes(2);
   });
@@ -202,9 +202,9 @@ describe("MembershipService.acceptPendingInvitations", () => {
       data: { acceptedAt: expect.any(Date) },
     });
     // Cache invalidated → the next listForUser hits the DB and sees the new workspace.
-    findMany.mockResolvedValue([{ tenantId: "t-inv", role: "admin" }]);
+    findMany.mockResolvedValue([{ tenantId: "t-inv", role: "admin", active: true }]);
     expect(await svc.listForUser("u1")).toEqual([
-      { tenantId: "t-inv", role: "admin" },
+      { tenantId: "t-inv", role: "admin", active: true },
     ]);
   });
 
@@ -220,7 +220,7 @@ describe("MembershipService.acceptPendingInvitations", () => {
   });
 
   it("skips the invitation scan while the user's memberships are CACHED (hot path)", async () => {
-    findMany.mockResolvedValue([{ tenantId: "t1", role: "owner" }]);
+    findMany.mockResolvedValue([{ tenantId: "t1", role: "owner", active: true }]);
     const svc = makeService();
     await svc.listForUser("u1"); // warm the cache
 

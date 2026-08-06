@@ -193,6 +193,8 @@ describe("addMember (slice 4) — owner-only, email→uid via Membership", () =>
         email: { equals: "User@Acme.com", mode: "insensitive" },
         // #1075 decision 3 — the candidate set is this COMPANY's workspaces, never the instance.
         tenantId: { in: ["t-1", "t-2"] },
+        // #1115 — and a DEACTIVATED workspace membership is not an account this company can see.
+        active: true,
       },
       orderBy: { createdAt: "desc" },
       select: { userId: true },

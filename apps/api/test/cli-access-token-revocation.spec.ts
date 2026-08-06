@@ -274,6 +274,9 @@ function seedMember(tenantId: string, userId: string, role = "admin"): void {
     email: `${userId}@example.com`,
     createdAt: new Date(),
     lastActiveAt: null,
+    // #1115's column, spelled the way Postgres would (NOT NULL DEFAULT true) — a fixture that
+    // omitted it would read as DEACTIVATED to the live-owner count in `assertNotLastOwner`.
+    active: true,
   });
 }
 

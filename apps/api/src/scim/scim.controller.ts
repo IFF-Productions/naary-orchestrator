@@ -5,6 +5,7 @@ import {
   Get,
   HttpCode,
   Param,
+  Patch,
   Post,
   Query,
   Res,
@@ -32,16 +33,18 @@ const SERVICE_PROVIDER_CONFIG = {
   schemas: ["urn:ietf:params:scim:schemas:core:2.0:ServiceProviderConfig"],
   documentationUri: "https://github.com/IFF-Productions/naary-orchestrator",
   /**
-   * STILL FALSE IN SLICE 2, WHICH DOES SUPPORT CREATE AND DELETE.
+   * TRUE SINCE #1115, and flipping this is a CONTRACT CHANGE, not a config tweak: an IdP reads
+   * `ServiceProviderConfig` to decide what to send, so from here on Okta and Entra WILL send
+   * `PATCH` on a leaver instead of `DELETE`. It may only say `true` because
+   * {@link ScimProvisioningService.setActive} exists and `Membership.active` is honoured by the
+   * authorization path — the same reason it said `false` for two slices while it was not.
    *
-   * PATCH's dominant use here is `active: false` — the soft de-provision — and `Membership`
-   * has no deactivated state to put a subject into (see ScimProvisioningService's docstring
-   * for the two candidate answers and why picking one is a product decision). Advertising
-   * `patch: true` and then 400ing the operation every IdP would send is strictly worse than
-   * this: an IdP configured to DELETE on de-provision works completely, and one configured to
-   * deactivate is told up front rather than discovering it one retry loop at a time.
+   * What "supported" means here is narrow and the parser enforces it: `replace`/`add` of the
+   * `active` attribute. Every other operation is a 400 rather than a silent no-op, because an
+   * IdP that believes it renamed someone and did not is worse served than one that gets an
+   * error it can map.
    */
-  patch: { supported: false },
+  patch: { supported: true },
   bulk: { supported: false, maxOperations: 0, maxPayloadSize: 0 },
   // The one filter production we implement — see scim-filter.ts.
   filter: { supported: true, maxResults: 200 },
@@ -69,7 +72,9 @@ const SERVICE_PROVIDER_CONFIG = {
  * principal.
  *
  * WHAT SLICE 2 ADDS: `POST /Users` (provision) and `DELETE /Users/{id}` (de-provision).
- * Still no PUT, no PATCH, no /Groups, no /Schemas, no /ResourceTypes.
+ * WHAT #1115 ADDS: `PATCH /Users/{id}` with `active` — the SOFT de-provision, the signal an IdP
+ * actually sends on a leaver, and its reversal. Still no PUT, no /Groups, no /Schemas, no
+ * /ResourceTypes.
  *
  * ── THE RULE SLICE 1 WROTE HERE, NOW HONOURED ───────────────────────────────────────────
  * The de-provision path MUST route through `MembersService.removeMember`. It is the only
@@ -171,5 +176,29 @@ export class ScimController {
     @Param("id") id: string,
   ): Promise<void> {
     return this.provisioning.deprovision(ctx, id);
+  }
+
+  /**
+   * The SOFT de-provision (RFC 7644 §3.5.2), #1115: `active: false` deactivates the subject's
+   * membership, `active: true` restores it — with their permission groups, which is the whole
+   * reason this is a column rather than a delete. See
+   * {@link ScimProvisioningService.setActive}; nothing here may take a shortcut past it, for
+   * the same reason the DELETE route may not.
+   *
+   * 204 with no body, always — §3.5.2 permits it and a uniform status is what an IdP's error
+   * handling can actually rely on.
+   *
+   * Rate-limited alongside the other writes: a mis-mapped "deactivate everyone not in this
+   * group" rule is the failure mode this endpoint has, exactly as it is for DELETE.
+   */
+  @Throttle({ default: { limit: 60, ttl: 60_000 } })
+  @Patch("Users/:id")
+  @HttpCode(204)
+  patch(
+    @ScimConnectionCtx() ctx: ScimWriteContext,
+    @Param("id") id: string,
+    @Body() body: unknown,
+  ): Promise<void> {
+    return this.provisioning.setActive(ctx, id, body);
   }
 }

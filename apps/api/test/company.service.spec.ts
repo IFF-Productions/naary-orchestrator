@@ -113,6 +113,24 @@ describe("attachWorkspace — the owner-authorized invariant (§4)", () => {
     expect(tenantSettings.updateMany).toHaveBeenCalled();
   });
 
+  /**
+   * #1115 — `isWorkspaceOwner` is an AUTHORITY read, and a deactivated row is not authority.
+   *
+   * Without the `active` check, a de-provisioned workspace owner could still pull their old
+   * workspace into a company — a soft de-provision that GRANTS something is the one shape of
+   * failure this column must not have. (The `ctx` fallback below is safe by construction: an
+   * `activeRole` only exists because the AuthGuard resolved one, which it will not do for a
+   * deactivated membership.)
+   */
+  it("REJECTS a workspace owner whose membership is DEACTIVATED (#1115)", async () => {
+    companyMembership.findUnique.mockResolvedValue({ role: "owner" });
+    membership.findUnique.mockResolvedValue({ role: "owner", active: false });
+    await expect(
+      svc.attachWorkspace("u1", "co1", "wsX", {}),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(tenantSettings.updateMany).not.toHaveBeenCalled();
+  });
+
   it("REJECTS when the workspace is already attached to another company", async () => {
     companyMembership.findUnique.mockResolvedValue({ role: "owner" });
     membership.findUnique.mockResolvedValue({ role: "owner" });

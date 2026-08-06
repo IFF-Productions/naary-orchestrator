@@ -654,6 +654,12 @@ export interface Member {
   email: string;
   role: string;
   status: "active" | "invited";
+  /** Is their access live? `false` = the membership has been DEACTIVATED (#1115 — a SCIM soft
+   *  de-provision): the row, the role and the permission groups are all kept and reactivating
+   *  restores every one of them, but they cannot sign in meanwhile. Absent on invited rows.
+   *  NOT a third `status`: they stay in the members list on purpose, because removing them
+   *  here is the escape hatch when the directory cannot de-provision them. */
+  active?: boolean;
   createdAt: string;
   /** Last authenticated request in this workspace (active rows only). null = not seen
    *  since tracking began; absent on invited rows. */
