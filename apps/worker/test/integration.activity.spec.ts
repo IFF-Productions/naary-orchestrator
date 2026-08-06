@@ -154,7 +154,10 @@ describe("callIntegration activity", () => {
 
   it("Shopify custom-header (#655): token → X-Shopify-Access-Token, no Authorization", async () => {
     connMock.mockResolvedValue({
-      serverUrl: "https://shop.myshopify.com/admin/api/2024-01",
+      // Inert here — this test asserts headers, not the URL — but kept on a supported
+      // version so a grep for the unsupported `2024-01` lands only on the comment in
+      // `shopify.ts` that explains it (#1109).
+      serverUrl: "https://shop.myshopify.com/admin/api/2026-07",
       authMode: "api_token",
     });
     authMock.mockResolvedValue({ Authorization: "Bearer shpat_xxx" });
