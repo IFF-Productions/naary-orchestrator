@@ -523,8 +523,12 @@ describe("signing a device out recalls the token that device holds", () => {
       (await del(`/cli-sessions/${family}`, asUser("fb-alice"))).status,
     ).toBe(200);
 
-    expect(await stillAuthenticates(macbook.accessToken)).toBe(false);
-    expect(await stillAuthenticates(desktop.accessToken)).toBe(true);
+    // The STATUS CODES, not just the booleans, on the one test that carries the feature: a
+    // truthiness helper reads "signed out" from any non-200, so a `/me` that broke for an
+    // unrelated reason would report this working. 401 is the claim — the guard could not resolve
+    // the bearer, because the row is gone.
+    expect((await get("/me", asUser(macbook.accessToken))).status).toBe(401);
+    expect((await get("/me", asUser(desktop.accessToken))).status).toBe(200);
     // ...and the desktop is still a session, not just a live bearer.
     expect(await canStillRefresh(desktop.refreshToken)).toBe(true);
   });
