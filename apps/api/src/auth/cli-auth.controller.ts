@@ -214,6 +214,24 @@ export class CliAuthController {
 
     // Approved AND claimed by this call — `claim()` won the compare-and-set, so this branch runs at
     // most once per device code no matter how many callers race it.
+    //
+    // THE REFRESH FAMILY IS CREATED FIRST, and the order is load-bearing rather than incidental:
+    // the family id is what the access token is stamped with, so it has to exist before the token
+    // does. It also moves the partial-failure leak in the safer direction. Before, a throw between
+    // the two left a live 12h BEARER nobody was holding; now it leaves a live FAMILY nobody is
+    // holding — which shows up as a phantom row in Settings (mildly confusing, revocable by the
+    // user, and unable to authenticate anything, because the exchange is single-use and the CLI
+    // never received the refresh token). A transaction would be the tidier answer and is not worth
+    // spanning two services for a case that requires the database to fail mid-handshake.
+    //
+    // The device label rides along onto the refresh family, which is what Settings groups and names
+    // its session rows by (#1078 §5) — a session with no device hint is one nobody revokes.
+    const refresh = await this.refreshTokens.issue(
+      claim.tenantId,
+      claim.userId,
+      new Date(),
+      claim.label,
+    );
     const access = await this.mintAccessToken(
       claim.tenantId,
       claim.label,
@@ -223,14 +241,9 @@ export class CliAuthController {
       // guard-resolved principal). Stamping it here is what makes the minted token revocable by
       // `MembersService` — see ApiTokenService.revokeUserCliTokens.
       claim.userId,
-    );
-    // The device label rides along onto the refresh family, which is what Settings groups and names
-    // its session rows by (#1078 §5) — a session with no device hint is one nobody revokes.
-    const refresh = await this.refreshTokens.issue(
-      claim.tenantId,
-      claim.userId,
-      new Date(),
-      claim.label,
+      // ...and the session it belongs to, which is what makes it revocable by the device's own
+      // "Sign out" button — see ApiTokenService.revokeSessionTokens.
+      refresh.familyId,
     );
     return {
       status: "authorized",
@@ -269,6 +282,18 @@ export class CliAuthController {
    * It is NOT surfaced as identity: `verify()` deliberately does not return `userId`, because a
    * principal carrying one would satisfy `assertMayApprove` and let a CLI token approve a login
    * that mints another CLI token. The column revokes; it never authorizes.
+   *
+   * `familyId` is the second such column, stamped by the same two paths under the same discipline,
+   * and it answers the question `userId` cannot: WHICH of a person's devices this token is. It is
+   * what lets Settings' "Sign out this device" recall the token that device holds
+   * (`ApiTokenService.revokeSessionTokens`) instead of promising a sign-out 12 hours from now. It
+   * is likewise absent from `verify()`.
+   *
+   * ONE MORE BOUNDED RESIDUAL, named rather than left implicit: reuse detection in
+   * `CliRefreshTokenService.afterRotation` revokes a leaked family but does NOT delete that
+   * family's access token, which now it could. It is left alone here because closing it means
+   * injecting `ApiTokenService` into `CliRefreshTokenService` — a service that four specs
+   * construct with no arguments — for a case whose window is the same ≤12h. A separate change.
    *
    * ONE RESIDUAL, bounded and not a rotation problem: a user offboarded by a path that does not
    * delete a Membership. There is none today — `removeMember` is the only `membership.deleteMany`
@@ -311,6 +336,12 @@ export class CliAuthController {
       // session stays as revocable as the one the exchange minted. Without this the very first
       // refresh would launder an owned token into an unowned one.
       rotated.userId,
+      // Same discipline, same lesson, for the SESSION: rotation stays inside one family
+      // (`mintSuccessor` copies `familyId` unchanged), so the token a day-old session is holding
+      // must carry it too. Without this line, "Sign out this device" would work on a session that
+      // had never refreshed and silently stop working on every session that had — the worst
+      // possible shape for a security control, because it would test green.
+      rotated.familyId,
     );
     return {
       status: "authorized",
@@ -368,9 +399,19 @@ export class CliAuthController {
      *  Settings/CI tokens stay unowned): every token this method produces is a person's CLI
      *  session, and one minted without an owner is one member removal cannot revoke. */
     userId: string,
+    /** The rotation family this session IS. REQUIRED here for the same reason: every token this
+     *  method produces belongs to exactly one session, and one minted without a family is one
+     *  "Sign out this device" cannot recall. */
+    familyId: string,
   ): Promise<{ token: string; expiresAt: Date }> {
     const expiresAt = new Date(now.getTime() + CLI_ACCESS_TOKEN_TTL_MS);
-    const minted = await this.tokens.mint(tenantId, label, expiresAt, userId);
+    const minted = await this.tokens.mint(
+      tenantId,
+      label,
+      expiresAt,
+      userId,
+      familyId,
+    );
     await this.tokens
       .pruneExpiredCliTokens(tenantId, now)
       .catch((err) =>

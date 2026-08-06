@@ -56,6 +56,30 @@ model ApiToken {
   // REVOCATION key, never an identity.
   userId     String?
 
+  // The CLI SESSION this access token belongs to — `CliRefreshToken.familyId` (#1078 §5 follow-up).
+  // Written by the same two paths as `userId` (`/auth/cli/exchange` and `/auth/cli/refresh`), and
+  // read by exactly one query: `ApiTokenService.revokeSessionTokens`, so "sign out this device" in
+  // Settings can DELETE the token that device is holding instead of leaving it live for up to 12h.
+  //
+  // `userId` answers "whose is this?" and `familyId` answers "which of their devices?" — offboarding
+  // needs the first, per-session revoke needs the second, and neither substitutes for the other: a
+  // family-scoped delete cannot offboard a user with three laptops, and a user-scoped delete would
+  // sign out all three when they asked to sign out one.
+  //
+  // NULLABLE with NO backfill, exactly like `userId` and `expiresAt`. NULL means "not part of a CLI
+  // rotation family": every Settings- and CI-minted token (a workspace capability, which no session
+  // revoke may touch) and every CLI token minted before this column existed. The latter is bounded
+  // by its own ≤12h `expiresAt` and self-healing — its family's next refresh mints a successor that
+  // DOES carry the id, and a revoked family never refreshes again.
+  //
+  // NOT a relation and NOT a foreign key, for the same reason `userId` is not: the refresh rows are
+  // rotated and swept independently, and a cascade from them must never decide the fate of a live
+  // access token. A bare id, scoped by `tenantId` at its only read, is the right shape.
+  //
+  // Deliberately NOT returned by `ApiTokenService.verify()` either — see `userId` above. A principal
+  // carrying more identity than it needs is how these surfaces go wrong; this is a REVOCATION key.
+  familyId   String?
+
   // Group membership as an RBAC subject (RBAC-GROUPS.md §4a): a restricted token's grants
   // resolve through these joins. Deleting the token cascades its rows.
   groupMemberships GroupTokenMember[]
@@ -69,6 +93,9 @@ model ApiToken {
   // usable prefix for the plain `tenantId` lookups; rows with a NULL userId are simply never
   // matched by it, which is the point.
   @@index([tenantId, userId])
+  // The per-session revoke read: "the access token(s) of THIS device, in THIS workspace". Same
+  // tenant-first shape and same reasoning as the pair above — a NULL familyId is never matched.
+  @@index([tenantId, familyId])
 }
 
 // A rotating CLI refresh token (design #1078 §4, slice 2).

@@ -3,11 +3,13 @@ import {
   Delete,
   ForbiddenException,
   Get,
+  Logger,
   NotFoundException,
   Param,
 } from "@nestjs/common";
 import { ApiBearerAuth, ApiProperty, ApiTags } from "@nestjs/swagger";
 import { ApiEndpoint } from "../swagger/api-decorators";
+import { ApiTokenService } from "./api-token.service";
 import { CliRefreshTokenService } from "./cli-refresh-token.service";
 import { CurrentPrincipal, type Principal } from "./tenant.decorator";
 
@@ -87,7 +89,15 @@ export class CliSessionRevokedResponse {
 @ApiBearerAuth("bearer")
 @Controller("cli-sessions")
 export class CliSessionsController {
-  constructor(private readonly refreshTokens: CliRefreshTokenService) {}
+  private readonly logger = new Logger(CliSessionsController.name);
+
+  constructor(
+    private readonly refreshTokens: CliRefreshTokenService,
+    /** Appended, so every positional construction in the tests keeps working. Both halves of a
+     *  sign-out live in different tables, and this controller composes them — the same shape
+     *  `MembersService` uses for offboarding, rather than teaching either service about the other. */
+    private readonly apiTokens: ApiTokenService,
+  ) {}
 
   /** This user's ACTIVE CLI sessions in this workspace, newest activity first. */
   @ApiEndpoint({
@@ -113,12 +123,30 @@ export class CliSessionsController {
   }
 
   /**
-   * Sign one device out: revoke the whole rotation family.
+   * Sign one device out: revoke the whole rotation family AND delete the access token that device
+   * is holding.
    *
    * `revokeUserFamily` re-reads ownership under the SAME `(tenantId, userId)` filter before it
    * touches anything — the path parameter is a claim, not a permission. Somebody else's family, an
    * already-revoked one and a made-up one are all the same 404, so this is not an oracle for
    * whether a family id is real.
+   *
+   * ORDER IS DELIBERATE, and it is the ownership check that puts it there: nothing may be deleted
+   * before `revokeUserFamily` has said this family is the caller's own, so the token delete runs
+   * only on `true`. `tenantId` comes from the principal on both calls, never from the request.
+   *
+   * WHY THE SECOND CALL EXISTS AT ALL: revoking the family stops the device minting anything new,
+   * but the 12-hour `nry_` token in its `~/.naary/config.json` authenticated every REST, /api/v1 and
+   * MCP request until it expired. `ApiToken.familyId` is what makes that token findable, so a
+   * sign-out is a sign-out now rather than by tomorrow. The token a session minted BEFORE that
+   * column existed carries no family and is not recalled — bounded by its own ≤12h expiry, and
+   * unable to renew itself because the family it belongs to is now dead.
+   *
+   * IT DOES NOT FAIL THE REQUEST. The family is already revoked by the time this runs, so a throw
+   * here would 500 a sign-out that has mostly succeeded and send the user to retry — where the
+   * spent family answers 404 and reads as "revocation failed". Reporting success with the residual
+   * logged is the same posture `MembersService` takes on the same pair of calls, and it degrades to
+   * exactly the pre-#1078-§5 behaviour: the device stops refreshing, and its token dies at 12h.
    */
   @ApiEndpoint({
     summary: "Revoke one of my CLI sessions",
@@ -137,6 +165,16 @@ export class CliSessionsController {
       familyId,
     );
     if (!ok) throw new NotFoundException("CLI session not found");
+    await this.apiTokens
+      .revokeSessionTokens(principal.tenantId, familyId)
+      .catch((err) =>
+        // No token material — the family id is a random opaque handle, and the message is ours.
+        this.logger.warn(
+          `CLI session ${familyId}: refresh family revoked but its access token(s) were not deleted: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        ),
+      );
     return { revoked: true };
   }
 

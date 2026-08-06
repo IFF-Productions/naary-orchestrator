@@ -91,17 +91,26 @@ export function CliSessionsSection() {
   async function revoke(session: CliSession) {
     const ok = await confirm({
       title: `Sign out ${deviceName(session)}?`,
-      // Precise about WHEN, because it isn't instant and a security screen that overstates is
-      // worse than one that explains: revoking kills the refresh family immediately, but the
-      // 12-hour access token that device already holds isn't recalled — it expires.
+      // This used to say the device's access token kept working "within 12 hours", which was
+      // honest about a real limitation: revoking killed the refresh family, but nothing linked
+      // the 12-hour access token in that device's config to the session, so it could not be
+      // recalled. `ApiToken.familyId` links them, and the server now deletes it in the same
+      // request — so the copy says so. An understated security screen is its own bug: it teaches
+      // people the control is weaker than it is, and someone who needs a device off NOW goes
+      // looking for a bigger hammer.
+      //
+      // Deliberately UNHEDGED. One case is still not instant — a session whose current token was
+      // minted before that column existed — but it is bounded by the token's own ≤12h expiry and
+      // cannot recur after the deploy, and a permanent "usually immediate" would understate this
+      // dialog forever to describe a condition that heals itself the same day.
       body: (
         <>
-          That device will have to run{" "}
+          That device is signed out immediately — its session and the access
+          token it is holding are both revoked. It will have to run{" "}
           <code className="mono" style={{ color: "var(--ink-soft)" }}>
             naary auth
           </code>{" "}
-          again. Its current access token keeps working until it expires, within
-          12 hours.
+          again.
         </>
       ),
       confirmLabel: "Sign out device",
