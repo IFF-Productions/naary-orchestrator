@@ -189,7 +189,7 @@ token into a custom header with an optional prefix; absent/`"bearer"` → plain 
 | jira | `basic` | `Authorization: Basic base64(email:api-token)` | Server URL = your Atlassian site |
 | twilio | `basic` | `Authorization: Basic base64(AccountSid:AuthToken)` | node's `accountSid` field set explicitly — it is **not** derived from the token |
 | zendesk | `basic` | `Authorization: Basic base64(email/token:api-token)` | Server URL = `https://{sub}.zendesk.com/api/v2` |
-| shopify | `{header: X-Shopify-Access-Token}` | `X-Shopify-Access-Token: <token>` | Server URL = `https://{shop}.myshopify.com/admin/api/2024-01` |
+| shopify | `{header: X-Shopify-Access-Token}` | `X-Shopify-Access-Token: <token>` | Server URL = `https://{shop}.myshopify.com/admin/api/{api_version}` — a dated quarterly release, supported ~12 months. **Do not hardcode one here**: an expired version does not 4xx, Shopify falls forward silently (#1109). Current list: [Shopify's release schedule](https://shopify.dev/docs/api/usage/versioning) |
 | discord | `{header: Authorization, prefix: "Bot "}` | `Authorization: Bot <token>` | — |
 | clickup | `{header: Authorization}` (no prefix) | `Authorization: <token>` — **bare**, no `Bearer` | — |
 | monday | `{header: Authorization}` (no prefix) | `Authorization: <token>` — **bare** | — |

@@ -26,7 +26,7 @@ Read and manage Shopify products and orders from a workflow.
 - **You need:** an Admin API access token.
 - **Scopes / permissions:** `read_products`/`write_products`, `write_orders` as required
 - **How the token is sent:** A custom header: `X-Shopify-Access-Token: <token>` — a **bare** value, with no `Bearer ` prefix. Naary applies this for you; paste only the token itself.
-- **Server URL: required.** `https://{your-store}.myshopify.com/admin/api/2024-01` — substitute your store handle, and check the API version is still supported. Getting this wrong is the most common cause of a setup that looks right and 404s.
+- **Server URL: required.** `https://{your-store}.myshopify.com/admin/api/{api_version}` — substitute your store handle, and put a currently-supported version in the last segment. Shopify ships one every quarter and supports each for at least 12 months, so read the current list off [its release-schedule table](https://shopify.dev/docs/api/usage/versioning) rather than copying a date: `2026-07` was the newest stable as of August 2026. Getting this wrong is the most common cause of a setup that looks right and 404s.
 
 ## Get your credentials
 
@@ -37,7 +37,7 @@ Read and manage Shopify products and orders from a workflow.
 
 1. Go to **Integrations → Connect a server**.
 2. Pick the **Shopify** tile (or *Custom* if you are configuring it by hand).
-3. Set **Server URL** to `https://{your-store}.myshopify.com/admin/api/2024-01` — substitute your store handle, and check the API version is still supported.
+3. Set **Server URL** to `https://{your-store}.myshopify.com/admin/api/{api_version}` — substitute your store handle, and put a currently-supported version in the last segment. Shopify ships one every quarter and supports each for at least 12 months, so read the current list off [its release-schedule table](https://shopify.dev/docs/api/usage/versioning) rather than copying a date: `2026-07` was the newest stable as of August 2026.
 4. Paste the credential into the token field and save.
 5. Connections are **per environment** — a sandbox connection and a prod connection are separate rows, so test credentials can never be used by a production run.
 
@@ -78,7 +78,7 @@ You fill in flat fields; the node assembles the nested body the API expects.
 ## Gotchas
 
 - The token goes in an `X-Shopify-Access-Token` header, not `Authorization`. Naary handles it — but it is why the token fails in a generic HTTP node configured for Bearer.
-- The Server URL embeds an **API version** that Shopify ages out roughly quarterly; a working integration can break on a version sunset. Check the version if calls start 400ing.
+- The Server URL embeds a dated **API version**, and an expired one does **not** start failing — Shopify *falls forward* and answers as the oldest still-supported version instead. So a stale URL keeps returning `200` while quietly serving a different API than the one you asked for; you will not get a 4xx to tell you. Re-check the version against Shopify's [release schedule](https://shopify.dev/docs/api/usage/versioning) on a calendar, not on an error.
 
 ## Troubleshooting
 
