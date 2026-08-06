@@ -25,7 +25,7 @@ Add and update Mailchimp audience members, and create campaigns.
 
 - **You need:** an API key.
 - **How the token is sent:** A standard `Authorization: Bearer <token>` header. Paste only the token.
-- **Server URL: required.** `https://{dc}.api.mailchimp.com/3.0`, where `{dc}` is your key's datacenter suffix (e.g. `us19`). Getting this wrong is the most common cause of a setup that looks right and 404s.
+- **Server URL: required.** `https://{dc}.api.mailchimp.com/3.0`, where `{dc}` is your key's datacenter suffix (e.g. `us19`). A missing `/3.0` suffix 404s, but the **datacenter** — the part people actually get wrong — does not: a `{dc}` that disagrees with your key returns **401 with a perfectly valid key**, which looks like a bad credential. The suffix is printed after the `-` in the key itself.
 
 ## Get your credentials
 
@@ -79,7 +79,7 @@ The 3 write actions run **at-most-once**: a transient failure fails the node ins
 | Symptom | Most likely cause |
 | --- | --- |
 | **401 / 403 on every call** | The credential is wrong, expired, or missing a scope. Paste only the token, with no `Bearer ` prefix of your own. |
-| **404 on a call that should work** | The Server URL is wrong. Re-read the format above — a missing path suffix or version segment produces a 404, not a helpful error. |
+| **404 on a call that should work** | The Server URL is wrong. Re-read the format above — a missing or mistyped path segment produces a 404, not a helpful error. |
 | **`host is not allowed` / egress error** | The target resolves to a private or loopback address. Naary's SSRF guard blocks those, so self-hosted instances must be reachable at a public hostname. |
 | **Works in sandbox, fails in prod (or vice versa)** | Connections are per-environment. Each environment needs its own connection row with its own credential. |
 | **Node output shows `status: 200` but nothing happened** | Some providers report failures in the body with a 200. Check `<nodeId>.body` before trusting the status. |

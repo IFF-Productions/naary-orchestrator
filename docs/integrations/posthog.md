@@ -25,7 +25,7 @@ Query PostHog events and people, and annotate releases, from a workflow.
 
 - **You need:** a personal API key.
 - **How the token is sent:** A standard `Authorization: Bearer <token>` header. Paste only the token.
-- **Server URL: required.** `https://us.posthog.com` for US Cloud, `https://eu.posthog.com` for EU Cloud, or your own host if you self-host. Getting this wrong is the most common cause of a setup that looks right and 404s. (PostHog connections made *before* this field was asked for store no host and keep calling `https://us.posthog.com`, so none of them broke — but every new connection sets it.)
+- **Server URL: required.** `https://us.posthog.com` for US Cloud, `https://eu.posthog.com` for EU Cloud, or your own host if you self-host. Getting this wrong does **not** 404. The regions are separate deployments, so a key from one against the other's host comes back as an auth failure — the symptom looks like a bad key, which is why this gets diagnosed as a credential problem and the region never gets checked (#1110). (PostHog connections made *before* this field was asked for store no host and keep calling `https://us.posthog.com`, so none of them broke — but every new connection sets it.)
 
 ## Get your credentials
 
@@ -78,7 +78,7 @@ The 1 write action run **at-most-once**: a transient failure fails the node inst
 | Symptom | Most likely cause |
 | --- | --- |
 | **401 / 403 on every call** | The credential is wrong, expired, or missing a scope. Paste only the token, with no `Bearer ` prefix of your own. |
-| **404 on a call that should work** | The Server URL is wrong. Re-read the format above — a missing path suffix or version segment produces a 404, not a helpful error. |
+| **404 on a call that should work** | The Server URL is wrong. Re-read the format above — a missing or mistyped path segment produces a 404, not a helpful error. |
 | **`host is not allowed` / egress error** | The target resolves to a private or loopback address. Naary's SSRF guard blocks those, so self-hosted instances must be reachable at a public hostname. |
 | **Works in sandbox, fails in prod (or vice versa)** | Connections are per-environment. Each environment needs its own connection row with its own credential. |
 | **Node output shows `status: 200` but nothing happened** | Some providers report failures in the body with a 200. Check `<nodeId>.body` before trusting the status. |
