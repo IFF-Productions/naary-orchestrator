@@ -179,10 +179,19 @@ function narrowerThan(
  * Probes with NO pinned OpenAPI document, and therefore no answer to "does this endpoint still
  * exist?". Each entry is a claim that we know, and what would settle it.
  *
- * This list is the honest half of check 3: without it, seven providers pass by being unexaminable,
- * and a green run would read as "31 probes verified" when it means 24. Asserted in BOTH directions
+ * This list is the honest half of check 3: without it, six providers pass by being unexaminable,
+ * and a green run would read as "31 probes verified" when it means 25. Asserted in BOTH directions
  * below — adding a `SOURCES` entry for one of these makes its line here fail, which is exactly the
  * moment somebody should delete it.
+ *
+ * `deepl` was the seventh entry, and its removal is what that both-directions assertion is FOR. Its
+ * text read "Another SOURCES candidate rather than a blocked provider; pinning it would bring this
+ * probe under check 3 and the languages action under the deprecation check" — which is exactly what
+ * happened (#1109): `SOURCES.deepl` now vendors `DeepL/api-docs` -> `api-reference/openapi.yaml`, so
+ * `get_usage` is checked by 3a/3b/3c below like any other pinned probe, and `list_languages`'s
+ * `deprecated: true` is adjudicated in ACKNOWLEDGED_DEPRECATED rather than merely noted in a comment
+ * nothing asserts. The two counts above moved with it; they are hand-maintained, and the coverage
+ * line this file prints on every run is what they must agree with.
  */
 const PROBE_NOT_SPEC_CHECKED: { provider: string; why: string }[] = [
   {
@@ -238,14 +247,6 @@ const PROBE_NOT_SPEC_CHECKED: { provider: string; why: string }[] = [
       "`.json` suffix our catalog uses, so matching needs a path-rewrite seam this repo decided not " +
       "to build for three actions (#813, restated in VERIFICATION.md §2.5). `list_tickets` was " +
       "confirmed present in that document by the #1109 audit.",
-  },
-  {
-    provider: "deepl",
-    why:
-      "DeepL publishes an OpenAPI document and #1109 read it: `get_usage` (`/v2/usage`) carries no " +
-      "deprecation, while `/v2/languages` — an action, not the probe — is flagged `deprecated: " +
-      "true`. Another SOURCES candidate rather than a blocked provider; pinning it would bring this " +
-      "probe under check 3 and the languages action under the deprecation check.",
   },
 ];
 

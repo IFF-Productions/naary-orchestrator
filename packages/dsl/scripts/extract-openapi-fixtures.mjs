@@ -255,6 +255,22 @@ const SOURCES = {
     url: "https://raw.githubusercontent.com/getsentry/sentry-api-schema/main/openapi-derefed.json",
     pathPrefix: "/api/0",
   },
+  // ── added by #1109, closing the last cheap spec-coverage gap ───────────────────────────────────
+  deepl: {
+    // DeepL's own document, in their docs repo, `info.version: 3.12.0`. Self-contained (local
+    // `$ref`s only) and it describes v1, v2 and v3 in ONE file — which is what makes it worth
+    // pinning here: `/v2/languages` carries `deprecated: true` naming `/v3/languages` as its
+    // successor, so both sides of that migration are in the same vendor document and the
+    // comparison behind `deepl.list_languages`'s ACKNOWLEDGED_DEPRECATED entry is like-for-like.
+    //
+    // `pathPrefix` is EMPTY even though every path we call is versioned: DeepL spells the version
+    // in the path (`/v2/translate`), and `deepl` has no catalog `baseUrl` at all
+    // (`baseUrlFromConnection: true` — a Free key only authenticates on api-free.deepl.com, a Pro
+    // key on api.deepl.com), so the drift spec's baseUrl-ends-with-pathPrefix seam compares "" to
+    // "". Nothing to strip, and nothing that could silently un-match the paths.
+    url: "https://raw.githubusercontent.com/DeepL/api-docs/main/api-reference/openapi.yaml",
+    pathPrefix: "",
+  },
 };
 
 /**

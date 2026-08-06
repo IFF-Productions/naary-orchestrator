@@ -1,0 +1,118 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "DeepL API Documentation",
+    "version": "3.12.0"
+  },
+  "x-naary": {
+    "provider": "deepl",
+    "pathPrefix": "",
+    "source": "https://raw.githubusercontent.com/DeepL/api-docs/main/api-reference/openapi.yaml",
+    "fetchedAt": "2026-08-06",
+    "note": "PRUNED snapshot — see packages/dsl/scripts/extract-openapi-fixtures.mjs. Do not hand-edit."
+  },
+  "paths": {
+    "/v2/translate": {
+      "post": {
+        "operationId": "translateText",
+        "x-security": [
+          "auth_header"
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "required": [
+                  "text",
+                  "target_lang"
+                ],
+                "properties": {
+                  "text": {
+                    "type": "array"
+                  },
+                  "source_lang": {},
+                  "target_lang": {},
+                  "context": {},
+                  "show_billed_characters": {},
+                  "split_sentences": {},
+                  "preserve_formatting": {},
+                  "formality": {},
+                  "model_type": {},
+                  "glossary_id": {},
+                  "glossary_ids": {},
+                  "style_id": {},
+                  "translation_memory_id": {},
+                  "translation_memory_threshold": {},
+                  "custom_instructions": {},
+                  "tag_handling": {},
+                  "tag_handling_version": {},
+                  "outline_detection": {},
+                  "enable_beta_languages": {},
+                  "non_splitting_tags": {},
+                  "splitting_tags": {},
+                  "ignore_tags": {}
+                }
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "required": [
+                  "text",
+                  "target_lang"
+                ],
+                "properties": {
+                  "text": {
+                    "type": "array"
+                  },
+                  "source_lang": {},
+                  "target_lang": {},
+                  "context": {},
+                  "show_billed_characters": {},
+                  "split_sentences": {},
+                  "preserve_formatting": {},
+                  "formality": {},
+                  "model_type": {},
+                  "glossary_id": {},
+                  "glossary_ids": {},
+                  "translation_memory_id": {},
+                  "translation_memory_threshold": {},
+                  "tag_handling": {},
+                  "outline_detection": {},
+                  "enable_beta_languages": {},
+                  "non_splitting_tags": {},
+                  "splitting_tags": {},
+                  "ignore_tags": {}
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v2/usage": {
+      "get": {
+        "operationId": "getUsage",
+        "x-security": [
+          "auth_header"
+        ]
+      }
+    },
+    "/v2/languages": {
+      "get": {
+        "operationId": "getLanguagesV2",
+        "deprecated": true,
+        "x-security": [
+          "auth_header"
+        ],
+        "parameters": [
+          {
+            "name": "type",
+            "in": "query",
+            "required": false
+          }
+        ]
+      }
+    }
+  }
+}
