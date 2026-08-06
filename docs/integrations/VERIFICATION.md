@@ -432,10 +432,30 @@ build instead of a year of silence.
 
 **Where it actually bites today**, because a mechanism's reach is not the same as its coverage:
 `notion` (spec declares `enum: ["2026-03-11"]`) and `intercom` (`1.0` … `2.16`, we pin `2.11`) — both
-refreshed here, both compared. `github` is **not** covered and cannot be: its 13MB description never
-mentions `X-GitHub-Api-Version` at all, so there is nothing to compare with. Every other fixture was
-extracted before this existed and carries no `enum`; each gains the check on its next refresh, as a
-reviewable diff. **A fixture with no `enum` means the spec did not say — never that it agrees.**
+refreshed here, and both pass the enum check. `github` is **not** covered and cannot be: its 13MB
+description never mentions `X-GitHub-Api-Version` at all, so there is nothing to compare with. Every
+other fixture was extracted before this existed and carries no `enum`; each gains the check on its next
+refresh, as a reviewable diff. **A fixture with no `enum` means the spec did not say — never that it
+agrees.**
+
+`intercom` is the case that shows what the enum check does *not* cover, and it is worth spelling out
+rather than reading "green" as "current" (#1126). Passing 3b only means **`2.11` is still an accepted
+value** — the pin is not stale in the sense of rejected. It says nothing about response shapes, and the
+shapes are where the risk lives. Those were compared for real: Intercom publishes one document per
+version, so 2.11 was diffed against **each** of 2.12 … 2.16 for all five actions, and **every candidate
+differs** — `contact.owner_id` goes `integer` → `string` in 2.16 (Intercom's own changelog calls it a
+breaking change, and it hits `get_contact` *and* `create_contact`), and `admin.avatar` goes
+`object {image_url}` → `string(uri)` from **2.12 onward**, which is `create_note`'s
+`body.author.avatar`. `send_message` and `get_me` are identical throughout, but the header is
+provider-wide. **Declined, with no safe target version**; the pin at 2.11 is a decision, not neglect.
+
+Two further limits of the mechanism, both visible only here. **Intercom publishes no sunset window at
+all** — not in its versioning docs, its versioning blog post, or the 2.16 changelog — so nothing can be
+derived about when `2.11` stops answering; and its *Unversioned Changes* page ships behaviour changes
+across **all** versions, so a pin fixes the shape contract, not the behaviour. And `SOURCES.intercom`
+names a version directory (`descriptions/2.16/`) with no `latest` alias upstream, so **once 2.17 ships,
+a refresh re-fetches the same frozen document and 3b can no longer fire for `intercom` until a human
+edits that URL.** That entry carries the instruction; this is the record of why it matters.
 
 The reverse still holds, and it is the rule to reach for first: **a spec mismatch on a
 version-pinned API is not evidence that an endpoint is gone.** Check which version we send, and check
