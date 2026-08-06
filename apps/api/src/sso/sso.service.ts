@@ -43,7 +43,12 @@ export type SsoFailure =
   | "replay"
   | "access_not_allowed"
   | "mfa_required"
-  | "no_membership";
+  | "no_membership"
+  /** Their `Membership` in this workspace exists but is DEACTIVATED (#1115). A DISTINCT code
+   *  from `no_membership`: the two mean different things to the person reading the SPA's error
+   *  ("you were never added here" vs "your directory switched you off"), and conflating them
+   *  would send a de-provisioned employee to a workspace admin instead of to their IdP. */
+  | "membership_deactivated";
 
 export class SsoLoginError extends Error {
   constructor(
@@ -257,6 +262,16 @@ export class SsoService {
    *     email_verified).
    *  3. PROVISION — `autoProvision` ⇒ a Membership with the CONNECTION's defaultRole.
    *  4. else refuse.
+   *
+   * STEP 0, AND IT IS A REAL BYPASS RATHER THAN TIDINESS (#1115): a DEACTIVATED membership
+   * refuses the login outright, before linking or provisioning. The guard would deny the
+   * resulting session anyway, so this looks redundant — it is not, because of what step 3 does
+   * with a MISSING one. If `findByEmail` merely hid deactivated rows, this method could not
+   * tell "never a member" from "de-provisioned", would fall through to `autoProvision`, and
+   * would `ensureMembership` a BRAND-NEW ACTIVE row under the synthetic `sso:` uid — a
+   * different `userId`, so the deactivated row does not stop it. A person their IdP had just
+   * switched off would restore their own access by signing in through SAML. Refusing here is
+   * what closes that, and it is why `findByEmail` reports `active` instead of filtering.
    */
   private async resolveUser(
     conn: {
@@ -269,6 +284,9 @@ export class SsoService {
     nameId: string,
   ): Promise<{ userId: string; outcome: SsoLoginResult["outcome"] }> {
     const existing = await this.memberships.findByEmail(conn.tenantId, email);
+    if (existing && !existing.active) {
+      throw new SsoLoginError("membership_deactivated");
+    }
     if (existing) return { userId: existing.userId, outcome: "linked" };
 
     // Deterministic synthetic id: stable across logins, impossible to collide with a Firebase

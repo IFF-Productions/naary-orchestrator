@@ -90,11 +90,11 @@ function signedResponse(opts: {
       <saml:AudienceRestriction><saml:Audience>${SP_ENTITY}</saml:Audience></saml:AudienceRestriction>
     </saml:Conditions>
     <saml:AuthnStatement AuthnInstant="${iso(-1)}"><saml:AuthnContext><saml:AuthnContextClassRef>${ctx}</saml:AuthnContextClassRef></saml:AuthnContext></saml:AuthnStatement>${
-    opts.nameId
-      ? `
+      opts.nameId
+        ? `
     <saml:AttributeStatement><saml:Attribute Name="email"><saml:AttributeValue>${opts.email}</saml:AttributeValue></saml:Attribute></saml:AttributeStatement>`
-      : ""
-  }
+        : ""
+    }
   </saml:Assertion>
 </samlp:Response>`;
   const sig = new SignedXml({
@@ -271,7 +271,11 @@ describe("SsoService — provisioning and linking", () => {
   });
 
   it("LINKS to an existing membership for that email, reusing its userId", async () => {
-    findByEmail.mockResolvedValue({ userId: "firebase-uid-7", role: "admin" });
+    findByEmail.mockResolvedValue({
+      userId: "firebase-uid-7",
+      role: "admin",
+      active: true,
+    });
     const svc = makeService();
     const res = await svc.consumeAssertion(
       signedResponse({
@@ -283,6 +287,36 @@ describe("SsoService — provisioning and linking", () => {
     expect(res.outcome).toBe("linked");
     expect(ensureMembership).not.toHaveBeenCalled(); // role/identity preserved, not overwritten
     expect(findByEmail).toHaveBeenCalledWith("ws-a", "alice@tenant-a.com");
+  });
+
+  /**
+   * #1115 — THE SAML BYPASS, and the reason `findByEmail` reports `active` instead of hiding a
+   * deactivated row.
+   *
+   * A de-provisioned user's `Membership` is still there, switched off. If `resolveUser` could
+   * not SEE it, "no membership" would send it down the auto-provision branch, which writes a
+   * BRAND-NEW ACTIVE membership under the synthetic `sso:` uid — a different `userId`, so the
+   * deactivated row does not stop it. The person their IdP had just switched off would restore
+   * their own access by signing in. Both halves are asserted: the login is refused, AND nothing
+   * was provisioned.
+   */
+  it("REFUSES a login for a DEACTIVATED membership, and provisions nothing (#1115)", async () => {
+    findByEmail.mockResolvedValue({
+      userId: "firebase-uid-7",
+      role: "member",
+      active: false,
+    });
+    const svc = makeService();
+    await expect(
+      svc.consumeAssertion(
+        signedResponse({
+          issuer: IDP_A,
+          email: "alice@tenant-a.com",
+          privateKey: keysA.privateKey,
+        }),
+      ),
+    ).rejects.toMatchObject({ code: "membership_deactivated" });
+    expect(ensureMembership).not.toHaveBeenCalled();
   });
 
   it("allows a pending invitation through even when autoProvision is off", async () => {
@@ -340,7 +374,11 @@ describe("SsoService — THE SECURITY INVARIANT: an IdP may only speak for its o
   it("never links a tenant-B membership from tenant A's IdP even when the email matches", async () => {
     // A membership DOES exist for this address — in the other workspace. The domain gate fires
     // first, and the lookup that follows would be scoped to ws-a anyway.
-    findByEmail.mockResolvedValue({ userId: "uid-in-ws-b", role: "owner" });
+    findByEmail.mockResolvedValue({
+      userId: "uid-in-ws-b",
+      role: "owner",
+      active: true,
+    });
     expect(
       await codeOf(() =>
         makeService().consumeAssertion(

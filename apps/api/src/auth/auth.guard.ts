@@ -53,6 +53,26 @@ const ACCESS_NOT_ALLOWED = {
 } as const;
 
 /**
+ * Response body for an authenticated user whose membership in the targeted workspace has been
+ * DEACTIVATED (#1115 — SCIM `PATCH active: false`).
+ *
+ * A distinct `code` for the same reason `mfa_required` has one: "Not a workspace member" is
+ * true but misleading for someone who IS in the workspace's member list and was switched off by
+ * their company's IdP, and it would send them to a workspace admin who can see them on the Team
+ * screen and cannot work out why they are locked out. The message names the actual state and
+ * the actual remedy (their directory), so the support conversation starts in the right place.
+ *
+ * 403, not 401: the credentials are valid and re-authenticating changes nothing.
+ */
+const MEMBERSHIP_DEACTIVATED = {
+  statusCode: 403,
+  error: "Forbidden",
+  code: "membership_deactivated",
+  message:
+    "Your access to this workspace has been deactivated. Ask your identity provider's administrator to reactivate you, or a workspace owner or admin for help.",
+} as const;
+
+/**
  * Instance-wide "require two-factor authentication" policy (#457). `REQUIRE_MFA` is an
  * operator env toggle — the same shape as `ACCESS_ALLOWED_EMAILS` above, which is the
  * existing precedent for an instance-wide auth policy (there is no instance-settings table;
@@ -320,11 +340,39 @@ export class AuthGuard implements CanActivate {
     // membership, even if the linked user really is a member of others. So a workspace's IdP
     // can never mint a session that reaches a workspace it does not speak for — including via
     // a linked pre-existing Firebase userId.
+    // `listForUser` returns LIVE memberships only — a row with `active: false` (#1115, the
+    // SCIM soft de-provision) is not in this list and therefore authorizes nothing.
     const allMemberships = await this.memberships.listForUser(user.userId);
     const memberships = ssoTenant
       ? allMemberships.filter((m) => m.tenantId === ssoTenant)
       : allMemberships;
-    const claim = user.claimTenant;
+    /**
+     * Workspaces where this user holds a DEACTIVATED membership (#1115).
+     *
+     * Needed because the legacy `tenant` claim below grants owner WITHOUT a Membership row, so
+     * dropping the deactivated row from `memberships` is not enough on its own: the claim would
+     * quietly re-grant exactly the access a de-provision took away, and we would have told the
+     * IdP the user was deactivated while they kept owner. An explicit deactivated row BEATS the
+     * claim — the fail-closed reading. Answered from the same cached entry as `listForUser`,
+     * so this adds no query.
+     *
+     * CONFINED TO `ssoTenant` FOR THE SAME REASON `memberships` IS. It is read twice — to defuse
+     * the claim (which an SSO session never has) and to pick the 403's body below (which an SSO
+     * session CAN reach). Unconfined, the second read would answer `membership_deactivated` for
+     * a workspace the session may not speak for and `"Not a workspace member"` otherwise — a
+     * distinguisher across exactly the boundary this guard's docstring calls a confinement. It
+     * grants nothing either way, but a one-line filter is cheaper than the exception.
+     */
+    const allDeactivated = await this.memberships.deactivatedTenantIds(
+      user.userId,
+    );
+    const deactivated = ssoTenant
+      ? new Set([...allDeactivated].filter((t) => t === ssoTenant))
+      : allDeactivated;
+    const claim =
+      user.claimTenant && !deactivated.has(user.claimTenant)
+        ? user.claimTenant
+        : undefined;
     if (claim && !memberships.some((m) => m.tenantId === claim)) {
       // Best-effort, NON-authorizing: access is granted via the claim union below, not by
       // this write succeeding. Awaiting-and-throwing would 500 an already-authorized user
@@ -365,7 +413,12 @@ export class AuthGuard implements CanActivate {
     if (targetAllowed) {
       active = target;
     } else if (target && !isUserScoped) {
-      // A workspace-scoped route explicitly targeting a workspace the user isn't in.
+      // A workspace-scoped route explicitly targeting a workspace the user isn't in — or, since
+      // #1115, one where their membership has been switched off. Same 403 either way; only the
+      // body differs, so a de-provisioned person is told what actually happened.
+      if (deactivated.has(target)) {
+        throw new ForbiddenException(MEMBERSHIP_DEACTIVATED);
+      }
       throw new ForbiddenException("Not a workspace member");
     } else {
       active =

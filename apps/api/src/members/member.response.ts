@@ -27,6 +27,16 @@ export class MemberResponse {
       "a verified matching email.",
   })
   status!: "active" | "invited";
+  @ApiPropertyOptional({
+    description:
+      "Is this member's access live? false = their membership has been DEACTIVATED (#1115 — a " +
+      "SCIM soft de-provision): the row, their role and their permission groups are all kept, " +
+      "and reactivating restores every one of them, but they cannot sign in meanwhile. Absent " +
+      "on invited rows. Render it as a badge — a deactivated member stays in the members list " +
+      "on purpose, because removing them in the workspace is the escape hatch when the " +
+      "directory cannot.",
+  })
+  active?: boolean;
   @ApiProperty({ format: "date-time" }) createdAt!: string;
   @ApiPropertyOptional({
     type: "string",

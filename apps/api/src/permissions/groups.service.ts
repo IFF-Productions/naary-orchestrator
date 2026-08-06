@@ -177,8 +177,19 @@ export class GroupsService {
     this.permissions.invalidateTenant(tenantId);
   }
 
-  /** Add a USER to a group. The target must hold a Membership in the tenant (400
-   *  otherwise) — groups reference real members, never free-floating uids. Idempotent. */
+  /**
+   * Add a USER to a group. The target must hold a Membership in the tenant (400 otherwise) —
+   * groups reference real members, never free-floating uids. Idempotent.
+   *
+   * A DEACTIVATED MEMBERSHIP (#1115) STILL QUALIFIES, and that is a decision rather than an
+   * omission. Preserving a de-provisioned person's grants across a deactivate/reactivate cycle
+   * is the entire reason `Membership.active` exists instead of a delete, so refusing to write
+   * group rows for them would be the same data loss by a slower route: an admin restructuring
+   * groups while someone is on leave would silently exclude them from the group they come back
+   * to. The row grants nothing meanwhile — the AuthGuard denies the person outright, and
+   * `resolveRemaining` does not count them as an approver. Access is gated in ONE place; this
+   * is not that place.
+   */
   async addMember(
     tenantId: string,
     caller: Principal,

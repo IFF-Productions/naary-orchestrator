@@ -23,14 +23,48 @@ export class MembershipService {
     @Inject(MEMBERSHIP_CACHE) private readonly cache: MembershipCache,
   ) {}
 
-  /** The user's memberships (cache → DB read-through). */
+  /**
+   * The user's LIVE memberships (cache → DB read-through).
+   *
+   * DEACTIVATED ROWS ARE FILTERED OUT HERE (#1115), and this method is the chokepoint the
+   * whole soft-de-provision design leans on: the AuthGuard resolves the active workspace and
+   * the user's role from exactly this list, so a `Membership` with `active: false` grants
+   * nothing. Filtering here rather than at each call site is what makes a future consumer
+   * safe by default — a caller that forgets `active` gets the live set anyway.
+   *
+   * The CACHE holds the raw rows, deactivated ones included, so {@link deactivatedTenantIds}
+   * can answer from the same entry without a second query (see UserMembership.active).
+   */
   async listForUser(userId: string): Promise<UserMembership[]> {
+    return (await this.rawForUser(userId)).filter((m) => m.active);
+  }
+
+  /**
+   * The workspaces where this user holds a DEACTIVATED membership (#1115).
+   *
+   * Exists for exactly one caller — the AuthGuard's legacy `tenant` claim. That claim is a
+   * transitional OWNER grant that needs no Membership row at all, so filtering the deactivated
+   * row out of {@link listForUser} would leave the claim silently re-granting the access the
+   * de-provision just took away. An explicit deactivated row therefore BEATS the claim: the
+   * fail-closed reading, and the only one that lets us tell an IdP the truth.
+   *
+   * Answered from the same cached entry as `listForUser` — no extra hot-path query.
+   */
+  async deactivatedTenantIds(userId: string): Promise<Set<string>> {
+    const raw = await this.rawForUser(userId);
+    return new Set(raw.filter((m) => !m.active).map((m) => m.tenantId));
+  }
+
+  /** Cache → DB read-through, UNFILTERED. Private: everything outside this file wants either
+   *  the live set or the deactivated ids, and a raw accessor is how "row exists ⇒ authority"
+   *  creeps back in. */
+  private async rawForUser(userId: string): Promise<UserMembership[]> {
     const cached = this.cache.get(userId);
     if (cached) return cached;
     const rows = await getPrisma().membership.findMany({
       where: { userId },
       orderBy: { createdAt: "asc" },
-      select: { tenantId: true, role: true },
+      select: { tenantId: true, role: true, active: true },
     });
     this.cache.set(userId, rows);
     return rows;
@@ -46,17 +80,25 @@ export class MembershipService {
    *
    * NOT cached: this is a login-time lookup, not a hot path, and a stale negative would make a
    * returning federated user look like a new one (a duplicate identity).
+   *
+   * IT STILL FINDS DEACTIVATED ROWS (#1115), and reports them via `active` rather than hiding
+   * them. Filtering them out here would be the more obvious change and would open a hole: the
+   * caller (`SsoService.resolveUser`) reads "no membership" as permission to AUTO-PROVISION,
+   * so a deactivated user signing in through SAML would get a brand-new ACTIVE membership under
+   * the synthetic `sso:` uid — a de-provisioned person restoring their own access by logging
+   * in. The caller must be able to tell "never a member" from "deactivated"; it refuses the
+   * latter.
    */
   async findByEmail(
     tenantId: string,
     email: string,
-  ): Promise<{ userId: string; role: string } | null> {
+  ): Promise<{ userId: string; role: string; active: boolean } | null> {
     const trimmed = email.trim();
     if (trimmed.length === 0) return null;
     const row = await getPrisma().membership.findFirst({
       where: { tenantId, email: { equals: trimmed, mode: "insensitive" } },
       orderBy: { createdAt: "asc" },
-      select: { userId: true, role: true },
+      select: { userId: true, role: true, active: true },
     });
     return row ?? null;
   }
@@ -88,6 +130,12 @@ export class MembershipService {
    * backfill existing claim-provisioned users into the new model on first read — a
    * purely ADDITIVE write (it records access the user already has via their claim;
    * enforcement is unchanged). Invalidates the cache so the new row is seen at once.
+   *
+   * `update: {}` IS LOAD-BEARING SINCE #1115, not just role preservation: this runs on the
+   * guard's hot path and on every SAML auto-provision, so an `update` that touched `active`
+   * would REACTIVATE a de-provisioned member the moment they tried to sign in. A new row is
+   * active (the column default) because it records access the caller has already proven;
+   * an existing row is left exactly as it is.
    */
   async ensureMembership(
     userId: string,
@@ -147,7 +195,10 @@ export class MembershipService {
     for (const inv of pending) {
       // upsert with an empty update: if a Membership already exists its role WINS — an
       // invitation never re-roles an existing member (silent escalation), and the P2002
-      // race (parallel first-login requests) is absorbed.
+      // race (parallel first-login requests) is absorbed. Since #1115 it also means an
+      // invitation can never REACTIVATE a de-provisioned membership: `active` is untouched on
+      // an existing row, so accepting a stale invitation converts nothing into access. (The
+      // SCIM deactivate path revokes the pending invitation anyway — this is the second belt.)
       await prisma.membership.upsert({
         where: { userId_tenantId: { userId, tenantId: inv.tenantId } },
         create: { userId, tenantId: inv.tenantId, role: inv.role, email },
@@ -224,7 +275,13 @@ export class MembershipService {
       });
     }
     this.cache.invalidate(userId);
-    return { tenantId, role: "owner", name: displayName || undefined };
+    // A workspace you just created is live by construction (`Membership.active` defaults true).
+    return {
+      tenantId,
+      role: "owner",
+      active: true,
+      name: displayName || undefined,
+    };
   }
 
   /**

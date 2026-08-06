@@ -2,6 +2,17 @@
 export interface UserMembership {
   tenantId: string;
   role: string;
+  /**
+   * Is this membership live? (#1115 — SCIM soft de-provision.) `false` = the row exists, with
+   * its role and its permission groups intact, but it grants NO access.
+   *
+   * The cache stores rows RAW, deactivated ones included, and
+   * {@link import("./membership.service").MembershipService.listForUser} does the filtering.
+   * That is deliberate: the guard needs to know a deactivated row EXISTS in order to refuse a
+   * legacy `tenant` claim for that workspace, and re-reading it would put a query back on the
+   * hot path this cache exists to keep free.
+   */
+  active: boolean;
 }
 
 /**

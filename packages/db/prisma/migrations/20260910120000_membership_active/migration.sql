@@ -1,0 +1,36 @@
+-- #1115 decision (b): give `Membership` a deactivated state, so SCIM's soft de-provision
+-- (`PATCH /scim/v2/Users/{id}` with `active: false`) has somewhere to land.
+--
+-- The alternative the owner rejected was mapping that signal onto a DELETE. It revokes just as
+-- hard, but `removeMember` cascades the `GroupMember` rows away, so a later `active: true`
+-- restores the PERSON and not their GRANTS — an IdP admin who deactivates a leaver and
+-- reactivates them a week later would silently hand back an account with no permissions. This
+-- column is what makes reactivation a pure flip: the row, its role and its groups all survive
+-- deactivation, and nothing but access is taken away.
+--
+-- IT IS AN AUTHORIZATION COLUMN, NOT A FLAG. Every read that treats "a Membership row exists"
+-- as authority now also reads this — the AuthGuard (via MembershipService.listForUser), the
+-- SAML login path, group add, company member resolution, the last-owner guard, the
+-- stranded-approval report and the SCIM read surface. The enumeration of those sites is in the
+-- PR for this migration and at the top of `scim-provisioning.service.ts`.
+--
+-- NOT NULL DEFAULT true — deliberately not nullable. A nullable column buys three-valued logic
+-- in every one of those predicates (`active IS NOT FALSE` vs `active = true`) in exchange for
+-- nothing: there is no third state, and "unknown" would have to be read as "active" anyway.
+--
+-- EXPAND/CONTRACT SAFE, which is the property a rolling deploy (docker-rollout runs the old and
+-- new images side by side) actually needs:
+--   * the OLD image's INSERTs do not name the column, so every row it writes defaults to true
+--     and authenticates exactly as it does today;
+--   * the OLD image's SELECTs name their columns, so an extra one is invisible to it;
+--   * on Postgres 11+ adding a NOT NULL column with a non-volatile DEFAULT is a catalogue-only
+--     change — no table rewrite, no lock held for the length of a scan.
+--
+-- THE ONE WINDOW THIS CANNOT CLOSE, stated rather than implied: during the rollout, a row the
+-- NEW image has just deactivated is read by the OLD image, which has no `active` check and will
+-- still authenticate that user. It lasts as long as the two images overlap (seconds to a
+-- minute) and it is inherent to expand/contract — the only alternative is a hard delete, which
+-- is precisely the semantic this change exists to replace. An operator who needs immediate
+-- revocation mid-rollout still has `MembersService.removeMember` (the Team screen), which
+-- deletes the row and is honoured by both images.
+ALTER TABLE "Membership" ADD COLUMN "active" BOOLEAN NOT NULL DEFAULT true;

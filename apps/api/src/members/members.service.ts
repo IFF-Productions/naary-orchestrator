@@ -33,6 +33,18 @@ export interface MemberView {
   email: string;
   role: string;
   status: MemberStatus;
+  /**
+   * Is this member's access live? (#1115.) `false` = their `Membership` is DEACTIVATED — the
+   * row, its role and its permission groups are all intact, but the AuthGuard denies them.
+   * Absent on invited rows (no membership to switch off).
+   *
+   * A NEW FIELD RATHER THAN A THIRD `status` VALUE, deliberately: the Team screen partitions
+   * on `status === "active" | "invited"`, so a third value would make deactivated members
+   * vanish from the screen entirely — the opposite of the legibility this exists for. An
+   * admin has to be able to SEE that the person is switched off, because workspace-side
+   * removal is the documented escape hatch when the IdP cannot de-provision them.
+   */
+  active?: boolean;
   createdAt: string;
   /** Last authenticated request in this workspace (#489). Active rows only; null = not seen
    *  since the column was added. Absent on invited rows (they have no membership yet). */
@@ -155,8 +167,17 @@ export class MembersService {
       where: { tenantId, email: { equals: norm, mode: "insensitive" } },
     });
     if (existingMember) {
+      // A DEACTIVATED member is still a member (#1115) — the row, its role and its groups all
+      // survive — so this stays a 409 rather than quietly re-inviting them, which would create
+      // an Invitation that accept-on-login could not honour anyway (the upsert there leaves
+      // `active` alone). The message names the state because otherwise an admin re-inviting
+      // someone their IdP switched off gets "already a member" for a person the screen shows
+      // as unable to sign in, and the real remedy — reactivate in the directory, or remove
+      // them here and start over — is invisible.
       throw new ConflictException(
-        "That email already belongs to a member of this workspace.",
+        existingMember.active === false
+          ? "That email belongs to a DEACTIVATED member of this workspace. Reactivate them in your directory, or remove them here first."
+          : "That email already belongs to a member of this workspace.",
       );
     }
     const existing = await prisma.invitation.findUnique({
@@ -208,6 +229,14 @@ export class MembersService {
    * Change an active member's role. Owner|admin; involving admin/owner (either the
    * target's current role or the new one) is owner-only; the last owner cannot be
    * demoted (409).
+   *
+   * A DEACTIVATED MEMBER MAY STILL BE RE-ROLED (#1115) — a decision, not an oversight, and the
+   * same one {@link GroupsService.addMember} takes: a deactivated row keeps its role and its
+   * groups precisely so reactivation restores them, and refusing to administer that role would
+   * make a workspace unable to demote someone before letting them back. It grants nothing
+   * meanwhile — the guard denies the person outright. The last-owner guard this calls already
+   * counts LIVE owners, so a deactivated owner cannot be the one that keeps a live owner
+   * demotable.
    *
    * A DEMOTION ALSO KILLS THE TARGET'S CLI SESSIONS (#1117), and that is not belt-and-braces:
    * a CLI access token is an `nry_` `ApiToken` row, and `AuthGuard`'s `nry_` branch resolves the
@@ -378,13 +407,114 @@ export class MembersService {
     } catch {
       strandedApprovals = UNKNOWN_HELD_APPROVALS;
     }
-    this.recordStranded(tenantId, caller, userId, strandedApprovals);
+    this.recordStranded(tenantId, caller, userId, "removed", strandedApprovals);
     return { removed: true, strandedApprovals };
   }
 
   /**
+   * SOFT DE-PROVISION / RE-PROVISION (#1115 decision (b)) — flip `Membership.active`.
+   *
+   * THE POINT OF THE COLUMN, stated once here because every other doc in this feature refers
+   * back to it: deactivation takes ACCESS away and nothing else. The `Membership` row, its
+   * role and — critically — its `GroupMember` rows all survive, so `setMemberActive(…, true)`
+   * later restores the PERSON AND THEIR GRANTS. Mapping SCIM's `active: false` onto
+   * {@link removeMember} instead would revoke just as hard and cascade the groups away, and a
+   * reactivated leaver would come back with an account that can see nothing.
+   *
+   * IT LIVES HERE, NOT IN THE SCIM LAYER, and that is the same rule the de-provision path
+   * already follows. `removeMember`'s docstring lists four things a hand-rolled
+   * `membership.deleteMany` would silently lose; deactivation needs every one of them, because
+   * the user's credentials are just as live afterwards:
+   *   1. `memberships.invalidate(userId)` — the guard reads a 60s per-user cache;
+   *   2. `permissions.invalidateTenant(tenantId)` — their cached `EffectiveGrant[]` (30s, and
+   *      slated to become a SHARED Redis cache) must not outlive their access;
+   *   3. {@link revokeCliSessions} — THE ONE A COLUMN CANNOT COVER. `AuthGuard`'s `nry_`
+   *      branch returns a full-access principal from the TOKEN ROW with no `Membership` read
+   *      anywhere, so a deactivated user's CLI session keeps working for up to 12h and keeps
+   *      minting successors for up to 90 days. Deactivating without this would be a
+   *      de-provision that the person's terminal never hears about;
+   *   4. the stranded-approval report + its AuditEvent — a paused compliance gate whose only
+   *      approver was just switched off is exactly as stuck as if they had been deleted.
+   * The role ceiling (`assertOwnerForElevated`) and the last-owner guard come with the
+   * location: deactivating an admin is refused for the same reason removing one is.
+   *
+   * NO-OP WHEN NOTHING CHANGES (`changed: false`), so an IdP re-sending `active: false` on
+   * every sync — which they do — does not re-revoke a CLI session, re-report a stranding or
+   * write an audit row per poll. Same shape as `removeMember`'s `removed: false`.
+   */
+  async setMemberActive(
+    tenantId: string,
+    caller: Principal,
+    userId: string,
+    active: boolean,
+  ): Promise<{ changed: boolean; strandedApprovals: HeldApprovals }> {
+    assertManager(caller);
+    const prisma = getPrisma();
+    const target = await prisma.membership.findUnique({
+      where: { userId_tenantId: { userId, tenantId } },
+    });
+    // unknown/foreign uid — no-op, not a 500, exactly as removeMember treats one.
+    if (!target)
+      return { changed: false, strandedApprovals: NO_HELD_APPROVALS };
+    assertOwnerForElevated(caller, target.role);
+    // The last-owner guard applies to deactivation for the reason it applies to removal: an
+    // owner who cannot sign in does not administer anything.
+    if (!active && target.role === "owner") {
+      await this.assertNotLastOwner(tenantId, "deactivated");
+    }
+    if (target.active === active) {
+      return { changed: false, strandedApprovals: NO_HELD_APPROVALS };
+    }
+    // Read while they are still an approver, like removeMember does — the report below runs
+    // after the write and must not count the person it just switched off.
+    const groupIds = (
+      await prisma.groupMember.findMany({
+        where: { userId, group: { tenantId } },
+        select: { groupId: true },
+      })
+    ).map((g) => g.groupId);
+
+    await prisma.membership.update({
+      where: { userId_tenantId: { userId, tenantId } },
+      data: { active },
+    });
+    this.memberships.invalidate(userId); // revocation is immediate
+    this.permissions.invalidateTenant(tenantId);
+
+    if (active) {
+      // Reactivation grants access back; it revokes nothing and stranded nothing. Their
+      // GroupMember rows were never touched, so their grants come back with them — which is
+      // the entire argument for this column over a delete.
+      return { changed: true, strandedApprovals: NO_HELD_APPROVALS };
+    }
+
+    await this.revokeCliSessions(tenantId, caller, userId, "deactivated");
+
+    // Everything past here is REPORTING — same contract as removeMember: the write has
+    // committed and an unreported stranding must never surface as a failed de-provision.
+    let strandedApprovals: HeldApprovals;
+    try {
+      strandedApprovals = await this.executions.heldApprovals(tenantId, {
+        email: target.email,
+        groupIds,
+      });
+    } catch {
+      strandedApprovals = UNKNOWN_HELD_APPROVALS;
+    }
+    this.recordStranded(
+      tenantId,
+      caller,
+      userId,
+      "deactivated",
+      strandedApprovals,
+    );
+    return { changed: true, strandedApprovals };
+  }
+
+  /**
    * Kill the user's CLI session in this workspace (#1117) — the offboarding half of "revocation is
-   * immediate", for both {@link removeMember} and a demotion in {@link changeRole}.
+   * immediate", for {@link removeMember}, a demotion in {@link changeRole}, and a deactivation
+   * in {@link setMemberActive}.
    *
    * BOTH HALVES OF THE CREDENTIAL, because a CLI session is two rows:
    *  1. the rotation FAMILIES (`CliRefreshTokenService.revokeUserSessions`) — the 90-day half.
@@ -428,7 +558,7 @@ export class MembersService {
     tenantId: string,
     caller: Principal,
     userId: string,
-    verb: "removed" | "demoted",
+    verb: "removed" | "demoted" | "deactivated",
   ): Promise<void> {
     try {
       const { families, tokens } = await this.cliSessions.revokeUserSessions(
@@ -473,23 +603,30 @@ export class MembersService {
    * `partial` counts are a lower bound, so they are labelled `+` rather than reported as exact.
    * Fire-and-forget: `AuditService.record` already swallows, and an audit row must never be
    * the reason a completed removal reports an error.
+   *
+   * `verb` because a DEACTIVATION strands a gate exactly as a removal does (#1115) and the row
+   * has to say which happened: an admin reading "Removed a member holding 2 paused approvals"
+   * about someone still visible on the Team screen would go looking for a removal that never
+   * occurred.
    */
   private recordStranded(
     tenantId: string,
     caller: Principal,
     userId: string,
+    verb: "removed" | "deactivated",
     held: HeldApprovals,
   ): void {
     if (held.needsOwnerOrAdmin === 0 && !held.partial) return;
     const n = `${held.needsOwnerOrAdmin}${held.partial ? "+" : ""}`;
+    const what = verb === "removed" ? "Removed" : "Deactivated";
     void this.audit
       .record({
         tenantId,
         actor: caller.subject ?? caller.userId ?? "api-token",
         action: held.partial
-          ? `Removed a member; paused approvals not fully checked (${n} need an owner or admin)`
-          : `Removed a member holding ${n} paused approval${held.needsOwnerOrAdmin === 1 ? "" : "s"} that now need an owner or admin`,
-        method: "DELETE",
+          ? `${what} a member; paused approvals not fully checked (${n} need an owner or admin)`
+          : `${what} a member holding ${n} paused approval${held.needsOwnerOrAdmin === 1 ? "" : "s"} that now need an owner or admin`,
+        method: verb === "removed" ? "DELETE" : "PATCH",
         path: `/tenants/${tenantId}/members/${userId}`,
         statusCode: 200,
       })
@@ -517,13 +654,21 @@ export class MembersService {
     });
   }
 
-  /** 409 when the tenant has a single owner left — they can be neither removed nor demoted. */
+  /**
+   * 409 when the tenant has a single owner left — they can be neither removed nor demoted
+   * nor (since #1115) deactivated.
+   *
+   * ACTIVE OWNERS ONLY. A deactivated owner cannot sign in, so counting them would let one
+   * live owner + one switched-off owner read as two and permit removing the live one, leaving
+   * a workspace whose only owner row is one the guard refuses — unadministerable, which is the
+   * exact state this guard exists to prevent.
+   */
   private async assertNotLastOwner(
     tenantId: string,
-    verb: "removed" | "demoted",
+    verb: "removed" | "demoted" | "deactivated",
   ): Promise<void> {
     const owners = await getPrisma().membership.count({
-      where: { tenantId, role: "owner" },
+      where: { tenantId, role: "owner", active: true },
     });
     if (owners <= 1) {
       throw new ConflictException(
@@ -539,6 +684,7 @@ function activeView(r: {
   role: string;
   createdAt: Date;
   lastActiveAt: Date | null;
+  active?: boolean;
 }): MemberView {
   return {
     id: r.userId,
@@ -546,6 +692,10 @@ function activeView(r: {
     email: r.email ?? "",
     role: r.role,
     status: "active",
+    // `?? true` covers the rolling-deploy read of a row written before the column existed and
+    // the unit fixtures that predate it — "unknown" is "live", the same answer the NOT NULL
+    // DEFAULT true gives in the database.
+    active: r.active ?? true,
     createdAt: r.createdAt.toISOString(),
     lastActiveAt: r.lastActiveAt ? r.lastActiveAt.toISOString() : null,
   };

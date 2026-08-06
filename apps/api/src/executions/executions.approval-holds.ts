@@ -250,9 +250,16 @@ export async function findHeldApprovals(
  * data (so it must run AFTER the membership/group rows are deleted — the removed person
  * must not count as their own remaining approver).
  *
- * An email counts as remaining only if it still holds a Membership in this workspace; a
- * group counts as remaining only if it still has at least one member. Both are exactly
- * what `accessAssertApprover` will consult when someone tries to decide.
+ * An email counts as remaining only if it still holds a LIVE Membership in this workspace; a
+ * group counts as remaining only if it still has at least one member whose Membership is live.
+ * Both are exactly what `accessAssertApprover` will consult when someone tries to decide.
+ *
+ * "LIVE" IS #1115's `active` COLUMN, and it matters more here than the delete case it was
+ * modelled on. A deactivated member keeps their `Membership` row AND their `GroupMember` rows —
+ * that preservation is the whole point of the column — so without these two filters a
+ * de-provisioned person would still be counted as their own remaining approver, and the report
+ * would tell an admin a paused compliance gate is covered when in fact nobody left can decide
+ * it. A stranding you are told about is recoverable; one you are told is fine is not.
  */
 async function resolveRemaining(
   tenantId: string,
@@ -273,13 +280,23 @@ async function resolveRemaining(
   const [members, groupMembers] = await Promise.all([
     emails.length
       ? prisma.membership.findMany({
-          where: { tenantId, email: { in: emails, mode: "insensitive" } },
+          where: {
+            tenantId,
+            email: { in: emails, mode: "insensitive" },
+            active: true,
+          },
           select: { email: true },
         })
       : Promise.resolve([] as { email: string | null }[]),
     groupIds.length
       ? prisma.groupMember.findMany({
-          where: { groupId: { in: groupIds }, group: { tenantId } },
+          where: {
+            groupId: { in: groupIds },
+            group: { tenantId },
+            // The composite FK's own relation (#1041) — a group whose only members are
+            // deactivated has no remaining approver, however many rows it still holds.
+            membership: { active: true },
+          },
           select: { groupId: true },
         })
       : Promise.resolve([] as { groupId: string }[]),

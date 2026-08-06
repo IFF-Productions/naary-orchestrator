@@ -17,6 +17,9 @@ import { IS_USER_SCOPED_KEY } from "../src/auth/user-scoped.decorator";
 const verify = vi.fn();
 const firebaseVerify = vi.fn();
 const listForUser = vi.fn();
+/** #1115 — the workspaces where this user's Membership is DEACTIVATED. Defaults to an empty
+ *  set in `beforeEach`, so every pre-#1115 test keeps its exact behaviour. */
+const deactivatedTenantIds = vi.fn();
 const ensureMembership = vi.fn();
 const acceptPendingInvitations = vi.fn();
 const touchLastActive = vi.fn();
@@ -38,6 +41,7 @@ function makeGuard(): AuthGuard {
   } as unknown as FirebaseVerifier;
   const memberships = {
     listForUser,
+    deactivatedTenantIds,
     ensureMembership,
     acceptPendingInvitations,
     touchLastActive,
@@ -78,6 +82,7 @@ beforeEach(() => {
   verify.mockReset();
   firebaseVerify.mockReset();
   listForUser.mockReset().mockResolvedValue([]);
+  deactivatedTenantIds.mockReset().mockResolvedValue(new Set<string>());
   ensureMembership.mockReset().mockResolvedValue(undefined);
   acceptPendingInvitations.mockReset().mockResolvedValue(undefined);
   touchLastActive.mockReset().mockResolvedValue(undefined);
@@ -916,6 +921,26 @@ describe("AuthGuard — SAML SSO session (#455)", () => {
     await expect(makeGuard().canActivate(ctx(req))).rejects.toBeInstanceOf(
       ForbiddenException,
     );
+  });
+
+  /**
+   * #1115 — the confinement covers the DEACTIVATION signal too, not only the memberships.
+   *
+   * `deactivatedTenantIds` is read twice: to defuse the legacy `tenant` claim (which an SSO
+   * session never has) and to choose the 403's body. Unconfined, that second read would answer
+   * `membership_deactivated` for a workspace this session may not speak for and the generic
+   * "Not a workspace member" otherwise — a distinguisher across exactly the boundary the two
+   * tests above establish. Nothing is granted either way; the point is that the confinement is
+   * whole.
+   */
+  it("does not leak a deactivated membership in ANOTHER workspace (#1115)", async () => {
+    listForUser.mockResolvedValue([{ tenantId: "ws-a", role: "member" }]);
+    deactivatedTenantIds.mockResolvedValue(new Set(["ws-victim"]));
+    const req = bearerSso(ssoUser, "ws-a");
+    req.path = "/tenants/ws-victim/credentials";
+    await expect(makeGuard().canActivate(ctx(req))).rejects.toMatchObject({
+      response: { message: "Not a workspace member" },
+    });
   });
 
   it("a user-scoped route sees ONLY the session's workspace (no enumeration of the others)", async () => {
