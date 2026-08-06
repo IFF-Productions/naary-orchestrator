@@ -555,6 +555,27 @@ describe("§6 PATCH /scim/v2/Users/{id}", () => {
     });
   });
 
+  /**
+   * The post-condition that makes "behaves exactly like DELETE" true rather than aspirational.
+   *
+   * A surviving `acceptedAt: null` row is a re-entry hole — `acceptPendingInvitations` converts
+   * it at the next sign-in — and this is the branch that then deletes the `ScimIdentity` row and
+   * audits success. A 500 is retried; a false 204 is never revisited. Simulated the only way it
+   * can happen: a delete that reports success and removes nothing.
+   */
+  it("500s rather than 204ing over an invitation the revoke failed to remove", async () => {
+    await provisioning.provision(CONN, { userName: "new@acme.example" });
+    const id = await idFor("new@acme.example");
+    db.invitation.deleteMany.mockResolvedValueOnce({ count: 1 }); // …but removes nothing
+
+    await expect(
+      provisioning.setActive(CONN, id, patchBody(false)),
+    ).rejects.toMatchObject({ status: 500 });
+    expect(auditLines().join("\n")).toMatch(
+      /deactivation of new@acme\.example FAILED: a pending invitation survives/,
+    );
+  });
+
   it("refuses to deactivate an ADMIN, and audits the refusal so the workspace can see it", async () => {
     seedMembership("u-admin", "admin@acme.example", "admin");
     const id = await idFor("admin@acme.example");

@@ -355,10 +355,20 @@ export class AuthGuard implements CanActivate {
      * IdP the user was deactivated while they kept owner. An explicit deactivated row BEATS the
      * claim — the fail-closed reading. Answered from the same cached entry as `listForUser`,
      * so this adds no query.
+     *
+     * CONFINED TO `ssoTenant` FOR THE SAME REASON `memberships` IS. It is read twice — to defuse
+     * the claim (which an SSO session never has) and to pick the 403's body below (which an SSO
+     * session CAN reach). Unconfined, the second read would answer `membership_deactivated` for
+     * a workspace the session may not speak for and `"Not a workspace member"` otherwise — a
+     * distinguisher across exactly the boundary this guard's docstring calls a confinement. It
+     * grants nothing either way, but a one-line filter is cheaper than the exception.
      */
-    const deactivated = await this.memberships.deactivatedTenantIds(
+    const allDeactivated = await this.memberships.deactivatedTenantIds(
       user.userId,
     );
+    const deactivated = ssoTenant
+      ? new Set([...allDeactivated].filter((t) => t === ssoTenant))
+      : allDeactivated;
     const claim =
       user.claimTenant && !deactivated.has(user.claimTenant)
         ? user.claimTenant

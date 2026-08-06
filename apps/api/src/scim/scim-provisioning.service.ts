@@ -297,6 +297,11 @@ function booleanish(v: unknown): boolean | undefined {
  *   · `CompanyService.addMember`/`isWorkspaceOwner` — a deactivated row is not an account;
  *   · this file's read surface (`ScimUsersService`) — reports `active: false` rather than
  *     hiding the subject, or the IdP reads them as deleted and re-creates them.
+ * DECIDED NOT TO GATE, so a reader walking the same grep finds no unclassified hit:
+ * `GroupsService.addMember` and `MembersService.changeRole` still administer a deactivated
+ * member (preserving their role and grants IS the feature; neither grants access), and
+ * `AuditService.actorEmails` is presentation — filtering it would blank the email on historical
+ * audit lines.
  * AND THE PART A COLUMN CANNOT DO: `AuthGuard`'s `nry_` branch authenticates from the TOKEN row
  * with no Membership read at all, so {@link MembersService.setMemberActive} revokes the user's
  * CLI rotation families and their live CLI access token, exactly as `removeMember` does.
@@ -658,6 +663,33 @@ export class ScimProvisioningService {
           kind: "invitation",
           role: invitation.role,
         });
+      }
+      // THE SAME POST-CONDITION `deprovision` ASSERTS, and "behaves exactly like DELETE" is only
+      // true because it is here. A surviving `acceptedAt: null` row is a re-entry hole:
+      // `acceptPendingInvitations` converts it at the subject's next sign-in. For a subject who
+      // HAS a membership that conversion could not restore access anyway (the upsert leaves
+      // `active` alone), but for an invitation-only one the invitation is the only thing between
+      // them and a fresh ACTIVE membership — and this is the branch that then deletes the
+      // identity row and audits success. A 500 is retried; a false 204 is never revisited.
+      const stillPending = await prisma.invitation.findFirst({
+        where: {
+          tenantId: ctx.tenantId,
+          acceptedAt: null,
+          email: { equals: email, mode: "insensitive" },
+        },
+        select: { id: true },
+      });
+      if (stillPending) {
+        this.record(ctx, {
+          action: `SCIM deactivation of ${email} FAILED: a pending invitation survives`,
+          method: "PATCH",
+          path: resourcePath(id),
+          statusCode: 500,
+        });
+        throw new ScimError(
+          500,
+          "Deactivation did not revoke the pending invitation.",
+        );
       }
     }
 

@@ -230,6 +230,14 @@ export class MembersService {
    * target's current role or the new one) is owner-only; the last owner cannot be
    * demoted (409).
    *
+   * A DEACTIVATED MEMBER MAY STILL BE RE-ROLED (#1115) — a decision, not an oversight, and the
+   * same one {@link GroupsService.addMember} takes: a deactivated row keeps its role and its
+   * groups precisely so reactivation restores them, and refusing to administer that role would
+   * make a workspace unable to demote someone before letting them back. It grants nothing
+   * meanwhile — the guard denies the person outright. The last-owner guard this calls already
+   * counts LIVE owners, so a deactivated owner cannot be the one that keeps a live owner
+   * demotable.
+   *
    * A DEMOTION ALSO KILLS THE TARGET'S CLI SESSIONS (#1117), and that is not belt-and-braces:
    * a CLI access token is an `nry_` `ApiToken` row, and `AuthGuard`'s `nry_` branch resolves the
    * principal from the TOKEN — tenant from the token row, `role: "owner"` stamped, no `userId`,
