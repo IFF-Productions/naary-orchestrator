@@ -77,6 +77,10 @@ const { db, tables } = vi.hoisted(() => {
         "approvedAt",
         "tenantId",
         "userId",
+        // Null-filled for the same reason `userId` is: `deleteMany({ where: { familyId } })` must
+        // fail to match an unowned row because the column is NULL, not because it is ABSENT — a
+        // fake that omitted it would make every "leaves X alive" negative below pass vacuously.
+        "familyId",
         "deniedAt",
         "consumedAt",
         "label",
@@ -195,6 +199,9 @@ const USERS: Record<
 
 let app: INestApplication;
 let base: string;
+/** The REAL service, resolved out of the module — used only to mint the tokens a Settings screen
+ *  and a pre-migration CLI would have left lying around, which no HTTP route can create. */
+let apiTokens: ApiTokenService;
 
 beforeAll(async () => {
   const moduleRef = await Test.createTestingModule({
@@ -239,6 +246,7 @@ beforeAll(async () => {
     ],
   }).compile();
 
+  apiTokens = moduleRef.get(ApiTokenService);
   app = moduleRef.createNestApplication();
   app.useGlobalPipes(
     new ValidationPipe({
@@ -319,6 +327,17 @@ const sessionsOf = (idToken: string) => get("/cli-sessions", asUser(idToken));
  *  bookkeeping, but a CLI's experience is whether `/auth/cli/refresh` still answers. */
 const canStillRefresh = async (refreshToken: string): Promise<boolean> =>
   (await post("/auth/cli/refresh", { refreshToken })).status === 200;
+
+/**
+ * Does this `nry_` ACCESS token still authenticate a real request?
+ *
+ * `/me` is an ordinary route behind the REAL global AuthGuard, so this ends where every REST,
+ * /api/v1 and MCP call ends — at `ApiTokenService.verify()` returning a row or not. Asserting the
+ * status here (rather than counting rows, or that `deleteMany` was called) is what makes the claim
+ * "that device is signed out" a claim about authentication instead of about bookkeeping.
+ */
+const stillAuthenticates = async (accessToken: string): Promise<boolean> =>
+  (await get("/me", asUser(accessToken))).status === 200;
 
 describe("what a signed-in human sees", () => {
   it("lists one row per DEVICE, named by the machine that logged in", async () => {
@@ -467,6 +486,106 @@ describe("revoking my own session", () => {
     expect(bogus.status).toBe(404);
     expect(spent.body).toEqual(bogus.body);
     expect(await canStillRefresh(cli.refreshToken)).toBe(false);
+  });
+});
+
+/**
+ * "Sign out this device" recalls the ACCESS token that device is holding — `ApiToken.familyId`.
+ *
+ * Revoking the rotation family only ever stopped the device minting something NEW. The 12-hour
+ * `nry_` token already in its `~/.naary/config.json` went on authenticating every request, because
+ * nothing linked a token to a session: `ApiToken` knew WHO a token belonged to (#1122's `userId`)
+ * but not WHICH of that person's devices. The dialog had to promise a sign-out for later.
+ *
+ * EVERY ASSERTION ENDS AT `/me` THROUGH THE REAL GUARD, never at a row or a spy. A delete scoped to
+ * the wrong tenant, the wrong column, or a column `verify()` does not read would satisfy a
+ * `toHaveBeenCalledWith` and fail here.
+ *
+ * THE DISCRIMINATING NEGATIVE IS THE SAME USER'S OTHER LAPTOP, and it is the one #1122's suite
+ * cannot contain: its negatives are all about a DIFFERENT user, a different workspace, or an
+ * unowned token, every one of which a `userId`-scoped delete already spares. Only a `familyId`
+ * scope keeps Alice's desktop alive while her macbook dies — which is the entire feature.
+ */
+describe("signing a device out recalls the token that device holds", () => {
+  it("401s the revoked device, and leaves the SAME user's other device authenticated", async () => {
+    const macbook = await login("fb-alice", "alices-macbook");
+    const desktop = await login("fb-alice", "alices-desktop");
+    // Both live first — otherwise the assertions below could pass on a token that never worked.
+    expect(await stillAuthenticates(macbook.accessToken)).toBe(true);
+    expect(await stillAuthenticates(desktop.accessToken)).toBe(true);
+
+    const family = String(
+      (await sessionsOf("fb-alice")).list.find(
+        (s) => s.label === "naary CLI — alices-macbook",
+      )?.familyId,
+    );
+    expect(
+      (await del(`/cli-sessions/${family}`, asUser("fb-alice"))).status,
+    ).toBe(200);
+
+    expect(await stillAuthenticates(macbook.accessToken)).toBe(false);
+    expect(await stillAuthenticates(desktop.accessToken)).toBe(true);
+    // ...and the desktop is still a session, not just a live bearer.
+    expect(await canStillRefresh(desktop.refreshToken)).toBe(true);
+  });
+
+  it("recalls the token a REFRESH minted, not only the login's", async () => {
+    // The realistic case. A session signed in yesterday is holding a token that came from
+    // `/auth/cli/refresh`, and if rotation dropped the family id this would be the ONLY failing
+    // test — the feature would work in a demo and not in production.
+    const cli = await login("fb-alice", "alices-macbook");
+    const rotated = await post("/auth/cli/refresh", {
+      refreshToken: cli.refreshToken,
+    });
+    const current = String(rotated.body.accessToken);
+    expect(await stillAuthenticates(current)).toBe(true);
+
+    const family = String((await sessionsOf("fb-alice")).list[0].familyId);
+    await del(`/cli-sessions/${family}`, asUser("fb-alice"));
+
+    expect(await stillAuthenticates(current)).toBe(false);
+  });
+
+  it("does not touch a CLI token with NO family — the pre-migration and rolling-deploy case", async () => {
+    // Same workspace, same `naary CLI` label stem, no `familyId`: what every token minted before
+    // the column existed looks like, and what an old image mints mid-rollout. It cannot be
+    // recalled by session id, and must not be swept up by one either — a delete scoped by LABEL
+    // would take it, and would take every other member's CLI token with it.
+    await login("fb-alice", "alices-macbook");
+    const legacy = await apiTokens.mint("tenant-A", "naary CLI — oldhost");
+    const family = String((await sessionsOf("fb-alice")).list[0].familyId);
+
+    await del(`/cli-sessions/${family}`, asUser("fb-alice"));
+
+    expect(await stillAuthenticates(legacy.token)).toBe(true);
+  });
+
+  it("does not touch the workspace's Settings/CI tokens", async () => {
+    // The quietest possible failure: signing out your own laptop silently breaking the workspace's
+    // automation. A Settings token is a workspace capability with no owner and no session, and a
+    // per-session revoke must be unable to reach it.
+    await login("fb-alice", "alices-macbook");
+    const ci = await apiTokens.mint("tenant-A", "ci");
+    const family = String((await sessionsOf("fb-alice")).list[0].familyId);
+
+    await del(`/cli-sessions/${family}`, asUser("fb-alice"));
+
+    expect(await stillAuthenticates(ci.token)).toBe(true);
+  });
+
+  it("leaves a colleague's access token working when their revoke is refused", async () => {
+    // The 404 test above proves the refresh family survives. This proves the other half: a route
+    // that deleted the token before checking ownership would sign Alice's laptop out anyway, and
+    // she would see a 404 nobody acted on.
+    const aliceCli = await login("fb-alice", "alices-macbook");
+    await login("fb-carol", "carols-thinkpad");
+    const aliceFamily = String((await sessionsOf("fb-alice")).list[0].familyId);
+
+    expect(
+      (await del(`/cli-sessions/${aliceFamily}`, asUser("fb-carol"))).status,
+    ).toBe(404);
+
+    expect(await stillAuthenticates(aliceCli.accessToken)).toBe(true);
   });
 });
 

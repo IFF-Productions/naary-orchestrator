@@ -145,6 +145,7 @@ const db = {
     expiresAt: null,
     environmentId: null,
     userId: null,
+    familyId: null,
   }),
   cliRefreshToken: table([], {
     createdAt: new Date(),
@@ -345,9 +346,27 @@ describe("ApiToken.userId is stamped by the CLI handshake and by nothing else", 
   });
 
   it("a Settings/CI token stays UNOWNED — it is a workspace capability, not a person's session", async () => {
-    // This is the `TokensController.create` call shape: no expiry, no owner.
+    // This is the `TokensController.create` call shape: no expiry, no owner, no session.
     await apiTokens.mint("t-1", "ci");
     expect(tokenRows()[0].userId).toBeNull();
+    expect(tokenRows()[0].familyId).toBeNull();
+  });
+
+  it("stamps the SESSION too, at the exchange and through every rotation", async () => {
+    // `familyId` is the second revocation key (#1078 §5 follow-up), and it needs exactly the
+    // discipline `userId` needed: carried through refresh, or the first rotation launders a
+    // revocable token into an unrevocable one — silently, and only for sessions old enough that
+    // nobody re-tests them.
+    const session = await cliLogin("t-1", "u-cli");
+    const family = db.cliRefreshToken.rows[0].familyId as string;
+    expect(family).toBeTruthy();
+    expect(tokenRows()[0].familyId).toBe(family);
+
+    await cliAuth.refresh({ refreshToken: session.refreshToken });
+    expect(tokenRows()).toHaveLength(2);
+    // Same family on both rows: rotation stays inside one session, so the token a day-old CLI
+    // holds is as revocable as the one its login minted.
+    for (const row of tokenRows()) expect(row.familyId).toBe(family);
   });
 
   it("does NOT reach the principal — an owned token still cannot approve a CLI login", async () => {
@@ -359,6 +378,13 @@ describe("ApiToken.userId is stamped by the CLI handshake and by nothing else", 
     const principal = await authenticate(session.accessToken);
     expect(principal).toMatchObject({ tenantId: "t-1", role: "owner" });
     expect(principal?.userId).toBeUndefined();
+    // And neither does the SESSION handle. The guard destructures `verify()` field by field, so
+    // this holds today whatever that method returns — which is exactly why the rule is on the
+    // return TYPE: `familyId` on a principal is a handle to `DELETE /cli-sessions/:familyId`, and
+    // a bearer that can name its own session is a step towards a token acting on sessions.
+    expect((principal as Record<string, unknown> | null)?.familyId).toBe(
+      undefined,
+    );
 
     const started = await cliAuth.start({ hostname: "attacker" });
     await expect(
@@ -397,6 +423,22 @@ describe("member removal rejects the removed user's live ACCESS token (#1118's r
     await members.removeMember("t-1", asOwner, "u-cli");
 
     expect(await isLive(current)).toBe(false);
+  });
+
+  it("kills EVERY device the removed member had, not just one session", async () => {
+    // The complement of the per-session revoke: offboarding is `userId`-scoped precisely because
+    // it must be WIDER than a session. A leaver with a laptop and a desktop loses both.
+    seedMember("t-1", "u-cli");
+    const laptop = await cliLogin("t-1", "u-cli");
+    const desktop = await cliLogin("t-1", "u-cli");
+    expect(db.cliRefreshToken.rows[0].familyId).not.toBe(
+      db.cliRefreshToken.rows[1].familyId,
+    );
+
+    await members.removeMember("t-1", asOwner, "u-cli");
+
+    expect(await isLive(laptop.accessToken)).toBe(false);
+    expect(await isLive(desktop.accessToken)).toBe(false);
   });
 
   it("does not audit on the happy path — a swallowed TypeError must not read as success", async () => {

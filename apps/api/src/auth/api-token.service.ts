@@ -32,6 +32,11 @@ export class ApiTokenService {
      *  on those would silently change what member removal means for a token the workspace, not the
      *  person, depends on. See {@link revokeUserCliTokens}. */
     ownerUserId?: string,
+    /** The CLI rotation family this token belongs to — the SESSION, where `ownerUserId` is the
+     *  person. Passed ONLY by the same two CLI paths, and for the same reason: omitted ⇒ NULL ⇒
+     *  not part of any session, which is what every Settings- and CI-minted token stays. See
+     *  {@link revokeSessionTokens}. */
+    familyId?: string,
   ): Promise<{ id: string; token: string; label: string; createdAt: Date }> {
     const token = `nry_${randomBytes(24).toString("base64url")}`;
     const row = await getPrisma().apiToken.create({
@@ -41,6 +46,7 @@ export class ApiTokenService {
         tokenHash: hashToken(token),
         expiresAt: expiresAt ?? null,
         userId: ownerUserId ?? null,
+        familyId: familyId ?? null,
       },
       select: { id: true, label: true, createdAt: true },
     });
@@ -149,6 +155,51 @@ export class ApiTokenService {
   }
 
   /**
+   * Delete the LIVE CLI access tokens of ONE SESSION — the "Sign out this device" surface
+   * (`CliSessionsController.revoke`, #1078 §5).
+   *
+   * The gap this closes is the sibling of the one {@link revokeUserCliTokens} closed. Revoking a
+   * rotation family stops the device minting anything NEW, but the `nry_` token already in its
+   * `~/.naary/config.json` kept authenticating until its 12h expiry, because nothing linked a
+   * token to a session — so the confirm dialog had to promise a sign-out that would happen later.
+   *
+   * WHY NOT `revokeUserCliTokens`: that one is scoped by `userId`, which is deliberately WIDER than
+   * a session. A person with a laptop and a desktop who signs the laptop out must keep the desktop;
+   * offboarding wants the opposite. Same table, two different questions, two different predicates.
+   *
+   * THREE PREDICATES, each excluding a token that must survive:
+   *  - `familyId` — a non-null match, so it can never reach a token belonging to another session
+   *    and can never reach an UNOWNED one. Prisma renders it as `= '<uuid>'`, and SQL `NULL =
+   *    '<uuid>'` is not true, so every Settings/CI token and every CLI token minted before this
+   *    column existed is outside the query by construction rather than by the label filter;
+   *  - `tenantId` — belt and braces on a globally-unique random id: the caller's own workspace,
+   *    from the guard-resolved principal, so even a mis-derived family id cannot cross a tenant.
+   *    (There is no test for this one; forging a colliding UUID is not a reachable state — the
+   *    reachable attack is revoking someone ELSE's family, which `revokeUserFamily`'s ownership
+   *    read 404s before this method is ever called.)
+   *  - the CLI label stem — defence in depth, exactly as above: only the CLI writes `familyId`
+   *    today, and if some future caller stamps one on a token that is NOT a CLI session, a device
+   *    sign-out must not delete it as a side effect.
+   *
+   * Idempotent, and returns 0 for the pre-migration/rolling-deploy case where the session's token
+   * carries no family — that token dies at its own ≤12h `expiresAt`, and its family is already
+   * revoked by the time this runs, so it can never mint a successor.
+   */
+  async revokeSessionTokens(
+    tenantId: string,
+    familyId: string,
+  ): Promise<number> {
+    const res = await getPrisma().apiToken.deleteMany({
+      where: {
+        tenantId,
+        familyId,
+        label: { startsWith: CLI_TOKEN_LABEL_STEM },
+      },
+    });
+    return res.count;
+  }
+
+  /**
    * Delete the row for a PRESENTED plaintext token (#1078 slice 4, `naary auth logout`).
    *
    * Unauthenticated by design, like the rest of the CLI handshake, and safe for the same reason:
@@ -196,7 +247,15 @@ export class ApiTokenService {
    *  `CliAuthController.assertMayApprove` — so surfacing the owner here would let a CLI access
    *  token approve a CLI login and mint another CLI token, i.e. self-replication off a leaked
    *  bearer. The column is a REVOCATION key for {@link revokeUserCliTokens}, never an identity;
-   *  a CLI token's authority stays exactly what it was before it had an owner. */
+   *  a CLI token's authority stays exactly what it was before it had an owner.
+   *
+   *  DOES NOT RETURN `familyId` either, for the same reason and one more of its own. The guard
+   *  destructures this result field by field rather than spreading it, so an extra field would be
+   *  inert TODAY — which is exactly why the rule has to be about the return type and not about the
+   *  guard: the next reader of `principal` inherits whatever this shape offers. And a family id on
+   *  the principal is a session HANDLE — `CliSessionsController.revoke` takes one — so a leaked
+   *  bearer that could name its own session is a step towards a token acting on sessions. Both
+   *  columns revoke; neither authorizes. */
   async verify(token: string): Promise<{
     id: string;
     tenantId: string;
