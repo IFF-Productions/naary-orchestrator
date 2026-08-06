@@ -18,9 +18,13 @@
 //     Admin.id") on GET/POST contacts, i.e. `get_contact` AND `create_contact`. Worse than an
 //     `undefined`: an `if` node comparing it numerically flips its branch in silence.
 //   - `admin.avatar`: `object {image_url}` → `string(uri)` from 2.12 ONWARD, which is what closes
-//     off 2.12–2.15 too. That is `create_note`'s `body.author.avatar`; a saved
-//     `…author.avatar.image_url` goes undefined. Spec-only evidence (description rewritten,
-//     `format: uri` added — a re-model, not a tidy-up), no changelog entry names it.
+//     off 2.12–2.15 too. That is `create_note`'s `body.author.avatar` (`note.author` → `admin`);
+//     if it is real, a saved `…author.avatar.image_url` goes undefined. Read this as CANNOT
+//     DETERMINE rather than as a confirmed change: no changelog names it, and the SAME 2.16
+//     document contradicts itself — `admin_with_app`, which `GET /me` returns, still declares
+//     `avatar` as `object {type, image_url}`, unchanged since 2.11. One document, two shapes for
+//     one concept, so it does not establish that the API moved. Under #1121's Vercel precedent
+//     "cannot compare" is not "identical", and a bump needs identical.
 //
 // Identical the whole way, 2.11 → 2.16: `send_message` and `get_me`. But the header is
 // provider-wide, so two safe actions out of five do not buy a bump.

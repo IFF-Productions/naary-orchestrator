@@ -443,11 +443,14 @@ rather than reading "green" as "current" (#1126). Passing 3b only means **`2.11`
 value** — the pin is not stale in the sense of rejected. It says nothing about response shapes, and the
 shapes are where the risk lives. Those were compared for real: Intercom publishes one document per
 version, so 2.11 was diffed against **each** of 2.12 … 2.16 for all five actions, and **every candidate
-differs** — `contact.owner_id` goes `integer` → `string` in 2.16 (Intercom's own changelog calls it a
-breaking change, and it hits `get_contact` *and* `create_contact`), and `admin.avatar` goes
-`object {image_url}` → `string(uri)` from **2.12 onward**, which is `create_note`'s
-`body.author.avatar`. `send_message` and `get_me` are identical throughout, but the header is
-provider-wide. **Declined, with no safe target version**; the pin at 2.11 is a decision, not neglect.
+differs**. 2.16 is **decided**: `contact.owner_id` goes `integer` → `string`, which Intercom's own
+changelog calls a breaking change, and it hits `get_contact` *and* `create_contact`. 2.12–2.15 are
+**cannot-determine**: `admin.avatar` goes `object {image_url}` → `string(uri)` from 2.12 onward — that
+is `create_note`'s `body.author.avatar` — but no changelog names it and the same document contradicts
+itself, since `admin_with_app` (what `GET /me` returns) still declares the object form. Under #1121's
+Vercel precedent **"cannot compare" is not "identical"**, and a bump needs identical. `send_message`
+and `get_me` are identical throughout, but the header is provider-wide, so two safe actions of five buy
+nothing. **Declined, with no safe target version**; the pin at 2.11 is a decision, not neglect.
 
 Two further limits of the mechanism, both visible only here. **Intercom publishes no sunset window at
 all** — not in its versioning docs, its versioning blog post, or the 2.16 changelog — so nothing can be
