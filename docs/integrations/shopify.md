@@ -26,7 +26,7 @@ Read and manage Shopify products and orders from a workflow.
 - **You need:** an Admin API access token.
 - **Scopes / permissions:** `read_products`/`write_products`, `write_orders` as required
 - **How the token is sent:** A custom header: `X-Shopify-Access-Token: <token>` — a **bare** value, with no `Bearer ` prefix. Naary applies this for you; paste only the token itself.
-- **Server URL: required.** `https://{your-store}.myshopify.com/admin/api/{api_version}` — substitute your store handle, and put a currently-supported version in the last segment. Shopify ships one every quarter and supports each for at least 12 months, so read the current list off [its release-schedule table](https://shopify.dev/docs/api/usage/versioning) rather than copying a date: `2026-07` was the newest stable as of August 2026. Getting this wrong is the most common cause of a setup that looks right and 404s.
+- **Server URL: required.** `https://{your-store}.myshopify.com/admin/api/{api_version}` — substitute your store handle, and put a currently-supported version in the last segment. Shopify ships one every quarter and supports each for at least 12 months, so read the current list off [its release-schedule table](https://shopify.dev/docs/api/usage/versioning) rather than copying a date: `2026-07` was the newest stable as of August 2026. Two different mistakes live in this one URL and they fail in **opposite** ways. A wrong store handle or a missing `/admin/api` segment 404s immediately — that is the usual setup error, and it tells you. An aged-out version segment never errors at all: Shopify falls forward and serves a supported version's behaviour under a `200`. Only the first kind will ever show up as a symptom, so the version is the one you have to check on a calendar.
 
 ## Get your credentials
 
@@ -85,7 +85,7 @@ You fill in flat fields; the node assembles the nested body the API expects.
 | Symptom | Most likely cause |
 | --- | --- |
 | **401 / 403 on every call** | The credential is wrong, expired, or missing a scope. Paste only the raw token — Naary adds the header and any prefix itself. |
-| **404 on a call that should work** | The Server URL is wrong. Re-read the format above — a missing path suffix or version segment produces a 404, not a helpful error. |
+| **404 on a call that should work** | The Server URL is wrong. Re-read the format above — a missing or mistyped path segment produces a 404, not a helpful error. |
 | **`host is not allowed` / egress error** | The target resolves to a private or loopback address. Naary's SSRF guard blocks those, so self-hosted instances must be reachable at a public hostname. |
 | **Works in sandbox, fails in prod (or vice versa)** | Connections are per-environment. Each environment needs its own connection row with its own credential. |
 | **Node output shows `status: 200` but nothing happened** | Some providers report failures in the body with a 200. Check `<nodeId>.body` before trusting the status. |

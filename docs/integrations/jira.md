@@ -93,7 +93,7 @@ You fill in flat fields; the node assembles the nested body the API expects.
 | Symptom | Most likely cause |
 | --- | --- |
 | **401 / 403 on every call** | The credential is wrong, expired, or missing a scope. Check you pasted the full `user:secret` pair and not just the secret. |
-| **404 on a call that should work** | The Server URL is wrong. Re-read the format above — a missing path suffix or version segment produces a 404, not a helpful error. |
+| **404 on a call that should work** | The Server URL is wrong. Re-read the format above — a missing or mistyped path segment produces a 404, not a helpful error. |
 | **`host is not allowed` / egress error** | The target resolves to a private or loopback address. Naary's SSRF guard blocks those, so self-hosted instances must be reachable at a public hostname. |
 | **Works in sandbox, fails in prod (or vice versa)** | Connections are per-environment. Each environment needs its own connection row with its own credential. |
 | **Node output shows `status: 200` but nothing happened** | Some providers report failures in the body with a 200. Check `<nodeId>.body` before trusting the status. |

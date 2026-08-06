@@ -41,6 +41,23 @@ export interface IntegrationProse {
   scopes?: string;
   /** Required Server URL format — set ONLY for providers the catalog gives no `baseUrl`. */
   serverUrl?: string;
+  /**
+   * What a WRONG Server URL actually looks like for this provider, replacing the default
+   * "…the most common cause of a setup that looks right and 404s".
+   *
+   * Exists because that default is a claim about a SYMPTOM, and it is not true everywhere (#1109).
+   * Shopify's version segment does the opposite — an unsupported version falls forward and keeps
+   * returning `200` — and PostHog's wrong region answers `401`, not `404`. Telling someone to look
+   * for a 404 that will never arrive is worse than saying nothing: it sends them to re-check the
+   * one thing that is fine, which is exactly how Shopify's `2024-01` survived nineteen months.
+   *
+   * Four of the seven Server-URL providers need one, and in every case the page ALREADY carried
+   * the true symptom in its own `gotchas` while the generated line above promised a 404 — the
+   * contradiction was sitting in one document, twice, for as long as both sentences existed.
+   * Set it only when the default is wrong: `jira`, `zendesk` and `mattermost` really do 404 on a
+   * bad host, and for them the default says so more directly than a hedge would.
+   */
+  serverUrlFailure?: string;
   /** Traps. Anything that makes a correct-looking setup fail. */
   gotchas?: string[];
   /**
@@ -144,6 +161,10 @@ export const INTEGRATION_PROSE: Record<string, IntegrationProse> = {
     ],
     serverUrl:
       "`https://api-free.deepl.com` for a Free key, `https://api.deepl.com` for Pro",
+    // #1109: this page's own gotcha calls the 403 "the single most common DeepL setup failure"
+    // while the generated line above it called a 404 "the most common cause". Both cannot be it.
+    serverUrlFailure:
+      "Getting this wrong does **not** 404 — the wrong host of the two returns **403 with a perfectly valid key**, so it reads as a permissions problem rather than a URL one. Match the host to the key, not to the plan name",
     gotchas: [
       "**A key ending `:fx` must use `api-free.deepl.com`; anything else uses `api.deepl.com`.** The wrong host returns 403 with a perfectly valid key — the single most common DeepL setup failure, and the suffix is a more reliable signal than the plan name.",
       "*Get usage* is the cheapest way to confirm the key works: it takes no arguments and consumes no characters.",
@@ -334,6 +355,9 @@ export const INTEGRATION_PROSE: Record<string, IntegrationProse> = {
     ],
     serverUrl:
       "`https://{dc}.api.mailchimp.com/3.0`, where `{dc}` is your key's datacenter suffix (e.g. `us19`)",
+    // #1109: the datacenter gotcha below already said 401, while the generated line said 404.
+    serverUrlFailure:
+      "A missing `/3.0` suffix 404s, but the **datacenter** — the part people actually get wrong — does not: a `{dc}` that disagrees with your key returns **401 with a perfectly valid key**, which looks like a bad credential. The suffix is printed after the `-` in the key itself",
     gotchas: [
       "The datacenter in the URL must match the one in your key, or every call 401s with a perfectly valid key.",
       "`listId` is the Audience ID from **Audience → Settings**.",
@@ -455,6 +479,11 @@ export const INTEGRATION_PROSE: Record<string, IntegrationProse> = {
     ],
     serverUrl:
       "`https://us.posthog.com` for US Cloud, `https://eu.posthog.com` for EU Cloud, or your own host if you self-host",
+    // Same class as Shopify's, found by asking the reviewer's question of every provider (#1109):
+    // this page's own gotcha already said "fails as an auth error and looks like a bad key" while
+    // the generated line above it promised a 404. One of the two had to go.
+    serverUrlFailure:
+      "Getting this wrong does **not** 404. The regions are separate deployments, so a key from one against the other's host comes back as an auth failure — the symptom looks like a bad key, which is why this gets diagnosed as a credential problem and the region never gets checked (#1110)",
     gotchas: [
       "A personal API key is **not** the same as the project write-only key used by the tracking SDKs. The SDK key will not work here.",
       "PostHog's regions are **separate deployments**: a key issued on EU Cloud is unknown to the US host, so a wrong Server URL fails as an auth error and looks like a bad key. `app.posthog.com` is the legacy alias for US Cloud.",
@@ -505,6 +534,8 @@ export const INTEGRATION_PROSE: Record<string, IntegrationProse> = {
     ],
     serverUrl:
       "`https://{your-store}.myshopify.com/admin/api/{api_version}` — substitute your store handle, and put a currently-supported version in the last segment. Shopify ships one every quarter and supports each for at least 12 months, so read the current list off [its release-schedule table](https://shopify.dev/docs/api/usage/versioning) rather than copying a date: `2026-07` was the newest stable as of August 2026",
+    serverUrlFailure:
+      "Two different mistakes live in this one URL and they fail in **opposite** ways. A wrong store handle or a missing `/admin/api` segment 404s immediately — that is the usual setup error, and it tells you. An aged-out version segment never errors at all: Shopify falls forward and serves a supported version's behaviour under a `200`. Only the first kind will ever show up as a symptom, so the version is the one you have to check on a calendar",
   },
   slack: {
     tagline:

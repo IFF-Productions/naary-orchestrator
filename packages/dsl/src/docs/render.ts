@@ -217,9 +217,15 @@ export function renderIntegrationDoc(
     // created before the provider asked for a host — a fact about why nothing broke, not an
     // instruction — so it is stated as exactly that, in the past tense, after the requirement.
     out.push(
+      // The trailing sentence is a claim about a SYMPTOM, so it is overridable (#1109): for
+      // Shopify a stale version segment keeps returning 200, and for PostHog a wrong region
+      // answers 401 — pointing either of them at a 404 sends them to re-check the wrong thing.
       `- **Server URL: required.** ${sentence(
         prose.serverUrl ?? "Set it to your instance's API base",
-      )} Getting this wrong is the most common cause of a setup that looks right and 404s.` +
+      )} ${sentence(
+        prose.serverUrlFailure ??
+          "Getting this wrong is the most common cause of a setup that looks right and 404s",
+      )}` +
         (p.defaultBaseUrl
           ? ` (${p.label} connections made *before* this field was asked for store no host and keep` +
             ` calling \`${p.defaultBaseUrl}\`, so none of them broke — but every new connection sets it.)`
@@ -386,7 +392,12 @@ export function renderIntegrationDoc(
   );
   if (needsServerUrl(p)) {
     out.push(
-      "| **404 on a call that should work** | The Server URL is wrong. Re-read the format above — a missing path suffix or version segment produces a 404, not a helpful error. |",
+      // "or version segment" used to be here and was withdrawn (#1109): a missing SEGMENT does
+      // 404, but an out-of-date API VERSION is the one Server-URL mistake that does not — Shopify
+      // falls forward and answers 200 as a version you did not pick. Naming the version here made
+      // this row contradict the provider's own gotcha two sections above it. Where the version is
+      // the risk, `serverUrlFailure` says so on the Server URL line instead.
+      "| **404 on a call that should work** | The Server URL is wrong. Re-read the format above — a missing or mistyped path segment produces a 404, not a helpful error. |",
     );
   }
   out.push(
