@@ -294,12 +294,18 @@ declaration silently, so asking *it* would go green while the catalog said somet
 where a spec is pinned, that the operation is present, is not flagged `deprecated`, and is not
 restricted to security schemes narrower than the ones the provider's other shipped actions require.
 
-Coverage, printed by that spec on every run: **31 probeable providers — 20 checked against a pinned
+Coverage, printed by that spec on every run: **31 probeable providers — 21 checked against a pinned
 vendor document, 4 excused as `UNSPECIFIED`** (`asana` · `mattermost` · `posthog` · `zoom`, each a
-documented `me` sentinel with live 401-vs-404 evidence), **7 with no pinned document at all**
-(`pipedrive` · `shopify` · `vercel` · `airtable` · `netlify` · `zendesk` · `deepl`). Every one of the
-seven carries a written reason, and the list is asserted in **both** directions — pinning a spec for
+documented `me` sentinel with live 401-vs-404 evidence), **6 with no pinned document at all**
+(`pipedrive` · `shopify` · `vercel` · `airtable` · `netlify` · `zendesk`). Every one of the
+six carries a written reason, and the list is asserted in **both** directions — pinning a spec for
 one of them fails its own entry, which is when it should be deleted.
+
+`deepl` is the entry that has now been deleted, which is that assertion doing its job. Its reason
+read "Another SOURCES candidate rather than a blocked provider; pinning it would bring this probe
+under check 3" — so pinning DeepL's document (#1109) both removed the line and made `get_usage` the
+21st probe a vendor document answers for. The list is one shorter for a good reason rather than one
+line shorter by hand.
 
 **What the spec cannot adjudicate, said out loud.** #1109 read `/token/authorized_by` as the one
 Webflow operation overriding the global scheme to OAuth2-only. That does not hold against the
@@ -329,13 +335,17 @@ there was not one `"deprecated": true` across all pinned fixtures and this instr
 structurally blind to a vendor deprecating an endpoint it still documents. That is not hypothetical:
 `sentry.list_issues` sat flagged `deprecated: true` inside a document this repo already pinned and
 re-read on every refresh, while #946 moved its two siblings onto the org-scoped successor. The flag
-is now carried and hard-asserted — **1 of the 127 vendored operations sets it**, and it is that one.
+is now carried and hard-asserted — **2 of the 130 vendored operations set it**: that one, and
+`deepl.list_languages`, which arrived with `deepl`'s own document (below).
 
 It is adjudicated rather than merely red, through `ACKNOWLEDGED_DEPRECATED`, for the reason every
 list in this file exists: a vendor can flag an endpoint on any morning, and failing an unrelated PR
 teaches everyone to re-run CI without reading. A *known* deprecation is a written decision naming
 what the migration costs and the issue that owns it; a **new** one fails until someone writes those
-two sentences. `sentry.list_issues` is the single entry — its successor moves the project from a
+two sentences. There are **two entries**, and they decline for the same reason from opposite ends of
+the severity range.
+
+`sentry.list_issues` — its successor moves the project from a
 path segment to a `project` query parameter, which accepts slugs, so the *input* half is a
 `retiredFields` chore (#944). The **response shapes have now been compared** — against Sentry's own
 `openapi-derefed.json` (`getsentry/sentry-api-schema`, the document already pinned as `sentry`'s
@@ -348,7 +358,26 @@ only blocking field, since 0 of our 25 properties disappear and 21 are added —
 `statsPeriod` survives BY NAME while changing MEANING (stats-timeline selector → query time window,
 the timeline selector being a separate `groupStatsPeriod`), which `retiredFields` cannot see because
 the key stays valid. One credentialed call settles it — single-node Test (§1.1) on a
-`sentry.list_issues` node as it stands, reading `body[0].annotations[0]`. **Absence of the flag proves nothing**: most
+`sentry.list_issues` node as it stands, reading `body[0].annotations[0]`.
+
+`deepl.list_languages` — the same shape with none of Sentry's ambiguity, and the reason pinning
+`deepl` was **two** changes rather than the one-liner #1109 called "bonus, and cheap": adding the
+`SOURCES` entry carries `/v2/languages`' `deprecated: true` into the fixture, which turns the build
+red until the acknowledgement lands in the same PR. DeepL names its own successor in the operation's
+description (`GET /v3/languages?resource=…`, with a migration guide), and one document declares both,
+so the comparison is like-for-like. Of the v2 item's **three** properties only `name` survives:
+`language` becomes `lang` *and re-cases its value* (`DE` → `de`, BCP 47), and
+`supports_formality: boolean` becomes `features.formality.status: string`
+(`stable|beta|early_access`) — so a saved `body[0].language` silently becomes `undefined`, and an
+`if` node testing `body[0].supports_formality` for truthiness would read `"beta"` where it read
+`false`. The input side is not a `retiredFields` rename either: our optional `type` (`source|target`)
+has no successor at all — v3 takes a **required** `resource` enum and moves the source/target
+question into per-item `usable_as_source`/`usable_as_target` booleans the caller filters on. DeepL
+publishes no sunset date ("We do not yet have a timeline for sunsetting /v2/languages"), and this
+provider's probe is `get_usage`, which carries no flag — so credential verification is not at risk.
+#1121 did the field-by-field; #1109 is where it is written up.
+
+**Absence of the flag proves nothing**: most
 vendors never set it, and the prose deprecations #1109 found by hand (`posthog.list_events`) are not
 machine-readable at all.
 

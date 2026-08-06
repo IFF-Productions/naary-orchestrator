@@ -248,6 +248,33 @@ export const ACKNOWLEDGED_DEPRECATED: { action: string; why: string }[] = [
       "on a `sentry.list_issues` node as it stands and read `body[0].annotations[0]` — if it is " +
       "already an object, the project-scoped schema is stale and the migration is safe.",
   },
+  {
+    action: "deepl.list_languages",
+    why:
+      "DeepL flags `GET /v2/languages` (`getLanguagesV2`) deprecated in its own document and names " +
+      "the successor in the operation's own description: \"Use `GET " +
+      '/v3/languages?resource=translate_text` (or the appropriate resource) instead", pointing at ' +
+      "https://developers.deepl.com/docs/languages/migrating-from-v2-languages. AUTHORITY for what " +
+      "follows is that same document — `DeepL/api-docs` -> `api-reference/openapi.yaml`, the file " +
+      "pinned as `deepl`'s SOURCES entry — which declares BOTH operations, so this is a " +
+      "like-for-like vendor comparison and not two sources stitched together. The two response " +
+      "shapes were compared field by field by #1121; that comparison is WRITTEN UP in issue #1109 " +
+      '(comment "Response-shape check on vercel, sentry, deepl, shopify"), which is a record of it ' +
+      "and not evidence for it. Result: of the v2 item's three properties only `name` survives " +
+      "unchanged. `language` becomes `lang` AND re-cases its value (`DE` -> `de`, BCP 47), and " +
+      "`supports_formality: boolean` becomes `features.formality.status: string` " +
+      "(enum stable|beta|early_access) — so a saved `body[0].language` silently becomes undefined " +
+      "and a saved `body[0].supports_formality` read for truthiness by an if node would read " +
+      '`"beta"` (truthy) where it read `false`. Both fail SILENTLY at run time with no gate ' +
+      "anywhere (#945 §4). The input half is not a `retiredFields` rename either (#944): our " +
+      "optional `type` (source|target, one call returns the whole list) has no successor — v3 takes " +
+      "a REQUIRED `resource` (enum of 7) and moves the source/target question into per-item " +
+      "`usable_as_source`/`usable_as_target` booleans the caller has to filter on. Tracked in " +
+      "https://github.com/IFF-Productions/naary-orchestrator/issues/1109. The endpoint answers " +
+      'today and DeepL publishes no sunset date for it ("We do not yet have a timeline for ' +
+      "sunsetting /v2/languages\"); `deepl`'s probe is `get_usage`, which carries no deprecation, so " +
+      "credential verification is not at risk here.",
+  },
 ];
 
 /**
