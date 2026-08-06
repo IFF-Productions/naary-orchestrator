@@ -227,13 +227,19 @@ const audit = {
   record: vi.fn(async (_input: Record<string, unknown>) => {}),
 };
 
-/** REAL (#1117), like MembersService itself: de-provisioning must kill the subject's CLI
- *  rotation families, and that only means anything if a later rotate() is refused. */
-const cliSessions = new CliRefreshTokenService();
-
 /** REAL for the same reason (#1118's residual): the de-provision must also delete the live `nry_`
- *  ACCESS token, and that only means anything if a later `verify()` returns null. */
+ *  ACCESS token, and that only means anything if a later `verify()` returns null.
+ *
+ *  Declared BEFORE `cliSessions` because that service now requires it — see below. */
 const apiTokens = new ApiTokenService();
+
+/** REAL (#1117), like MembersService itself: de-provisioning must kill the subject's CLI
+ *  rotation families, and that only means anything if a later rotate() is refused.
+ *
+ *  It takes the REAL `ApiTokenService`, not a stub. The dependency is required rather than
+ *  optional so that a service constructed without it cannot compile — the alternative would let
+ *  reuse detection's access-token recall silently no-op in a spec that appears to cover it. */
+const cliSessions = new CliRefreshTokenService(apiTokens);
 
 const members = new MembersService(
   memberships as never,

@@ -178,7 +178,7 @@ import type { SsoSessionService } from "../src/sso/sso-session.service";
 
 // Everything below the fake Prisma is real.
 const apiTokens = new ApiTokenService();
-const cliSessions = new CliRefreshTokenService();
+const cliSessions = new CliRefreshTokenService(apiTokens);
 const requests = new CliAuthRequestService();
 const cliAuth = new CliAuthController(requests, apiTokens, cliSessions);
 

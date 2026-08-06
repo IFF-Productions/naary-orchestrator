@@ -152,11 +152,12 @@ const auditRecord = vi.fn().mockResolvedValue(undefined);
 const invalidate = vi.fn();
 const invalidateTenant = vi.fn();
 
-/** REAL, not a double — the whole point is that the revoke reaches the rotation state machine. */
-const cliSessions = new CliRefreshTokenService();
-/** Also real, for the same reason: `revokeCliSessions` calls both, and a double here would hide a
- *  throw from the second call behind the first. */
+/** REAL, for the same reason as below: `revokeCliSessions` calls both, and a double here would
+ *  hide a throw from the second call behind the first. Declared FIRST because the rotation
+ *  service now requires it. */
 const apiTokens = new ApiTokenService();
+/** REAL, not a double — the whole point is that the revoke reaches the rotation state machine. */
+const cliSessions = new CliRefreshTokenService(apiTokens);
 
 const svc = new MembersService(
   { invalidate } as unknown as MembershipService,
