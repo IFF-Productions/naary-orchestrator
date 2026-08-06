@@ -1,6 +1,6 @@
 {
   "name": "@naary/temporal-config",
-  "version": "0.0.73",
+  "version": "0.0.74",
   "private": true,
   "description": "Resolve Temporal connection options (address/namespace/TLS/API-key) from env. Defaults to the local dev server; enables Temporal Cloud purely via env. Boot-code only — never imported by workflow code.",
   "main": "dist/index.js",
