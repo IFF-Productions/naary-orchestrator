@@ -13,7 +13,7 @@ Usage:
   naary <group> <command> [options]
 
 Groups:
-  auth        Configure credentials (login, status)
+  auth        Log in via the browser (login, status, logout)
   runs        Start, list, inspect, watch, cancel, rerun runs
   workflows   List, get, export, import, delete, promote workflows
   approvals   List and act on human-approval waits
@@ -33,8 +33,13 @@ Config precedence: flags > env (NAARY_API_URL/NAARY_TOKEN/NAARY_ENV) > ~/.naary/
 export const GROUP_HELP: Record<string, string> = {
   auth: `naary auth — manage credentials
 
-  naary auth login --token <nry_...> [--api-url <url>]   Save credentials to ~/.naary/config.json
-  naary auth status                                      Show resolved apiUrl + masked token`,
+  naary auth login [--no-browser] [--api-url <url>]      Log in through the browser (device code)
+  naary auth login --token <nry_...>                     Save a token minted in Settings instead
+  naary auth status                                      Show apiUrl, masked token, expiry, workspace
+  naary auth logout                                      Revoke the session and forget it locally
+
+A browser login mints a 12-hour access token plus a refresh token, and the CLI renews it for you.
+Approving a login requires a workspace OWNER or ADMIN account; a member cannot approve one.`,
 
   runs: `naary runs — manage runs
 

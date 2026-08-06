@@ -63,6 +63,21 @@ export interface RequestOptions {
  */
 const API_PREFIX = "/api/v1";
 
+/**
+ * Join base url + the `/api` proxy segment + path, for the routes that are NOT under `/v1`.
+ *
+ * The `naary auth` handshake is one: `@Controller("auth/cli")` in `cli-auth.controller.ts`, so the
+ * API serves `/auth/cli/start` and the web origin's `location /api/` rewrite reaches it as
+ * `/api/auth/cli/start`. Kept as its own builder rather than a flag on `buildUrl`, because
+ * `buildUrl`'s `/api/v1` prefix is a fact about the PUBLIC API surface — bending it per-call is how
+ * a `/api/v1/auth/cli/start` (a path nothing serves) would get shipped.
+ */
+export function buildRootUrl(apiUrl: string, path: string): string {
+  const base = apiUrl.replace(/\/+$/, "");
+  const rel = path.startsWith("/") ? path : `/${path}`;
+  return `${base}/api${rel}`;
+}
+
 /** Join base url + /api/v1 + path, normalizing slashes. */
 export function buildUrl(
   apiUrl: string,
@@ -95,11 +110,26 @@ export function buildHeaders(
   return headers;
 }
 
+/**
+ * Called when a request comes back 401. Returns a FRESH access token to retry with, or undefined
+ * if the session cannot be renewed (no refresh token stored, or the token came from a flag/env
+ * override that must not be rotated). May THROW an `AuthError` — that is the revoked-family case,
+ * and its message is what the user is meant to read.
+ */
+export type RefreshHook = () => Promise<string | undefined>;
+
 export class ApiClient {
+  /** Mutable: a mid-process refresh has to stick for the rest of the run, or a polling command
+   *  like `runs watch` would refresh once per poll and burn a rotation every few seconds. */
+  private config: ResolvedConfig;
+
   constructor(
-    private readonly config: ResolvedConfig,
+    config: ResolvedConfig,
     private readonly fetchImpl: FetchLike = globalThis.fetch as FetchLike,
-  ) {}
+    private readonly onUnauthorized?: RefreshHook,
+  ) {
+    this.config = config;
+  }
 
   async request<T = unknown>(
     path: string,
@@ -108,17 +138,32 @@ export class ApiClient {
     const requireAuth = opts.requireAuth ?? true;
     if (requireAuth && !this.config.token) {
       throw new AuthError(
-        "No API token configured. Run `naary auth login --token <nry_...>` or set NAARY_TOKEN.",
+        "Not logged in. Run `naary auth login` (or set NAARY_TOKEN / pass --token <nry_...>).",
       );
     }
 
     const url = buildUrl(this.config.apiUrl, path, opts.query);
     const hasBody = opts.body !== undefined;
-    const res = await this.fetchImpl(url, {
-      method: opts.method ?? "GET",
-      headers: buildHeaders(this.config, hasBody),
-      body: hasBody ? JSON.stringify(opts.body) : undefined,
-    });
+    const send = (): Promise<Awaited<ReturnType<FetchLike>>> =>
+      this.fetchImpl(url, {
+        method: opts.method ?? "GET",
+        headers: buildHeaders(this.config, hasBody),
+        body: hasBody ? JSON.stringify(opts.body) : undefined,
+      });
+
+    let res = await send();
+    // The whole point of slices 1–2: a 12-hour access token WILL expire mid-session, and without
+    // this the user re-authenticates every working day and the rotation machinery is dead code.
+    // Retried exactly ONCE — a second 401 after a freshly-minted token is a real authorization
+    // failure (wrong workspace, revoked token), not a stale one, and looping on it would just
+    // spend rotations against a server that is already saying no.
+    if (res.status === 401 && requireAuth && this.onUnauthorized) {
+      const fresh = await this.onUnauthorized();
+      if (fresh) {
+        this.config = { ...this.config, token: fresh };
+        res = await send();
+      }
+    }
 
     const raw = await res.text();
     if (!res.ok) {

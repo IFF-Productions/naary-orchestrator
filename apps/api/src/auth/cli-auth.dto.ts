@@ -103,6 +103,32 @@ export class CliAuthRefreshDto {
 }
 
 /**
+ * `naary auth logout` (#1078 slice 4). Both fields are optional and both are credentials the caller
+ * already holds, so presenting either is proof enough to destroy it — the route is @Public for the
+ * same reason refresh is. A CLI sends both: the refresh token ends the rotation family, the access
+ * token kills the 12-hour bearer that would otherwise outlive the logout.
+ */
+export class CliAuthLogoutDto {
+  @ApiPropertyOptional({
+    description:
+      "The current `nryr_` refresh token. Its whole rotation family is revoked.",
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  refreshToken?: string;
+
+  @ApiPropertyOptional({
+    description:
+      "The current `nry_` access token. Deleted, so the session ends now rather than in 12 hours.",
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  accessToken?: string;
+}
+
+/**
  * The polled response. `status` is the discriminator: `pending` means keep polling, `denied` means
  * stop, and `authorized` carries the tokens exactly once.
  *

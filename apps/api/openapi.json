@@ -544,6 +544,68 @@
         ]
       }
     },
+    "/auth/cli/logout": {
+      "post": {
+        "operationId": "CliAuthController_logout",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CliAuthLogoutDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "400": {
+            "description": "Validation error / malformed request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid credentials (bearer token).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Authenticated but not permitted for this workspace.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "summary": "End a CLI session: revoke the refresh family and the access token.",
+        "tags": [
+          "cli-auth"
+        ]
+      }
+    },
     "/cli-sessions": {
       "get": {
         "operationId": "CliSessionsController_list",
@@ -18266,6 +18328,19 @@
         "required": [
           "refreshToken"
         ]
+      },
+      "CliAuthLogoutDto": {
+        "type": "object",
+        "properties": {
+          "refreshToken": {
+            "type": "string",
+            "description": "The current `nryr_` refresh token. Its whole rotation family is revoked."
+          },
+          "accessToken": {
+            "type": "string",
+            "description": "The current `nry_` access token. Deleted, so the session ends now rather than in 12 hours."
+          }
+        }
       },
       "CliSessionView": {
         "type": "object",

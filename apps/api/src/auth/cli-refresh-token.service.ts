@@ -209,9 +209,36 @@ export class CliRefreshTokenService {
     return this.afterRotation(fresh, now);
   }
 
+  /**
+   * `naary auth logout`: end the session a presented token belongs to (#1078 slice 4).
+   *
+   * Deliberately NOT expressed as `rotate()`-then-revoke. Rotation is a state machine with reuse
+   * detection in it; a logout that went through it would, for a token already rotated by a
+   * concurrent process, look exactly like a leak and log a false incident. Logout asks a much
+   * smaller question — "which family is this?" — and answers it with the same sha256 lookup
+   * `rotate()` opens with, then revokes the family and nothing else.
+   *
+   * Every state is accepted, because every state means the same thing to a human who typed
+   * `logout`: an already-rotated token still names its family (so the successor its sibling holds
+   * dies too), and an already-revoked family is a no-op via `revokeFamily`'s `revokedAt: null`
+   * filter. An unknown token returns 0. The caller renders ALL of these identically — a distinct
+   * answer would turn this into an oracle for whether a token is real.
+   */
+  async revokeByToken(
+    presented: string,
+    now: Date = new Date(),
+  ): Promise<number> {
+    const row = await getPrisma().cliRefreshToken.findUnique({
+      where: { tokenHash: hashToken(presented) },
+    });
+    if (!row) return 0;
+    return this.revokeFamily(row.familyId, now);
+  }
+
   /** Revoke every live token in a rotation family. Used by reuse detection, by offboarding via
-   *  {@link revokeUserSessions} (#1117), and, in slice 4, by `naary logout`. Idempotent:
-   *  already-revoked rows are left with their original timestamp. */
+   *  {@link revokeUserSessions} (#1117), by the Settings list (#1078 §5), and by `naary auth
+   *  logout` through {@link revokeByToken}. Idempotent: already-revoked rows keep their original
+   *  timestamp. */
   async revokeFamily(
     familyId: string,
     now: Date = new Date(),

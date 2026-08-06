@@ -638,6 +638,142 @@ describe("refresh", () => {
   });
 });
 
+/**
+ * `naary auth logout` (#1078 slice 4 — "revokes the family").
+ *
+ * A logout is only a logout if BOTH credentials die. Revoking the refresh family alone leaves the
+ * 12-hour access token authenticating every route for the rest of the day, which is precisely the
+ * window someone runs `logout` to close when they think a laptop is compromised.
+ */
+describe("logout", () => {
+  /** 204 has no body, so this route needs a reader that doesn't call `res.json()`. */
+  const postNoContent = async (
+    path: string,
+    body: unknown,
+  ): Promise<number> => {
+    const res = await fetch(`${base}${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    return res.status;
+  };
+
+  it("kills the family AND the access token, so neither survives the command", async () => {
+    const { exchanged } = await login("fb-alice");
+    const accessToken = String(exchanged.body.accessToken);
+    const refreshToken = String(exchanged.body.refreshToken);
+    // Both work beforehand — otherwise this test could pass against a broken login.
+    expect((await get("/me", asUser(accessToken))).status).toBe(200);
+
+    expect(
+      await postNoContent("/auth/cli/logout", { refreshToken, accessToken }),
+    ).toBe(204);
+
+    // The access token is gone from the store, so the REAL guard refuses it.
+    expect((await get("/me", asUser(accessToken))).status).toBe(401);
+    // And the family cannot mint a replacement.
+    expect((await post("/auth/cli/refresh", { refreshToken })).status).toBe(
+      401,
+    );
+    expect(tables.cliRefreshToken.every((r) => r.revokedAt !== null)).toBe(
+      true,
+    );
+  });
+
+  it("revokes the whole family, not just the token presented", async () => {
+    // Two tokens in one lineage: the CLI presents the newest, and the older one — which a stale
+    // process or a backup may still hold — must die with it.
+    const { exchanged } = await login("fb-alice");
+    const first = String(exchanged.body.refreshToken);
+    const rotated = await post("/auth/cli/refresh", { refreshToken: first });
+    const second = String(rotated.body.refreshToken);
+
+    await postNoContent("/auth/cli/logout", { refreshToken: second });
+
+    expect(
+      (await post("/auth/cli/refresh", { refreshToken: first })).status,
+    ).toBe(401);
+    expect(
+      (await post("/auth/cli/refresh", { refreshToken: second })).status,
+    ).toBe(401);
+  });
+
+  it("does NOT trip reuse detection on an already-rotated token", async () => {
+    // A logout is not a leak. Routing it through `rotate()` would log a false reuse incident for
+    // any CLI that logs out holding a token a sibling process already superseded.
+    const { exchanged } = await login("fb-alice");
+    const first = String(exchanged.body.refreshToken);
+    await post("/auth/cli/refresh", { refreshToken: first });
+    const row = tables.cliRefreshToken.find((r) => r.rotatedAt);
+    if (row) row.rotatedAt = new Date(Date.now() - 10 * 60_000);
+
+    // The OLD token, well past the grace window — reuse detection's exact trigger.
+    expect(
+      await postNoContent("/auth/cli/logout", { refreshToken: first }),
+    ).toBe(204);
+    expect(tables.cliRefreshToken.every((r) => r.revokedAt !== null)).toBe(
+      true,
+    );
+  });
+
+  it("answers 204 to an unknown token, an empty body, and a repeat — no oracle, and idempotent", async () => {
+    expect(
+      await postNoContent("/auth/cli/logout", {
+        refreshToken: "nryr_never-issued",
+      }),
+    ).toBe(204);
+    expect(await postNoContent("/auth/cli/logout", {})).toBe(204);
+
+    const { exchanged } = await login("fb-alice");
+    const refreshToken = String(exchanged.body.refreshToken);
+    expect(await postNoContent("/auth/cli/logout", { refreshToken })).toBe(204);
+    // A CLI retrying after a network blip must not see an error for work already done.
+    expect(await postNoContent("/auth/cli/logout", { refreshToken })).toBe(204);
+  });
+
+  it("refuses to delete a hand-made token even when handed it directly", async () => {
+    // The case that discriminates, and the one a browser-login-only test cannot reach: `--token`
+    // is still supported (it is the only route open to a plain member), so a config file can hold
+    // a Settings/CI credential — shared with other systems — and a logout will present it here.
+    // Deleting it would turn "forget my local session" into "revoke a shared token", permanently.
+    const svc = new ApiTokenService();
+    const settings = await svc.mint("tenant-A", "MCP token");
+
+    expect(
+      await postNoContent("/auth/cli/logout", { accessToken: settings.token }),
+    ).toBe(204); // still opaque — no hint that this one was refused
+    expect((await get("/me", asUser(settings.token))).status).toBe(200);
+    expect(tables.apiToken.map((t) => t.label)).toContain("MCP token");
+  });
+
+  it("cannot delete a token it was not given", async () => {
+    // The presented hash IS the scope on this unauthenticated route. Bob's session is untouched by
+    // Alice logging out, and a hand-made Settings token is not collateral damage either.
+    const svc = new ApiTokenService();
+    const settings = await svc.mint("tenant-A", "MCP token");
+    const alice = await login("fb-alice");
+    const bob = await login("fb-bob");
+
+    await postNoContent("/auth/cli/logout", {
+      refreshToken: String(alice.exchanged.body.refreshToken),
+      accessToken: String(alice.exchanged.body.accessToken),
+    });
+
+    expect(
+      (await get("/me", asUser(String(bob.exchanged.body.accessToken)))).status,
+    ).toBe(200);
+    expect((await get("/me", asUser(settings.token))).status).toBe(200);
+    expect(
+      (
+        await post("/auth/cli/refresh", {
+          refreshToken: String(bob.exchanged.body.refreshToken),
+        })
+      ).status,
+    ).toBe(200);
+  });
+});
+
 describe("input boundary", () => {
   it("rejects a body with unknown fields rather than silently ignoring them", async () => {
     const res = await post("/auth/cli/start", {
