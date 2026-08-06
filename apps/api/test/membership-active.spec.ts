@@ -102,8 +102,10 @@ const permissions = { invalidateTenant: vi.fn(), isTenantEnforced: vi.fn() };
 const mailer = { sendInvitation: vi.fn(async () => {}) };
 const executions = { heldApprovals: vi.fn(async () => NO_HELD_APPROVALS) };
 const audit = { record: vi.fn(async (_i: Record<string, unknown>) => {}) };
-const cliSessions = new CliRefreshTokenService();
+// `apiTokens` first: `CliRefreshTokenService` requires it (the reuse-detection access-token
+// recall), and a required dependency is what stops that recall degrading to a silent no-op.
 const apiTokens = new ApiTokenService();
+const cliSessions = new CliRefreshTokenService(apiTokens);
 
 const members = new MembersService(
   memberships,

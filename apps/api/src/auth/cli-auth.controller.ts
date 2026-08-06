@@ -289,11 +289,14 @@ export class CliAuthController {
    * (`ApiTokenService.revokeSessionTokens`) instead of promising a sign-out 12 hours from now. It
    * is likewise absent from `verify()`.
    *
-   * ONE MORE BOUNDED RESIDUAL, named rather than left implicit: reuse detection in
-   * `CliRefreshTokenService.afterRotation` revokes a leaked family but does NOT delete that
-   * family's access token, which now it could. It is left alone here because closing it means
-   * injecting `ApiTokenService` into `CliRefreshTokenService` — a service that four specs
-   * construct with no arguments — for a case whose window is the same ≤12h. A separate change.
+   * REUSE DETECTION NOW KILLS BOTH HALVES TOO, and that residual is closed. It used to revoke a
+   * leaked family and leave the access token that family had already minted authenticating for up
+   * to 12 hours — the one branch in the whole flow that fires on positive evidence of THEFT rather
+   * than on a policy decision, and therefore the one where 12 hours is least affordable.
+   * `CliRefreshTokenService` now takes `ApiTokenService` as a REQUIRED constructor dependency and
+   * calls `revokeSessionTokens` from `afterRotation`. Required, not optional-and-skipped: a
+   * revocation that silently no-ops when its collaborator is missing would test green in exactly
+   * the specs that appear to cover it.
    *
    * ONE RESIDUAL, bounded and not a rotation problem: a user offboarded by a path that does not
    * delete a Membership. There is none today — `removeMember` is the only `membership.deleteMany`
@@ -360,6 +363,13 @@ export class CliAuthController {
    * access token, because a logout that leaves a live 12-hour bearer behind is only a logout
    * tomorrow. Both are the caller's own credentials, which is what makes an unauthenticated route
    * safe here: the token IS the authorization, exactly as on exchange and refresh.
+   *
+   * `accessToken` IS OPTIONAL AND NO LONGER LOAD-BEARING. `revokeByToken` recalls the whole
+   * family's access tokens from the refresh row's own `tenantId`/`familyId`, so a caller that
+   * sends only its refresh token is signed out just as completely — the shape a `curl`, an older
+   * `naary`, or a config whose access token had already rotated away would take. The by-hash
+   * delete below stays because it is the ONLY thing that reaches a token minted before
+   * `ApiToken.familyId` existed, or one whose family the caller cannot name.
    *
    * ALWAYS 204, whatever was found. An unknown token, a spent token and a real one are one answer
    * on purpose — the same discipline the exchange's single `invalid_grant` follows. A "revoked 1

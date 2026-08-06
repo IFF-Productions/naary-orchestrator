@@ -220,7 +220,9 @@ beforeAll(async () => {
         useValue: {
           listForUser: async (userId: string) => {
             const u = Object.values(USERS).find((x) => x.userId === userId);
-            return u ? [{ tenantId: u.tenantId, role: u.role, active: true }] : [];
+            return u
+              ? [{ tenantId: u.tenantId, role: u.role, active: true }]
+              : [];
           },
           // #1115 — nobody in this fixture is de-provisioned.
           deactivatedTenantIds: async () => new Set<string>(),
@@ -606,6 +608,69 @@ describe("refresh", () => {
     );
   });
 
+  /**
+   * Reuse detection signs the device out NOW, not within 12 hours.
+   *
+   * This is the only branch in the whole flow that fires on positive evidence of a LEAK rather
+   * than on somebody's decision — a token was presented that the legitimate holder had already
+   * traded in. Revoking the family alone (the pre-#1127 behaviour) stopped the thief minting
+   * anything NEW while leaving the `nry_` access token the last rotation handed out authenticating
+   * every REST, /api/v1 and MCP request for the rest of the day. That is the scenario where twelve
+   * hours is least affordable.
+   *
+   * Asserted at `/me`, through the REAL global AuthGuard, because "signed out" is a claim about
+   * AUTHENTICATION. Counting rows, or asserting `deleteMany` was called, would be satisfied by a
+   * delete on the wrong tenant, the wrong column, or a column `verify()` never reads.
+   */
+  it("401s the access token of a REUSED family, and leaves the same user's other device alive", async () => {
+    const victim = await login("fb-alice", "alices-macbook");
+    const stolen = String(victim.exchanged.body.refreshToken);
+    // The token the thief is actually holding is the one the LAST successful rotation minted, not
+    // the one the exchange did — so refresh once and target that. It carries the same family.
+    const rotated = await post("/auth/cli/refresh", { refreshToken: stolen });
+    const live = String(rotated.body.accessToken);
+
+    // THE NEGATIVE CONTROL, and it is what carries this test. Same human, same workspace, a second
+    // machine. A delete scoped to `{ tenantId, label }` — i.e. one that forgot `familyId` — passes
+    // every assertion above and fails here, because losing one token would sign Alice out of every
+    // device she owns. A colleague's session is the weaker control; this is the sharp one.
+    const otherDevice = await login("fb-alice", "alices-desktop");
+    const keptAlive = String(otherDevice.exchanged.body.accessToken);
+    const bystander = await login("fb-bob");
+
+    expect((await get("/me", asUser(live))).status).toBe(200);
+
+    // Past the grace window ⇒ a leak, not the concurrent-CLI race.
+    for (const row of tables.cliRefreshToken)
+      if (row.rotatedAt) row.rotatedAt = new Date(Date.now() - 10 * 60_000);
+    expect(
+      (await post("/auth/cli/refresh", { refreshToken: stolen })).status,
+    ).toBe(401);
+
+    // The stolen session is over AT THE GUARD, not at its 12h expiry.
+    expect((await get("/me", asUser(live))).status).toBe(401);
+    // ...and nothing else was collateral damage.
+    expect((await get("/me", asUser(keptAlive))).status).toBe(200);
+    expect(
+      (await get("/me", asUser(String(bystander.exchanged.body.accessToken))))
+        .status,
+    ).toBe(200);
+  });
+
+  it("does not recall an access token for a refresh INSIDE the grace window", async () => {
+    // Two `naary` processes racing is not a leak. Signing them out here would make concurrent CLI
+    // use unusable — the exact failure the 60s window exists to prevent — and it would do it in a
+    // path that looks, from the outside, exactly like the one above.
+    const { exchanged } = await login("fb-alice");
+    const first = String(exchanged.body.refreshToken);
+    const a = await post("/auth/cli/refresh", { refreshToken: first });
+    const b = await post("/auth/cli/refresh", { refreshToken: first });
+
+    expect(b.status).toBe(200);
+    for (const token of [a, b].map((r) => String(r.body.accessToken)))
+      expect((await get("/me", asUser(token))).status).toBe(200);
+  });
+
   it("sweeps this workspace's DEAD CLI tokens, and leaves everything else alone", async () => {
     const svc = new ApiTokenService();
     await svc.mint(
@@ -681,6 +746,29 @@ describe("logout", () => {
     expect(tables.cliRefreshToken.every((r) => r.revokedAt !== null)).toBe(
       true,
     );
+  });
+
+  it("signs the device out even when the body carries NO access token", async () => {
+    // `accessToken` is optional on this route, so before the family-scoped recall a caller that
+    // omitted it — an older `naary`, a `curl`, or a config whose access token had already been
+    // rotated away — revoked the family and left a live 12-hour bearer behind. That is the same
+    // gap reuse detection had, in a different coat, and it was reachable by an ordinary client.
+    const { exchanged } = await login("fb-alice", "alices-macbook");
+    const accessToken = String(exchanged.body.accessToken);
+    const other = await login("fb-alice", "alices-desktop");
+
+    expect(
+      await postNoContent("/auth/cli/logout", {
+        refreshToken: String(exchanged.body.refreshToken),
+      }),
+    ).toBe(204);
+
+    expect((await get("/me", asUser(accessToken))).status).toBe(401);
+    // Only the device that logged out — the same human's other machine is untouched.
+    expect(
+      (await get("/me", asUser(String(other.exchanged.body.accessToken))))
+        .status,
+    ).toBe(200);
   });
 
   it("revokes the whole family, not just the token presented", async () => {

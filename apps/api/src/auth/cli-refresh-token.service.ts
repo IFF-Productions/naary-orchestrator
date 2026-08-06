@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { Injectable, Logger } from "@nestjs/common";
 import { getPrisma } from "@naary/db";
+import { ApiTokenService } from "./api-token.service";
 
 /** sha256 hex — the only form of the token persisted, exactly as ApiTokenService does it.
  *  The plaintext is returned to the CLI once and never written anywhere. */
@@ -118,6 +119,23 @@ const fail = (reason: RefreshFailureReason): RefreshResult => ({
 export class CliRefreshTokenService {
   private readonly logger = new Logger(CliRefreshTokenService.name);
 
+  /**
+   * `ApiTokenService` is a REQUIRED dependency, and its being required is the point.
+   *
+   * Two paths in this file learn that a session is over from inside the state machine, where no
+   * caller can see it: reuse detection in {@link afterRotation}, and `naary auth logout` through
+   * {@link revokeByToken}. Both must delete the `nry_` access token the session is holding, not
+   * merely revoke the family — see {@link killSessionAccessTokens}.
+   *
+   * The obvious alternative (an OPTIONAL collaborator, skipped when absent) was rejected
+   * deliberately: a security revocation that quietly no-ops when it is not wired would test green
+   * in exactly the specs that look like they cover it, and the failure would only ever be visible
+   * as a stolen token that kept working. Required means TypeScript refuses
+   * `new CliRefreshTokenService()` and Nest refuses to boot a module that does not provide it —
+   * a wiring mistake is a compile error or a crash at startup, never a silent downgrade.
+   */
+  constructor(private readonly apiTokens: ApiTokenService) {}
+
   /** Mint the FIRST token of a new rotation family (i.e. a fresh CLI login).
    *  Returns the plaintext once — only the sha256 is stored.
    *
@@ -223,6 +241,15 @@ export class CliRefreshTokenService {
    * dies too), and an already-revoked family is a no-op via `revokeFamily`'s `revokedAt: null`
    * filter. An unknown token returns 0. The caller renders ALL of these identically — a distinct
    * answer would turn this into an oracle for whether a token is real.
+   *
+   * IT ALSO DELETES THE SESSION'S ACCESS TOKEN, which used to depend on what the client sent.
+   * `POST /auth/cli/logout` takes an OPTIONAL `accessToken` and deletes it by hash — so a caller
+   * that sent only its refresh token (an older `naary`, a `curl`, a config whose access token had
+   * already been rotated away) revoked the family and left a live 12-hour bearer behind. That is
+   * the same gap reuse detection had, in a different coat. The refresh row hands us `tenantId` and
+   * `familyId` for free, so the session's tokens are recalled whatever the body contained. The
+   * controller's by-hash delete stays: it is the only thing that reaches a token minted before
+   * `ApiToken.familyId` existed, and the only thing that reaches a token whose family is unknown.
    */
   async revokeByToken(
     presented: string,
@@ -232,13 +259,32 @@ export class CliRefreshTokenService {
       where: { tokenHash: hashToken(presented) },
     });
     if (!row) return 0;
-    return this.revokeFamily(row.familyId, now);
+    const killed = await this.revokeFamily(row.familyId, now);
+    await this.killSessionAccessTokens(row.tenantId, row.familyId, "logout");
+    return killed;
   }
 
   /** Revoke every live token in a rotation family. Used by reuse detection, by offboarding via
    *  {@link revokeUserSessions} (#1117), by the Settings list (#1078 §5), and by `naary auth
    *  logout` through {@link revokeByToken}. Idempotent: already-revoked rows keep their original
-   *  timestamp. */
+   *  timestamp.
+   *
+   *  THIS IS HALF A REVOCATION, on purpose, and every caller is now responsible for the other
+   *  half. A revoked family mints nothing new, but the `nry_` access token the session already
+   *  holds authenticates every REST, /api/v1 and MCP request until its own ≤12h expiry. All four
+   *  callers close that:
+   *
+   *   | caller                                     | the access token dies via                   |
+   *   |--------------------------------------------|---------------------------------------------|
+   *   | reuse detection ({@link afterRotation})    | {@link killSessionAccessTokens}, by family  |
+   *   | logout ({@link revokeByToken})             | {@link killSessionAccessTokens}, by family  |
+   *   | Settings ({@link revokeUserFamily})        | `CliSessionsController.revoke` → `ApiTokenService.revokeSessionTokens` |
+   *   | offboarding ({@link revokeUserSessions})   | `MembersService` → `ApiTokenService.revokeUserCliTokens`, by PERSON   |
+   *
+   *  It stays a bare `familyId` — no tenant, no token deletion — precisely so the two caller-side
+   *  paths can keep using the predicate that is right for them (a tenant-scoped ownership check,
+   *  and a person-scoped sweep across every device a leaver had) rather than a family-scoped one
+   *  folded in here. */
   async revokeFamily(
     familyId: string,
     now: Date = new Date(),
@@ -382,6 +428,54 @@ export class CliRefreshTokenService {
     return true;
   }
 
+  /**
+   * Delete the `nry_` access token(s) a dead session is still holding.
+   *
+   * ONE PLACE, called by the two paths that end a session from INSIDE this service — reuse
+   * detection and `naary auth logout`. The other two callers of {@link revokeFamily} do the same
+   * thing at their own caller instead, because a better predicate is available there:
+   * `CliSessionsController.revoke` calls `revokeSessionTokens` after its ownership check (#1078
+   * §5), and `MembersService.revokeCliSessions` calls `revokeUserCliTokens`, which is scoped by
+   * PERSON and so reaches every device a leaver had (#1122). It is deliberately NOT folded into
+   * `revokeFamily`: that method takes a bare `familyId` with no tenant, and widening its signature
+   * would duplicate work those two paths already do correctly.
+   *
+   * NON-FATAL, DELIBERATELY, and this is a posture about DATABASE FAILURE — not the
+   * optional-collaborator skip the constructor docstring rejects. The call always happens; only a
+   * throw from Prisma can stop it, and it says so at WARN. The family is already revoked by the
+   * time we get here, so failing the request could not un-leak anything: it would only make a
+   * reuse answer 500 where an unknown token answers 401 — precisely the oracle
+   * `/auth/cli/refresh` spends its effort not being (`cli-auth.http.spec.ts` asserts the two
+   * responses are identical) — and it would 500 an idempotent `logout` that had mostly succeeded.
+   * Same posture as `CliSessionsController.revoke` and `MembersService.revokeCliSessions` on the
+   * same pair of calls. Degrading here leaves exactly the pre-#1127 state: a ≤12h token that can
+   * never renew itself, because its family is dead.
+   */
+  private async killSessionAccessTokens(
+    tenantId: string,
+    familyId: string,
+    why: "reuse" | "logout",
+  ): Promise<void> {
+    try {
+      const deleted = await this.apiTokens.revokeSessionTokens(
+        tenantId,
+        familyId,
+      );
+      if (deleted > 0) {
+        this.logger.log(
+          `CLI ${why}: deleted ${deleted} live access token(s) of family ${familyId}`,
+        );
+      }
+    } catch (err) {
+      // No token material — the family id is a random opaque handle, and the message is ours.
+      this.logger.warn(
+        `CLI ${why}: family ${familyId} revoked but its access token(s) were NOT deleted: ${
+          err instanceof Error ? err.message : String(err)
+        }. They stay valid until their own expiry (≤12h) and cannot be renewed.`,
+      );
+    }
+  }
+
   /** The already-rotated branch: grace-window sibling, or reuse ⇒ kill the family. */
   private async afterRotation(
     row: RefreshRow,
@@ -396,6 +490,13 @@ export class CliRefreshTokenService {
       this.logger.warn(
         `CLI refresh token reuse detected: revoked family ${row.familyId} (${killed} live token(s))`,
       );
+      // BOTH HALVES, and this is the path where the second half matters most. Revoking the family
+      // stops the thief minting anything NEW; the `nry_` access token the last successful rotation
+      // already handed out stays valid for up to 12 hours, and reuse is the only branch in this
+      // file that fires on positive evidence of a LEAK rather than on a policy decision. Leaving a
+      // compromised bearer live for the rest of the day because nothing linked it to a session was
+      // the residual #1127 named; `ApiToken.familyId` is what closes it.
+      await this.killSessionAccessTokens(row.tenantId, row.familyId, "reuse");
       return fail("reused");
     }
     // Inside the grace window. Deliberately does NOT touch `rotatedAt` on this row: sliding it

@@ -15,7 +15,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * would be untested and could be deleted without a single test going red.
  */
 
-interface Row {
+/** Indexable so the ONE generic `matches` predicate can serve both tables — the `CliRefreshToken`
+ *  rows below and the `ApiToken` rows reuse detection now deletes from. Two copies of the
+ *  predicate would be two chances for one of them to quietly stop implementing an operator. */
+interface Row extends Record<string, unknown> {
   id: string;
   tenantId: string;
   userId: string;
@@ -29,27 +32,44 @@ interface Row {
   revokedAt: Date | null;
 }
 
-const { rows, cliRefreshToken, hooks } = vi.hoisted(() => {
+const { rows, tokenRows, cliRefreshToken, apiToken, hooks } = vi.hoisted(() => {
   const rows: Row[] = [];
+  /** The `ApiToken` table. It exists here because reuse detection and logout now DELETE from it:
+   *  a fake without it would make `revokeSessionTokens` throw, the non-fatal catch would swallow
+   *  it, and every assertion below about a recalled access token would pass or fail for reasons
+   *  that have nothing to do with the code under test. */
+  const tokenRows: Record<string, unknown>[] = [];
   /** One-shot interleaving hook: runs INSIDE updateMany, before it takes effect. Used to
    *  reproduce a concurrent rotation deterministically. */
   const hooks: { beforeUpdateMany?: () => Promise<void> } = {};
   let seq = 0;
 
   /** Generic predicate: EVERY key in `where` must equal the row's value. Dates compare by
-   *  instant, everything else by identity. `{ gt }` is the one operator the session list uses
-   *  (the absolute-cap filter) and is implemented for real, because "which families are still
-   *  alive" is precisely what that screen is asserting. Unknown key or unknown operator ⇒ no
-   *  match (fail closed). */
-  const matches = (row: Row, where: Record<string, unknown>): boolean =>
+   *  instant, everything else by identity. `{ gt }` is the operator the session list uses (the
+   *  absolute-cap filter) and `{ startsWith }` the one `revokeSessionTokens` uses (the CLI label
+   *  stem); both are implemented for real, because "which families are still alive" and "which
+   *  access tokens belong to this session" are precisely what is being asserted. Unknown key or
+   *  unknown operator ⇒ no match (fail closed) — which is why `startsWith` had to be added the
+   *  moment an `apiToken.deleteMany` appeared: without it the delete would match ZERO rows and
+   *  every "the access token is gone" assertion would fail, while every "it survived" negative
+   *  would pass vacuously. */
+  const matches = (
+    row: Record<string, unknown>,
+    where: Record<string, unknown>,
+  ): boolean =>
     Object.entries(where).every(([k, want]) => {
-      const got = (row as unknown as Record<string, unknown>)[k];
+      const got = row[k];
       if (want instanceof Date && got instanceof Date)
         return want.getTime() === got.getTime();
       if (want && typeof want === "object" && !(want instanceof Date)) {
         return Object.entries(want as Record<string, unknown>).every(
-          ([op, v]) =>
-            op === "gt" && got instanceof Date && v instanceof Date && got > v,
+          ([op, v]) => {
+            if (op === "gt")
+              return got instanceof Date && v instanceof Date && got > v;
+            if (op === "startsWith")
+              return typeof got === "string" && got.startsWith(v as string);
+            return false;
+          },
         );
       }
       return got === want;
@@ -102,11 +122,47 @@ const { rows, cliRefreshToken, hooks } = vi.hoisted(() => {
         },
       ),
     },
+    tokenRows,
+    apiToken: {
+      create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
+        const row = {
+          id: `tok-${++seq}`,
+          createdAt: new Date(),
+          expiresAt: null,
+          lastUsedAt: null,
+          environmentId: null,
+          // Null-filled, not absent: `deleteMany({ where: { familyId } })` must fail to match an
+          // unowned row because the column is NULL, not because the fake forgot it — otherwise
+          // every "this one survived" negative passes for the wrong reason.
+          userId: null,
+          familyId: null,
+          ...data,
+        };
+        tokenRows.push(row);
+        return row;
+      }),
+      findUnique: vi.fn(
+        async ({ where }: { where: Record<string, unknown> }) =>
+          tokenRows.find((r) => matches(r, where)) ?? null,
+      ),
+      deleteMany: vi.fn(
+        async ({ where }: { where: Record<string, unknown> }) => {
+          const keep = tokenRows.filter((r) => !matches(r, where));
+          const removed = tokenRows.length - keep.length;
+          tokenRows.length = 0;
+          tokenRows.push(...keep);
+          return { count: removed };
+        },
+      ),
+    },
   };
 });
 
-vi.mock("@naary/db", () => ({ getPrisma: () => ({ cliRefreshToken }) }));
+vi.mock("@naary/db", () => ({
+  getPrisma: () => ({ cliRefreshToken, apiToken }),
+}));
 
+import { ApiTokenService } from "../src/auth/api-token.service";
 import {
   CLI_REFRESH_TOKEN_PREFIX,
   CliRefreshTokenService,
@@ -115,7 +171,12 @@ import {
   REFRESH_ROTATION_GRACE_MS,
 } from "../src/auth/cli-refresh-token.service";
 
-const service = new CliRefreshTokenService();
+/** The REAL `ApiTokenService`, over the same fake Prisma — a stub would prove only that a method
+ *  was called, and the thing worth proving is that the ROW is gone. It is a required constructor
+ *  argument, so a spec cannot forget it and quietly test a service whose access-token recall is
+ *  inert. */
+const apiTokens = new ApiTokenService();
+const service = new CliRefreshTokenService(apiTokens);
 
 const T0 = new Date("2026-08-04T12:00:00Z");
 const at = (ms: number) => new Date(T0.getTime() + ms);
@@ -136,10 +197,16 @@ async function rotateOk(token: string, now: Date): Promise<string> {
 
 beforeEach(() => {
   rows.length = 0;
+  tokenRows.length = 0;
   hooks.beforeUpdateMany = undefined;
   cliRefreshToken.create.mockClear();
   cliRefreshToken.findUnique.mockClear();
   cliRefreshToken.updateMany.mockClear();
+  // `mockReset`, not `mockClear`: it restores the implementation `vi.fn(impl)` was created with
+  // AND drains any queued one-shot. That second half matters — the DB-failure test below queues a
+  // `mockRejectedValueOnce`, and if the call it was meant for ever stops happening the rejection
+  // would leak into whichever test deleted next and fail it for a reason that is not its own.
+  apiToken.deleteMany.mockReset();
 });
 
 // ---------------------------------------------------------------------------
@@ -265,6 +332,136 @@ describe("rotate — the old token dies", () => {
       reason: "unknown",
     });
     expect(rows).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Reuse detection kills BOTH halves of the session.
+//
+// Revoking the family stops the thief minting anything new. It does nothing at all to the `nry_`
+// access token the last rotation already handed out, which authenticates every REST, /api/v1 and
+// MCP request until its own ≤12h expiry — and reuse is the ONE branch in this file that fires on
+// positive evidence of a leak rather than on a policy decision, so it is the one where twelve
+// hours is least affordable. `ApiToken.familyId` (#1127) is what makes that token findable.
+//
+// These are unit assertions about the ROW. The claim that the guard actually 401s it is made over
+// real HTTP in `cli-auth.http.spec.ts`, which is where a claim about authentication belongs.
+// ---------------------------------------------------------------------------
+describe("reuse detection — the access token", () => {
+  /** A CLI access token exactly as `/auth/cli/exchange` mints one: expiring, owned, and stamped
+   *  with the session it belongs to. */
+  const mintCliToken = (
+    tenantId: string,
+    userId: string,
+    familyId: string,
+    host = "laptop",
+  ) =>
+    apiTokens.mint(
+      tenantId,
+      `naary CLI — ${host}`,
+      at(12 * 60 * 60 * 1000),
+      userId,
+      familyId,
+    );
+
+  const labels = () => tokenRows.map((r) => r.label);
+
+  it("deletes the leaked family's access token, not merely the refresh rows", async () => {
+    const first = await service.issue("tenant-A", "user-1", T0);
+    await mintCliToken("tenant-A", "user-1", first.familyId);
+    await rotateOk(first.refreshToken, T0);
+    expect(tokenRows).toHaveLength(1);
+
+    expect(
+      await service.rotate(
+        first.refreshToken,
+        at(REFRESH_ROTATION_GRACE_MS + 1),
+      ),
+    ).toEqual({ ok: false, reason: "reused" });
+
+    expect(tokenRows).toHaveLength(0);
+  });
+
+  it("leaves the SAME user's other device, and every unowned token, authenticating", async () => {
+    // THE DISCRIMINATING CASE. A delete scoped to `{ tenantId, label }` instead of
+    // `{ tenantId, familyId, label }` passes every other test in this block and fails here — it
+    // would sign the victim out of every machine they own because one copy of one token leaked.
+    const leaked = await service.issue("tenant-A", "user-1", T0);
+    const other = await service.issue("tenant-A", "user-1", T0);
+    await mintCliToken("tenant-A", "user-1", leaked.familyId, "leaked-laptop");
+    await mintCliToken("tenant-A", "user-1", other.familyId, "desktop");
+    // A pre-#1127 CLI token (no family) and a Settings/CI token (no family, no owner): both are
+    // NULL in the column being matched, so both are outside the query by construction.
+    await apiTokens.mint("tenant-A", "naary CLI — pre-migration");
+    await apiTokens.mint("tenant-A", "ci");
+    // Another workspace's session, which the tenant predicate excludes.
+    await mintCliToken("tenant-B", "user-2", other.familyId, "someone-else");
+
+    await rotateOk(leaked.refreshToken, T0);
+    await service.rotate(
+      leaked.refreshToken,
+      at(REFRESH_ROTATION_GRACE_MS + 1),
+    );
+
+    expect(labels().sort()).toEqual([
+      "ci",
+      "naary CLI — desktop",
+      "naary CLI — pre-migration",
+      "naary CLI — someone-else",
+    ]);
+  });
+
+  it("still reports `reused` when the token delete FAILS, and keeps the family revoked", async () => {
+    // Non-fatal on purpose. The family is already down by the time the delete runs, so a throw
+    // could not un-leak anything — it would only make a reuse answer differently from an unknown
+    // token, which is an oracle, and it would leave the caller believing nothing was revoked.
+    const first = await service.issue("tenant-A", "user-1", T0);
+    await mintCliToken("tenant-A", "user-1", first.familyId);
+    await rotateOk(first.refreshToken, T0);
+    apiToken.deleteMany.mockRejectedValueOnce(new Error("db is down"));
+
+    expect(
+      await service.rotate(
+        first.refreshToken,
+        at(REFRESH_ROTATION_GRACE_MS + 1),
+      ),
+    ).toEqual({ ok: false, reason: "reused" });
+
+    expect(liveRows()).toHaveLength(0);
+    // The residual is exactly the pre-#1127 state: a token that dies at its own ≤12h expiry and
+    // can never be renewed, because its family is revoked.
+    expect(tokenRows).toHaveLength(1);
+  });
+
+  it("does NOT delete anything inside the grace window", async () => {
+    // A second `naary` process racing the first is not a leak, and signing it out would make
+    // concurrent CLI use unusable — the exact failure the grace window exists to prevent.
+    const first = await service.issue("tenant-A", "user-1", T0);
+    await mintCliToken("tenant-A", "user-1", first.familyId);
+    await rotateOk(first.refreshToken, T0);
+
+    expect((await service.rotate(first.refreshToken, at(SECOND))).ok).toBe(
+      true,
+    );
+
+    expect(tokenRows).toHaveLength(1);
+    expect(apiToken.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it("`naary auth logout` recalls the session's token WITHOUT being handed it", async () => {
+    // The same gap in a different coat: `POST /auth/cli/logout` takes an OPTIONAL `accessToken`,
+    // so a caller that sent only its refresh token used to revoke the family and leave a live
+    // 12-hour bearer behind. The refresh row names the session, so the body no longer decides.
+    const session = await service.issue("tenant-A", "user-1", T0);
+    const kept = await service.issue("tenant-A", "user-1", T0);
+    await mintCliToken("tenant-A", "user-1", session.familyId, "this-laptop");
+    await mintCliToken("tenant-A", "user-1", kept.familyId, "desktop");
+
+    expect(await service.revokeByToken(session.refreshToken, at(SECOND))).toBe(
+      1,
+    );
+
+    expect(labels()).toEqual(["naary CLI — desktop"]);
   });
 });
 
