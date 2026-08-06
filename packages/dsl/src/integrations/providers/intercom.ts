@@ -10,8 +10,8 @@
 //
 // Intercom publishes one document per version (`intercom/Intercom-OpenAPI`,
 // `descriptions/<version>/api.intercom.io.yaml`), so this was compared for real — 2.11 against
-// EACH of 2.12…2.16, for these five operations, on name+type. Every candidate differs, on two
-// independent blockers at two points on the ladder:
+// EACH of 2.12…2.16, for these five operations, on name+type. Every candidate differs, at two
+// points on the ladder — tiered, because the two are not equally certain:
 //
 //   - `contact.owner_id`: `integer` (example 123) → `string` (example "321") in 2.16 — Intercom's
 //     own changelog calls it a breaking change ("now returns as a string type, aligning with
