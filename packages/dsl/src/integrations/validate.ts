@@ -8,7 +8,10 @@
  * mid-run. They must nonetheless agree on what "supplied" means, which is why both take
  * `isEmptyFieldValue` from `../integration-fields` instead of each keeping its own idea of empty.
  */
-import { isEmptyFieldValue } from "../integration-fields";
+import {
+  findPlaceholderFieldValue,
+  isBlankFieldValue,
+} from "../integration-fields";
 import { bindingNamesSource } from "../mcp-args";
 import type { IntegrationNodeConfig } from "../types";
 import { getIntegrationAction, getIntegrationProvider } from "./lookup";
@@ -33,7 +36,10 @@ export function validateIntegrationConfig(
   // A field is "supplied" only by a binding (resolved at runtime) or a NON-EMPTY static value.
   // A present-but-empty static value ("" / null / [] ) counts as MISSING — otherwise it would
   // pass the gate but be dropped by buildIntegrationRequest (which omits empties), sending a
-  // malformed path/body instead of failing fast here.
+  // malformed path/body instead of failing fast here. "Empty" is judged ALL THE WAY DOWN
+  // (`isBlankFieldValue`, not `isEmptyFieldValue`), because a `json` field's emptiness hides one
+  // level in: Notion's `parent` arrives as `{ "database_id": "" }`, which has a key and so used to
+  // count as filled.
   // Only a binding that NAMES A SOURCE counts as supplying the field. An unfinished row used
   // to satisfy this gate and then blank the value at run time — the save said fine, the run
   // said "empty". Now an unfinished row leaves the field to its static value, and if there
@@ -45,7 +51,7 @@ export function validateIntegrationConfig(
   const hasStaticValue = (key: string): boolean =>
     config.fields != null &&
     key in config.fields &&
-    !isEmptyFieldValue(config.fields[key]);
+    !isBlankFieldValue(config.fields[key]);
   const supplied = (key: string): boolean =>
     hasBinding(key) ||
     hasStaticValue(key) ||
@@ -69,6 +75,23 @@ export function validateIntegrationConfig(
       `this action no longer takes${retired.replacedBy ? ` — it is now '${retired.replacedBy}'` : ""}. ` +
       retired.note
     );
+  }
+  // An UNFILLED SLOT — `"<your-board-id>"` — is not a value, and until now it was the only kind of
+  // unfilled field nothing anywhere reported. It is a non-empty string, so `supplied()` accepts it,
+  // the node looks configured on the canvas, the save goes through, and `buildIntegrationRequest`
+  // sends the literal text to the provider, which answers 400 on the first run. Reported here, so
+  // the canvas issues panel, the dry run and the run-time activity all name it at once — and the
+  // message QUOTES the slot, because `<your-board-id>` says what to go and find better than any
+  // sentence we could write. Checked across every configured field, not just the required ones:
+  // an optional field with a slot in it is sent too, and fails the same way.
+  for (const [key, value] of Object.entries(config.fields ?? {})) {
+    const slot = findPlaceholderFieldValue(value);
+    if (slot) {
+      return (
+        `integration '${config.provider}.${config.action}' field '${key}' is still a placeholder ` +
+        `(${slot}) — replace it with the real value, or bind it to an earlier node.`
+      );
+    }
   }
   for (const field of action.fields) {
     if (field.required && !supplied(field.key)) {

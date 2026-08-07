@@ -693,6 +693,56 @@ describe("generate — self-repairs its own catalog mistakes", () => {
     expect(generateText).toHaveBeenCalledTimes(1);
   });
 
+  /**
+   * A PLACEHOLDER is the author's to resolve too, for exactly the connection's reason: a model that
+   * didn't know the user's Twilio number on the first pass doesn't know it on the second. Reported
+   * as "sometimes missing inputs" — and until the save gate learned to see `<…>` it was worse than
+   * a missing field, because nothing reported it at all.
+   */
+  it("does not self-repair a field the model left as a placeholder", async () => {
+    listConnections.mockResolvedValue(conns);
+    generateText.mockResolvedValue({
+      text: JSON.stringify(
+        graphWithFields({ owner: "acme", repo: "api", title: "<issue-title>" }),
+      ),
+    });
+
+    const res = await makeService().generate("t-1", "e-1", "file an issue");
+
+    // ONE call: no repair attempt for something the model cannot fix.
+    expect(generateText).toHaveBeenCalledTimes(1);
+    // And the slot SURVIVES into the draft — it is the clearest statement of what to go and find,
+    // and the canvas issues panel now names it (validateIntegrationConfig reports it).
+    expect(
+      (
+        res.graph.nodes.find((n) => n.id === "gh")?.config as {
+          fields?: Record<string, unknown>;
+        }
+      ).fields,
+    ).toMatchObject({ title: "<issue-title>" });
+  });
+
+  it("warns the operator about placeholders left for the author", async () => {
+    listConnections.mockResolvedValue(conns);
+    const warn = vi
+      .spyOn(Logger.prototype, "warn")
+      .mockImplementation(() => {});
+    generateText.mockResolvedValue({
+      text: JSON.stringify(
+        graphWithFields({ owner: "acme", repo: "api", title: "<issue-title>" }),
+      ),
+    });
+
+    await makeService().generate("t-1", "e-1", "file an issue");
+
+    const line = warn.mock.calls.map((c) => String(c[0])).join("\n");
+    expect(line).toContain("left as a placeholder");
+    // The FIELD, never the value — a value is the user's own content (Tier-1 §4).
+    expect(line).toContain("gh.title");
+    expect(line).not.toContain("<issue-title>");
+    warn.mockRestore();
+  });
+
   /** A clean draft costs nothing extra. */
   it("makes no second call when the draft is already valid", async () => {
     listConnections.mockResolvedValue(conns);
@@ -912,5 +962,65 @@ describe("generate — a connection of the WRONG TYPE is blanked too", () => {
     });
 
     expect(connectionIdOf(res.graph)).toBe("");
+  });
+});
+
+/**
+ * WHAT THE PROMPT TELLS THE MODEL ABOUT A THIRD-PARTY FIELD.
+ *
+ * Reported as "anytime there is a 3rd party integration it always does not work". Two things in the
+ * prompt caused it, and both were things we already knew and threw away:
+ *
+ *   1. the resource block printed a required field's KEY and nothing else, though the catalog holds
+ *      its type and its format hint. A model handed `required: channel, text` has to guess what a
+ *      channel looks like; handed `channel:string (#channel or a channel ID)` it does not.
+ *   2. the system prompt ASKED for `"<...>"` placeholders. The model generalized that from
+ *      connectionId to every value it wasn't given — and a slot passes every check we had.
+ */
+describe("generate — the prompt grounds third-party fields", () => {
+  const promptOf = () =>
+    (generateText.mock.calls[0][0].prompt as string) +
+    (generateText.mock.calls[0][0].system as string);
+
+  beforeEach(() => {
+    generateText.mockResolvedValue({ text: JSON.stringify(validOut) });
+  });
+
+  it("gives each required field its TYPE and the catalog's own hint", async () => {
+    await makeService().generate("t-1", "e-1", "post to slack");
+
+    const prompt = promptOf();
+    // Slack's channel: the hint is the catalog's own, so it cannot drift from what we send.
+    expect(prompt).toContain(
+      'provider="slack" action="post_message"  required: channel:string (#channel or a channel ID), text:string',
+    );
+    // A NUMBER stays a number — the classic "42" vs 42 miss on a path field.
+    expect(prompt).toContain("issueNumber:number");
+    // A json field says so, rather than reading like a string.
+    expect(prompt).toContain("properties:json");
+  });
+
+  it("tells the model to leave an unknown value EMPTY, never as a slot", async () => {
+    await makeService().generate("t-1", "e-1", "text me on twilio");
+
+    const prompt = promptOf();
+    expect(prompt).toContain("NEVER INVENT A VALUE YOU WERE NOT GIVEN");
+    expect(prompt).toContain("<your-board-id>"); // named as the thing NOT to write
+    // The old instruction — "leave ONLY connectionId as a '<...>' placeholder" — is gone. It is
+    // what taught the model the habit, and it contradicted the resource block besides (which says
+    // to leave connectionId EMPTY, and which the scrub then enforces).
+    expect(prompt).not.toContain(
+      'leave ONLY connectionId as a "<...>" placeholder',
+    );
+  });
+
+  it("lists `integration` among the connection-based node types", async () => {
+    // It was the one connection-based node type missing from that sentence — and it is the node
+    // the whole third-party catalog runs through.
+    await makeService().generate("t-1", "e-1", "post to slack");
+
+    expect(promptOf()).toContain(
+      "Only use connection-based nodes (integration/mcpTool/",
+    );
   });
 });

@@ -1949,6 +1949,114 @@ describe("integration save-gate validation", () => {
     });
   });
 
+  describe("an UNFILLED SLOT is not a value", () => {
+    // Reported as "anytime there is a 3rd party integration it always does not work". A value like
+    // `<your-twilio-number>` is a non-empty string, so every check called it supplied: the save
+    // passed, the canvas issues panel was clean, and the run posted those characters to the
+    // provider. Measured on the AI builder, 8 of 9 generations of a request that didn't state the
+    // values wrote one. These pin BOTH halves — the slot is caught, and ordinary text is not.
+    it("reports a slot in a required field, and quotes it", () => {
+      const err = validateIntegrationConfig({
+        provider: "twilio",
+        action: "send_sms",
+        connectionId: "c1",
+        fields: {
+          accountSid: "AC123",
+          To: "<your-mobile-number>",
+          From: "+15550001111",
+          Body: "hi",
+        },
+      });
+      expect(err).toContain("field 'To' is still a placeholder");
+      expect(err).toContain("<your-mobile-number>");
+    });
+
+    it("looks INSIDE a json field, where the AI builder actually puts them", () => {
+      // Notion's `parent` is `{ "database_id": "…" }` — a top-level string test waves it through.
+      expect(
+        validateIntegrationConfig({
+          provider: "notion",
+          action: "create_page",
+          connectionId: "c1",
+          fields: {
+            parent: { database_id: "<your-notion-database-id>" },
+            properties: { Name: { title: [{ text: { content: "x" } }] } },
+          },
+        }),
+      ).toContain("<your-notion-database-id>");
+    });
+
+    it("a json field with nothing in it is missing, not supplied", () => {
+      // The other half of the same bug, one level down. Stop the generator writing
+      // `<your-notion-database-id>` and it writes `""` in the same slot — `{ "database_id": "" }`,
+      // which has a key, so the gate used to call it filled and the run POSTed a page into a
+      // database with no id. Identical outcome for the author; identical silence.
+      expect(
+        validateIntegrationConfig({
+          provider: "notion",
+          action: "create_page",
+          connectionId: "c1",
+          fields: {
+            parent: { database_id: "" },
+            properties: { Name: { title: [{ text: { content: "x" } }] } },
+          },
+        }),
+      ).toContain("missing required field 'parent'");
+    });
+
+    it("a PARTLY filled json field still counts as supplied", () => {
+      // The catalog describes the field, never the shape inside it, so there is no way to know
+      // which key is load-bearing. Only "nothing at all" is a fact we can state — guessing here
+      // would block workflows that are correct.
+      expect(
+        validateIntegrationConfig({
+          provider: "monday",
+          action: "create_item",
+          connectionId: "c1",
+          fields: {
+            query: "mutation { create_item { id } }",
+            variables: { boardId: "", itemName: "{{ hook.name }}" },
+          },
+        }),
+      ).toBeNull();
+    });
+
+    it("catches an optional field too — it is sent, and fails, just the same", () => {
+      expect(
+        validateIntegrationConfig({
+          provider: "slack",
+          action: "post_message",
+          connectionId: "c1",
+          fields: { channel: "#alerts", text: "hi", threadTs: "<message ts>" },
+        }),
+      ).toContain("field 'threadTs' is still a placeholder");
+    });
+
+    it("leaves real text alone — markup, Slack links, expressions, e-mail", () => {
+      // The rule is "you left a slot here", not "this string contains angle brackets". Each of
+      // these is a value someone legitimately types, and blocking any of them would be a
+      // regression far worse than the bug.
+      for (const text of [
+        "<b>Deploy failed</b> — see the log",
+        "<https://acme.example/run/1|Open the run>",
+        "Ping <@U123> about it",
+        "Reported by {{ form.name }} <{{ form.email }}>",
+        "a < b and b > c",
+        "<3",
+      ]) {
+        expect(
+          validateIntegrationConfig({
+            provider: "slack",
+            action: "post_message",
+            connectionId: "c1",
+            fields: { channel: "#alerts", text },
+          }),
+          text,
+        ).toBeNull();
+      }
+    });
+  });
+
   it("rejects unknown provider / action", () => {
     expect(validateIntegrationConfig({ ...base, provider: "nope" })).toMatch(
       /unknown integration provider/,

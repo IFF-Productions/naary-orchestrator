@@ -96,10 +96,11 @@ Rules:
 - Exactly ONE entry node (marked [entry] below) and it MUST be startNodeId.
 - Every edge.from/edge.to MUST reference an existing node id. Node ids are short, unique, lowercase.
 - Prefer the simplest graph that satisfies the request. End flows with an "end" node (or "respondToWebhook" for a webhook that returns a response).
-- Only use connection-based nodes (mcpTool/sqlQuery/sqlExec/sendEmail/hmac/jwt/totp) when the request implies them; leave connectionId as a short placeholder the user will set.
+- Only use connection-based nodes (integration/mcpTool/sqlQuery/sqlExec/sendEmail/hmac/jwt/totp) when the request implies them; leave connectionId as "" unless the resource block below lists a connection that fits.
+- NEVER INVENT A VALUE YOU WERE NOT GIVEN. If a field's value is not stated in the request and cannot come from an earlier node, set it to "" — an empty field is reported to the author and they fill it in. Do NOT write a slot like "<your-board-id>" or "<your-twilio-number>": that reads as a real value everywhere, so nothing warns anyone and the first run sends those characters to the provider verbatim.
 - Do NOT invent node types. Use only the catalog below.
 - FILL IN each node's config with concrete, ready-to-run values inferred from the request, following the "config:" shape shown for that node type below. Write real agent systemPrompts (specific to the task), real url+method for httpRequest, real title+instructions for humanApproval, real subject+body for sendEmail, etc. Reference upstream outputs with {{ nodeId.path }} where a value comes from an earlier node.
-- Do NOT emit an empty config {} for a node whose catalog entry shows config keys. Only nodes with no "config:" shape (e.g. start, end, merge) may omit config. For connection-based nodes leave ONLY connectionId as a "<...>" placeholder; still fill the rest.
+- Do NOT emit an empty config {} for a node whose catalog entry shows config keys. Only nodes with no "config:" shape (e.g. start, end, merge) may omit config. Fill every key you can from the request or an upstream node; leave the ones you genuinely can't as "".
 - A conditional edge has condition:{path,op,value}; op MUST be one of: ${CONDITION_OPS.join(", ")}. Do NOT put a conditional edge INTO a "merge" node.
 - To branch, prefer an "if" (two-way) or "switch" (multi-way) node and put conditions on the edges leaving it (e.g. path:"<if-id>.result", op:"eq", value:true).
 
