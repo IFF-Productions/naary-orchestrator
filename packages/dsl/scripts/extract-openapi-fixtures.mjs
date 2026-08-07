@@ -313,6 +313,14 @@ const SOURCES = {
  *                as that provider — but Shopify publishes no spec at all, so the condition can no
  *                longer be met, and 3 actions don't justify a transform duplicated across this
  *                script and the drift spec where a desync silently stops matching.
+ *   netlify, vercel — NOT ASSESSED. Neither was ever looked at; they are absent from SOURCES and
+ *                were absent from this list too, which made the absence read as a decision. It is
+ *                not one. Surfaced by `integration-request-contract.spec.ts`, whose coverage line
+ *                prints the 10 providers no document can speak to and left these two with no
+ *                sentence beside them. Nobody has run the vendor-authored-document search for
+ *                either, so this row records a GAP, not a finding — it expires the moment somebody
+ *                looks, which is the same lesson the paragraph below spells out for notion.
+ *
  * `notion` was on that last row and should not have been: `developers.notion.com/openapi.json` is
  * vendor-published, fetchable, and self-contained. It is in SOURCES as of #944. The lesson is that
  * "not found" is a statement about a search, so it belongs next to the search that came back
