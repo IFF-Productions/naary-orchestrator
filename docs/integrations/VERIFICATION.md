@@ -561,6 +561,9 @@ Pasted from a real run (`npx vitest run packages/dsl/test/integration-request-co
 
 - **131 of 183** catalog actions built and compared against a pinned document
 - **41 query parameters** confirmed declared upstream, 0 unknowable
+- **1** upstream-**required** query parameter existed to check at all. Printed beside the confirmed
+  count deliberately: the vendors mark almost nothing required, so "does the smallest legal call
+  carry what upstream demands" is barely exercised, and 41 must not be read as covering it.
 - **4 request headers** confirmed declared upstream, 0 unknowable
 - **0 fields lost** during assembly, across all 38 providers
 - **4 adjudicated findings**, in two lists the file keeps deliberately separate — 1 where the
@@ -574,6 +577,10 @@ Pasted from a real run (`npx vitest run packages/dsl/test/integration-request-co
   `pipedrive` · `zendesk` · `airtable` · `vercel` · `netlify` · `dropbox`. Eight have a written
   reason in `extract-openapi-fixtures.mjs`; `netlify` and `vercel` had none, and now carry a row
   saying the search was never run.
+- **not compared, no matching operation (5):** asserted to be *exactly* §2.5's `UNSPECIFIED` list,
+  not merely assumed to be. An action that matches nothing is dropped from every check above, so
+  "not compared" must never become a hiding place — a new non-matching action fails here rather than
+  being printed under a reassuring label.
 
 **A green run here does not mean the integrations work**, and the file's docblock says so at
 length. It compares our request against a *document*: a document can be wrong; auth, scopes, rate

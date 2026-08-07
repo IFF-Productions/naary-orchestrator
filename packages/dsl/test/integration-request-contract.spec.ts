@@ -7,6 +7,7 @@ import {
   type IntegrationField,
   buildIntegrationRequest,
 } from "../src/integrations";
+import { UNSPECIFIED } from "./openapi-drift-adjudications";
 
 /**
  * The REQUEST we actually build, diffed against the provider's own OpenAPI document.
@@ -383,7 +384,10 @@ interface RequestCheck {
   bodyProblems: string[];
   advisories: string[];
   /** Positive evidence, so "0 problems" can be told apart from "0 compared". */
-  confirmed: { query: number; header: number; body: number };
+  /** Positive evidence. `query`/`header` are names the pinned document DECLARES — not merely
+   *  names we sent. `requiredQuery` is how many upstream-required query parameters were compared
+   *  at all, which is a much smaller number than the confirmed count and must not hide behind it. */
+  confirmed: { query: number; header: number; requiredQuery: number };
   unknowable: { query: number; header: number };
 }
 
@@ -403,7 +407,7 @@ function checkRequest(
     placementProblems: [],
     bodyProblems: [],
     advisories: [],
-    confirmed: { query: 0, header: 0, body: 0 },
+    confirmed: { query: 0, header: 0, requiredQuery: 0 },
     unknowable: { query: 0, header: 0 },
   };
   const hit = fixture.operations.get(
@@ -505,11 +509,18 @@ function checkRequest(
           `we put "${name}" in the request body, upstream declares it as in:"${where}"`,
         );
       }
-      if (built.body) check.confirmed.body++;
 
       // (6) the media type we will send, advisory only (#707/#813) --------------------------------
-      // Advisory for the reason the drift spec's is: Slack's Swagger-2 document declares only
-      // form-encoding and accepts JSON with a Bearer token. A content map is evidence, not proof.
+      // Advisory for the reason the drift spec's is: a content map is evidence, not proof — Slack
+      // ships a Swagger-2 document and accepts JSON with a Bearer token regardless of what it says.
+      //
+      // It currently reports NOTHING, and so does the drift spec's equivalent: Slack's pinned
+      // fixture turns out to declare BOTH media types, so the example the two docblocks cite is not
+      // a live finding for either of us. Kept because the question — "is the content type right?" —
+      // is one this file is supposed to answer, and pinned on synthetic input below so that its
+      // silence means "compared, and they agree" rather than "never ran". It fires only when a body
+      // was actually BUILT, which is the request-level version of the drift spec's "the action has
+      // body fields".
       const declaredMedia = Object.keys(hit.op.requestBody?.content ?? {});
       const sending =
         action.bodyEncoding === "form"
@@ -529,7 +540,9 @@ function checkRequest(
       // (5) a parameter upstream REQUIRES must reach the wire, not merely exist in the catalog ----
       for (const parameter of parameters) {
         if (!parameter.required) continue;
-        if (parameter.in === "query" && !query.has(parameter.name))
+        if (parameter.in !== "query") continue;
+        check.confirmed.requiredQuery++;
+        if (!query.has(parameter.name))
           check.queryProblems.push(
             `upstream requires ?${parameter.name}= and the smallest legal call omits it — ` +
               "either no field supplies it, or the field that does is `required: false` so an " +
@@ -869,6 +882,34 @@ describe("the checks themselves, on hand-built inputs", () => {
     );
   });
 
+  it("reports a media type upstream does not declare", () => {
+    const check = run(
+      {
+        parameters: [{ name: "id", in: "path", required: true }],
+        requestBody: {
+          content: { "application/x-www-form-urlencoded": { schema: {} } },
+        },
+      },
+      [{ key: "note", label: "Note", in: "body", required: true }],
+    );
+    expect(check.advisories).toHaveLength(1);
+    expect(check.advisories[0]).toContain("application/json");
+    expect(check.advisories[0]).toContain("application/x-www-form-urlencoded");
+    // Advisory, never a failure — nothing above asserts on `advisories`.
+    expect(check.pathProblems.concat(check.placementProblems)).toEqual([]);
+  });
+
+  it("says nothing when upstream declares the media type we send", () => {
+    const check = run(
+      {
+        parameters: [{ name: "id", in: "path", required: true }],
+        requestBody: { content: { "application/json": { schema: {} } } },
+      },
+      [{ key: "note", label: "Note", in: "body", required: true }],
+    );
+    expect(check.advisories).toEqual([]);
+  });
+
   it("passes a path that lines up", () => {
     const check = run(
       { parameters: [{ name: "id", in: "path", required: true }] },
@@ -939,17 +980,31 @@ describe("coverage — what this run could and could not check", () => {
         `    ${matched.length} of ${actions} catalog actions were built and compared against a pinned document\n` +
         `    ${matched.reduce((n, c) => n + c.confirmed.query, 0)} query parameter(s) confirmed declared upstream, ` +
         `${matched.reduce((n, c) => n + c.unknowable.query, 0)} unknowable (the operation declares none)\n` +
+        // Printed BESIDE the confirmed count on purpose. The two answer different questions and the
+        // second number is far smaller: across every pinned operation the vendors mark almost no
+        // query parameter required, so "does the smallest legal call carry what upstream demands"
+        // has barely been exercised. A reader seeing only "41 confirmed" would assume otherwise.
+        `    ${matched.reduce((n, c) => n + c.confirmed.requiredQuery, 0)} upstream-REQUIRED query parameter(s) existed to check at all\n` +
         `    ${matched.reduce((n, c) => n + c.confirmed.header, 0)} request header(s) confirmed declared upstream, ` +
         `${matched.reduce((n, c) => n + c.unknowable.header, 0)} unknowable\n` +
         `    ${roundTrips.length} field(s) lost during assembly, across ALL ${Object.keys(INTEGRATION_CATALOG).length} providers\n` +
         `    ${SPEC_OVERSTRICT.length} adjudicated as an over-strict document, ${KNOWN_DEFECT.length} as a known defect\n` +
         `    NOT compared — no pinned document (${uncheckable.length} provider(s)): ${uncheckable.join(", ")}\n` +
-        `    NOT compared — no matching operation (${unmatchedKeys.length}, the drift spec's UNSPECIFIED list): ${unmatchedKeys.join(", ")}\n` +
+        `    NOT compared — no matching operation (${unmatchedKeys.length}, and asserted below to be exactly the drift spec's UNSPECIFIED list): ${unmatchedKeys.join(", ")}\n` +
         (advisories.length ? `    advisory: ${advisories.join("; ")}\n` : "") +
         "    NONE of this proves a call succeeds — see the file docblock, item 2.\n\n",
     );
     // The summary must be summarizing something.
     expect(matched.length).toBeGreaterThan(100);
+    // …and "not compared" must never become a hiding place. An action that matches no operation is
+    // silently dropped from every check above, so the set of them has to be exactly the set the
+    // drift spec has already adjudicated as absent upstream. The moment a NEW action stops matching
+    // — a wrong method, a path that moved — this fails here rather than being printed under a
+    // reassuring label. (The drift spec fails on it too; that is the point, not duplication: this
+    // one is what stops THIS file quietly measuring less than it says.)
+    expect([...unmatchedKeys].sort()).toEqual(
+      UNSPECIFIED.map((u) => u.action).sort(),
+    );
     // Every uncheckable provider is a real catalog provider with no fixture — computed, never a
     // hand-written list, so adding a provider without a spec updates this by itself.
     for (const provider of uncheckable)
