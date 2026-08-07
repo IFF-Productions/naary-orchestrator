@@ -128,6 +128,25 @@ const SOURCES = {
     pathPrefix: "",
   },
   intercom: {
+    // DELIBERATELY the CURRENT version's document, while the catalog sends `Intercom-Version:
+    // 2.11` (#1126). Intercom ships one document per version, so `descriptions/2.11/` is available
+    // — and would be the wrong choice: check 3b hard-fails when the pinned header value is not in
+    // the document's enum, and a 2.11 document lists `2.11` by construction, forever. Aiming at
+    // the current document is the only way that check can ever fire.
+    //
+    // TWO CONSEQUENCES, both worth knowing before touching this line.
+    //
+    // 1. The guard reads an API version we do not call. Benign TODAY, and that is checked, not
+    //    hoped: the request bodies of `create_contact`, `create_note` and `send_message` are
+    //    name+type identical across the whole 2.11→2.16 ladder, so nothing the drift spec inspects
+    //    is affected. The RESPONSE side is not, which is exactly why the pin stays at 2.11 — see
+    //    providers/intercom.ts.
+    // 2. **This URL must be hand-bumped whenever Intercom ships a version.** It names a version
+    //    directory and the repo has no `latest` alias (`descriptions/0` is Preview, and its enum
+    //    tops out below the current release). Once 2.17 exists, a refresh re-fetches this same
+    //    frozen 2.16 document, gets the same enum, and check 3b stays green no matter what
+    //    Intercom has since done to 2.11 — i.e. the one machine check for "our pin stopped being
+    //    accepted" goes decorative, silently. Bump the directory, refresh, re-read the diff.
     url: "https://raw.githubusercontent.com/intercom/Intercom-OpenAPI/main/descriptions/2.16/api.intercom.io.yaml",
     pathPrefix: "",
   },

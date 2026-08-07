@@ -1,5 +1,42 @@
 // ── Intercom (cloud, api.intercom.io, pinned to API version 2.11 via a static header;
 //    auth = an access token as a Bearer. `get_me` is the credential probe) ─────────────
+//
+// ## 2.11 is DELIBERATE, not stale — do not bump it without redoing this (#1126)
+//
+// Intercom is on 2.16. The pin stays at 2.11 because a version bump changes RESPONSE shapes, and
+// under #945 §4 that fails silently: node output is `{status, ok, body}`, authors bind into
+// `body.…` in saved workflows, and a renamed or re-typed field evaluates to `undefined` and flows
+// downstream rather than erroring. Safe iff the shape is identical.
+//
+// Intercom publishes one document per version (`intercom/Intercom-OpenAPI`,
+// `descriptions/<version>/api.intercom.io.yaml`), so this was compared for real — 2.11 against
+// EACH of 2.12…2.16, for these five operations, on name+type. Every candidate differs, at two
+// points on the ladder — tiered, because the two are not equally certain:
+//
+//   - `contact.owner_id`: `integer` (example 123) → `string` (example "321") in 2.16 — Intercom's
+//     own changelog calls it a breaking change ("now returns as a string type, aligning with
+//     Admin.id") on GET/POST contacts, i.e. `get_contact` AND `create_contact`. Worse than an
+//     `undefined`: an `if` node comparing it numerically flips its branch in silence.
+//   - `admin.avatar`: `object {image_url}` → `string(uri)` from 2.12 ONWARD, which is what closes
+//     off 2.12–2.15 too. That is `create_note`'s `body.author.avatar` (`note.author` → `admin`);
+//     if it is real, a saved `…author.avatar.image_url` goes undefined. Read this as CANNOT
+//     DETERMINE rather than as a confirmed change: no changelog names it, and the SAME 2.16
+//     document contradicts itself — `admin_with_app`, which `GET /me` returns, still declares
+//     `avatar` as `object {type, image_url}`, unchanged since 2.11. One document, two shapes for
+//     one concept, so it does not establish that the API moved. Under #1121's Vercel precedent
+//     "cannot compare" is not "identical", and a bump needs identical.
+//
+// Identical the whole way, 2.11 → 2.16: `send_message` and `get_me`. But the header is
+// provider-wide, so two safe actions out of five do not buy a bump.
+//
+// 2.11 is still ACCEPTED — the current (2.16) document's `intercom_version` enum lists it. That is
+// documentation of acceptance, not live verification and not a support commitment: Intercom
+// publishes no sunset window anywhere (checked: the versioning docs, the versioning blog post, the
+// 2.16 changelog). Nor is a pin a full freeze — their "Unversioned Changes" page ships behaviour
+// changes across ALL versions, so this pin fixes the shape contract, not the behaviour.
+//
+// Field-by-field write-up: issue #1126. `SOURCES.intercom` in extract-openapi-fixtures.mjs records
+// why the guard reads 2.16 while we send 2.11, and why that URL has to be hand-bumped.
 import type { IntegrationProvider } from "../types";
 
 export const INTERCOM: IntegrationProvider = {
