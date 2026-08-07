@@ -37,7 +37,10 @@ export {
 } from "./mcp-args";
 // `resolveIntegrationFields` names its true home: it is catalog-free and the interpreter calls it
 // on every integration node, so it lives in ./integration-fields (#910). Public surface unchanged.
-export { resolveIntegrationFields } from "./integration-fields";
+export {
+  findPlaceholderFieldValue,
+  resolveIntegrationFields,
+} from "./integration-fields";
 export {
   INTEGRATION_CATALOG,
   INTEGRATION_PROVIDERS,

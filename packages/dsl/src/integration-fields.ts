@@ -45,3 +45,72 @@ export function isEmptyFieldValue(v: unknown): boolean {
   if (typeof v === "object") return Object.keys(v as object).length === 0;
   return false;
 }
+
+/**
+ * `<your-board-id>` — an ANGLE-BRACKET SLOT standing in for a value nobody supplied.
+ *
+ * A placeholder is worse than a blank, which is the whole reason this exists. Blank is a state the
+ * product understands: the save gate names the field, the canvas issues panel lists it, the config
+ * panel shows it empty. `<your-twilio-number>` is a non-empty string, so `isEmptyFieldValue` calls
+ * it supplied, every check passes, the node LOOKS configured — and the run posts the literal
+ * fourteen characters to Twilio and gets a 400. Measured on the AI builder (this module's first
+ * caller): 8 of 9 generations of a request that didn't state the values wrote one of these, and not
+ * one was reported anywhere before the run.
+ *
+ * DELIBERATELY ANCHORED AND NARROW. It matches a value that is ENTIRELY one bracketed
+ * lowercase-word token — `<board id>`, `<your-notion-database-id>`, `<TWILIO_SID>` — and nothing
+ * else. Markup keeps working because markup is never the whole value (`<b>bold</b>` has content
+ * after the tag) and Slack's link syntax carries `:`/`/`/`|`, none of which are in the token class.
+ * The rule is "you left a slot here", not "this string contains angle brackets".
+ */
+const PLACEHOLDER_SLOT = /^<[A-Za-z][A-Za-z0-9]*(?:[ _-][A-Za-z0-9]+)*>$/;
+
+/**
+ * A value with NOTHING IN IT ANYWHERE — `""`, `[]`, `{}`, and also `{ "database_id": "" }`.
+ *
+ * `isEmptyFieldValue` stops at the top level, which is right for the request builder (it decides
+ * whether to send the key) and wrong for the save gate. A required `json` field arrives as a shape
+ * with its values still to fill: Notion's `parent` is `{ "database_id": "" }` — one key, so "not
+ * empty", so "supplied" — and the run POSTs a page into a database with no id. Measured directly:
+ * once the generator stopped writing `<your-notion-database-id>` it started writing `""` in the
+ * same slot, and without this the outcome for the author was identical.
+ *
+ * PARTIALLY filled is supplied, deliberately. `{ "boardId": "", "itemName": "{{ hook.name }}" }` is
+ * a judgement call we cannot make — the catalog describes the field, never the shape inside it, so
+ * there is no way to know `boardId` is the load-bearing one. Only "the author filled in nothing at
+ * all" is a fact we can state.
+ */
+export function isBlankFieldValue(v: unknown): boolean {
+  if (Array.isArray(v)) return v.every(isBlankFieldValue);
+  if (v && typeof v === "object")
+    return Object.values(v as Record<string, unknown>).every(isBlankFieldValue);
+  return isEmptyFieldValue(v);
+}
+
+/**
+ * The first placeholder slot anywhere in a field value, or null. Recurses, because a `json` field
+ * hides them one level down — Notion's `parent` arrives as `{ "database_id": "<your-database-id>" }`
+ * and monday's `variables` as `{ "boardId": "<your-board-id>" }`, which a top-level string test
+ * would wave straight through.
+ *
+ * Returns the offending TEXT rather than a boolean so the error can quote it: `<your-database-id>`
+ * is itself the clearest possible statement of what the author has to go and find.
+ */
+export function findPlaceholderFieldValue(v: unknown): string | null {
+  if (typeof v === "string")
+    return PLACEHOLDER_SLOT.test(v.trim()) ? v.trim() : null;
+  if (Array.isArray(v)) {
+    for (const item of v) {
+      const hit = findPlaceholderFieldValue(item);
+      if (hit) return hit;
+    }
+    return null;
+  }
+  if (v && typeof v === "object") {
+    for (const item of Object.values(v as Record<string, unknown>)) {
+      const hit = findPlaceholderFieldValue(item);
+      if (hit) return hit;
+    }
+  }
+  return null;
+}

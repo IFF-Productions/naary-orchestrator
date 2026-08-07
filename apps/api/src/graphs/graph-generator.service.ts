@@ -16,6 +16,7 @@ import {
 import type { GraphDef } from "@naary/dsl";
 import {
   CONNECTION_TYPES,
+  findPlaceholderFieldValue,
   INTEGRATION_PROVIDERS,
   NODE_TYPES,
   validateGraph,
@@ -175,15 +176,26 @@ export class GraphGeneratorService {
     }
     lines.push(
       "",
-      "INTEGRATION node actions (set config.provider + config.action to one of these; fill the required fields via fields/fieldBindings). There is NO action beyond these — do not invent one (e.g. there is no 'push commit'):",
+      'INTEGRATION node actions (set config.provider + config.action to one of these; fill the required fields via fields/fieldBindings). There is NO action beyond these — do not invent one (e.g. there is no \'push commit\'). Each required field is listed as key:type (hint) — honour the TYPE (a number field takes 42, not "42"; a json field takes the object the provider\'s API documents) and the hint\'s FORMAT. If you were not given a value for one, set it to "" — never a "<slot>" (see the rules above):',
     );
     for (const p of INTEGRATION_PROVIDERS) {
       for (const a of p.actions) {
         // `const` fields are catalog-supplied (API type discriminators) — the request
         // builder injects them, so never ask the model to fill them.
+        //
+        // TYPE AND HINT, not just the key (the AI-builder integration-failure report). The catalog
+        // has always known that Slack's `channel` is "#channel or a channel ID", that GitHub's
+        // `issueNumber` is a number and that Notion's `properties` is provider-shaped `json` — and
+        // this line threw all of it away and printed the bare key. A model handed only names has to
+        // guess a shape, and a guessed shape reaches the provider as a 400 that nothing upstream
+        // could have caught. It costs ~6.5KB on a ~12KB block; the hints are the catalog's own
+        // words, so they cannot drift from what the request builder actually sends.
         const req = a.fields
           .filter((f) => f.required && f.const === undefined)
-          .map((f) => f.key)
+          .map(
+            (f) =>
+              `${f.key}:${f.type ?? "string"}${f.hint ? ` (${f.hint})` : ""}`,
+          )
           .join(", ");
         lines.push(
           `- provider="${p.key}" action="${a.key}"${req ? `  required: ${req}` : ""}`,
@@ -436,6 +448,7 @@ export class GraphGeneratorService {
         `builder turn: blanked ${inventedEdit.length} bogus connectionId(s) — ${inventedEdit.join(", ")}`,
       );
     }
+    this.logPlaceholderFields("builder turn", graph);
 
     // Always a real PRICED pair (claude-code → anthropic/opus) so an estimate can still cost it.
     const pricedProvider: GenProvider =
@@ -554,6 +567,7 @@ export class GraphGeneratorService {
         `graph generate: blanked ${invented.length} bogus connectionId(s) — ${invented.join(", ")}`,
       );
     }
+    this.logPlaceholderFields("graph generate", graph);
 
     return { name: out.name?.trim() || "Generated workflow", graph };
   }
@@ -590,9 +604,11 @@ export class GraphGeneratorService {
    * Catalog problems the MODEL can fix on a second pass — an unknown provider/action, or a missing
    * REQUIRED field. Returned as prompt-ready lines naming the node.
    *
-   * DELIBERATELY EXCLUDES the missing-connectionId case. No prompt can conjure a connection the
-   * tenant hasn't created, so feeding that back would burn a repair turn and still fail; it belongs
-   * to the author, and the canvas issues panel asks for it (#831).
+   * DELIBERATELY EXCLUDES the missing-connectionId case, and for the same reason the
+   * still-a-placeholder case. No prompt can conjure a connection the tenant hasn't created, and no
+   * prompt can conjure their monday board id either — a model that didn't know the value on the
+   * first pass doesn't know it on the second, so feeding either back burns a repair turn and still
+   * fails. Both belong to the author, and the canvas issues panel asks for them (#831).
    *
    * WHAT THIS ADDS over the structural pass, precisely: `validateGraph` already rejects an unknown
    * provider/action, and the existing repair loop fixes those. It does NOT check whether an
@@ -609,11 +625,40 @@ export class GraphGeneratorService {
           typeof validateIntegrationConfig
         >[0],
       );
-      // The connection error is the author's to resolve — see above.
-      if (!err || /needs a connectionId/.test(err)) continue;
+      // The connection and placeholder errors are the author's to resolve — see above.
+      if (!err || /needs a connectionId|is still a placeholder/.test(err))
+        continue;
       out.push(`node "${node.id}": ${err}`);
     }
     return out;
+  }
+
+  /**
+   * Warn about integration fields the model left as `<a-slot>`.
+   *
+   * NOT a scrub, on purpose. `scrubInventedConnections` blanks a bogus id because the id is
+   * meaningless to the author — but `<your-notion-database-id>` is the single most useful sentence
+   * anyone could put in that box, so blanking it would delete the one hint about what to go and
+   * find. The save gate now REPORTS these (`validateIntegrationConfig`), so the canvas issues panel
+   * names the node and quotes the slot, and the value stays where the author can see it. This just
+   * puts the same fact in the operator's log — field names only, never the values, since a value is
+   * the user's own content.
+   */
+  private logPlaceholderFields(stage: string, graph: GraphDef): void {
+    const left: string[] = [];
+    for (const node of graph.nodes) {
+      if (node.type !== "integration") continue;
+      const fields = (node.config as { fields?: Record<string, unknown> })
+        ?.fields;
+      for (const [key, value] of Object.entries(fields ?? {})) {
+        if (findPlaceholderFieldValue(value)) left.push(`${node.id}.${key}`);
+      }
+    }
+    if (left.length > 0) {
+      this.logger.warn(
+        `${stage}: ${left.length} integration field(s) left as a placeholder for the author — ${left.join(", ")}`,
+      );
+    }
   }
 
   /**
