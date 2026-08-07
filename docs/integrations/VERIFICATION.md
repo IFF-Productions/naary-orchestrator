@@ -556,6 +556,63 @@ only read would multiply the fixture by 20 for a strictly smaller risk. And, as 
 document, a schema proves the query is *sayable*, not that anyone has ever sent it — neither
 provider has live proof (§2, `Live proof` column).
 
+### 2.7 The REQUEST we build, not the entry we wrote — 131 of 183 actions
+
+§2.5 and §2.6 both read **declarations**. They compare a catalog entry against a vendor document.
+Neither builds a request, so the step between "the catalog says X" and "we send Y" had nothing
+looking at both ends at once. `packages/dsl/test/integration-request-contract.spec.ts` closes that:
+it runs the real `buildIntegrationRequest` over a filled-in node config and asks the pinned document
+whether the resulting path, query, headers and body are things it declares.
+
+Two directions were genuinely unchecked before, and they are why it exists:
+
+- **a query parameter we SEND that upstream does not declare.** §2.5's parameter loop walks the
+  spec's parameters looking for a catalog field; it never walks our fields looking for a spec
+  parameter. Compared **byte-exact** — a query key IS the wire name, so `perPage` where the vendor
+  says `per_page` is not a naming difference, it is a parameter the server ignores while answering
+  200 with the unfiltered list.
+- **a request header we send** (`in: "header"` fields — PagerDuty's `From`). Same gap, same
+  direction.
+
+Plus one check that needs no document and therefore covers **all 38 providers**, the 10 unpinned
+included: every value an author supplied must be findable in the built request. That catches silent
+loss during assembly — a `type: "json"` field whose `bodyPath` is the prefix of another field's,
+where `setPath` overwrites and catalog order decides which value survives. Nothing about either
+declaration is wrong; the request is just missing something the author typed.
+
+Pasted from a real run (`npx vitest run packages/dsl/test/integration-request-contract.spec.ts`):
+
+- **131 of 183** catalog actions built and compared against a pinned document
+- **41 query parameters** confirmed declared upstream, 0 unknowable
+- **1** upstream-**required** query parameter existed to check at all. Printed beside the confirmed
+  count deliberately: the vendors mark almost nothing required, so "does the smallest legal call
+  carry what upstream demands" is barely exercised, and 41 must not be read as covering it.
+- **4 request headers** confirmed declared upstream, 0 unknowable
+- **0 fields lost** during assembly, across all 38 providers
+- **4 adjudicated findings**, in two lists the file keeps deliberately separate — 1 where the
+  document is over-strict (`cloudflare.delete_dns_record` declares a required body with an empty
+  schema on a DELETE) and 3 real, low-severity defects (`asana.update_task`,
+  `clickup.update_task`, `mailchimp.update_member`: every body field is optional, so an author who
+  configures only the id builds a bodyless PUT/PATCH and gets a provider 400 instead of a save-time
+  "nothing to update"). Both lists are asserted in the other direction — an entry that stops being
+  produced fails — so neither can rot into a graveyard.
+- **not compared, no pinned document (10):** `googlesheets` · `shopify` · `linear` · `monday` ·
+  `pipedrive` · `zendesk` · `airtable` · `vercel` · `netlify` · `dropbox`. Eight have a written
+  reason in `extract-openapi-fixtures.mjs`; `netlify` and `vercel` had none, and now carry a row
+  saying the search was never run.
+- **not compared, no matching operation (5):** asserted to be *exactly* §2.5's `UNSPECIFIED` list,
+  not merely assumed to be. An action that matches nothing is dropped from every check above, so
+  "not compared" must never become a hiding place — a new non-matching action fails here rather than
+  being printed under a reassuring label.
+
+**A green run here does not mean the integrations work**, and the file's docblock says so at
+length. It compares our request against a *document*: a document can be wrong; auth, scopes, rate
+limits and account state are invisible because no credential is used and no byte leaves the process;
+values and semantics are unchecked; the response is out of scope entirely. Intercom is the sharpest
+illustration — its pinned document is 2.16 while we send `Intercom-Version: 2.11` (#1133), so every
+Intercom row is a comparison against an API we do not call. That caveat is asserted on both sides
+rather than written in a comment, so bumping the header or refreshing the fixture forces a re-read.
+
 ## 3. Non-catalog product integrations
 
 | Integration | Surface | Credential / config | Real-environment check | Writes? | Live proof |
