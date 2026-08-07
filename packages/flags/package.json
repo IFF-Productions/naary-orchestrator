@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.test.json"
   },
   "dependencies": {
-    "@openfeature/server-sdk": "1.22.0",
+    "@openfeature/server-sdk": "1.23.0",
     "@openfeature/flagsmith-provider": "0.1.2",
     "flagsmith-nodejs": "6.2.0"
   },
