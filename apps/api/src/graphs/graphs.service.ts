@@ -15,6 +15,8 @@ import {
   type NodeDef,
   validateGraph,
   validateGraphToolPolicy,
+  collectIntegrationConfigErrors,
+  type IntegrationConfigError,
 } from "@naary/dsl";
 import { TracedClass } from "@naary/observability";
 // Runtime config validation is imported from the registry module DIRECTLY (not via the package
@@ -246,6 +248,72 @@ export class GraphsService {
         )
         .join(" | ");
       throw new BadRequestException(`Invalid node config — ${summary}`);
+    }
+    // Integration nodes, at SAVE (#1138 cause 2). `validateGraphConfigs` above is deliberately
+    // lenient on missing fields so a draft still saves, and every per-node zod schema is
+    // `.partial()`'d — so a node with no `connectionId`, or missing a required action field, or
+    // carrying an unfillable `<your-notion-database-id>` slot (#1139), sailed through here and
+    // failed at RUN time. That is the reported product failure: "anytime there is a 3rd party
+    // integration it always does not work". The information to stop it existed the whole time;
+    // nothing on this path asked for it.
+    //
+    // ONLY WHAT THIS SAVE TOUCHED. Blocking every incomplete integration node would mean a user
+    // editing node A cannot save because node B — which they never opened, possibly authored
+    // months ago — is incomplete, and the error would name a node they have no reason to care
+    // about. So a node whose config is byte-identical to the stored version is forgiven: you
+    // cannot be blocked by something you did not touch. New and edited nodes are held to the
+    // full rule, which also means a half-finished FIX is refused rather than half-saved.
+    //
+    // The previous version is read ONLY when something is already wrong, so the ordinary save
+    // costs no extra query.
+    //
+    // AN AUTHORING GATE, so it applies only when there IS an author (`actor`). The actor-absent
+    // callers are copy-in, not authoring — promote (this service, below), the seeds, the
+    // failing-open migration CLI — and every one of them starts with `previous === null` in the
+    // target, so a first promote of a workflow that has run happily in sandbox for months would
+    // 400 with nothing the operator can do about it from the prod side. Refusing a COPY of a graph
+    // this instance already accepted stops nothing: whoever authored it is who this gate is for,
+    // and they are stopped at authoring time.
+    const integrationErrors = actor
+      ? collectIntegrationConfigErrors(graph)
+      : [];
+    if (integrationErrors.length > 0) {
+      const previous = await this.getLatest(
+        tenantId,
+        environmentId,
+        workflowKey,
+      ).catch(() => null);
+      // `canonicalize`, NOT `JSON.stringify`. The stored graph comes back out of a `jsonb`
+      // column, and Postgres does not preserve key order — so a node the author never touched
+      // round-trips with its keys in a different order and compares unequal to the identical
+      // object the canvas just sent. That would make this branch dead code and every
+      // pre-existing incomplete workflow unsaveable, which is the exact failure it exists to
+      // prevent. Same function the content hash uses, for the same reason.
+      const before = new Map(
+        (previous?.graph?.nodes ?? []).map((n) => [
+          n.id,
+          canonicalize(n.config ?? {}),
+        ]),
+      );
+      const blocking = integrationErrors.filter((e: IntegrationConfigError) => {
+        const stored = before.get(e.nodeId);
+        const now = canonicalize(
+          graph.nodes.find((n) => n.id === e.nodeId)?.config ?? {},
+        );
+        // Absent from the previous version ⇒ new ⇒ never forgiven.
+        return stored === undefined || stored !== now;
+      });
+      if (blocking.length > 0) {
+        throw new BadRequestException({
+          message: `This integration step can't run yet — ${blocking
+            .map((e: IntegrationConfigError) => `${e.nodeId}: ${e.message}`)
+            .join(" | ")}`,
+          code: "INTEGRATION_CONFIG_INCOMPLETE",
+          // Per-node, so the canvas can put the message on the node rather than in a toast the
+          // user has to map back to a step themselves.
+          nodes: blocking,
+        });
+      }
     }
     // Agent guardrails (#576 AC1, save half): reject a graph that calls a tool this workspace's
     // policy denies, and reject a forced-approval tool placed INSIDE an agent's in-loop `tools[]`

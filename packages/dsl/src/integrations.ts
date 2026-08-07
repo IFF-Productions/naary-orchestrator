@@ -85,4 +85,8 @@ export {
   buildIntegrationRequest,
   type BuiltIntegrationRequest,
 } from "./integrations/build-request";
-export { validateIntegrationConfig } from "./integrations/validate";
+export {
+  validateIntegrationConfig,
+  collectIntegrationConfigErrors,
+} from "./integrations/validate";
+export type { IntegrationConfigError } from "./integrations/validate";

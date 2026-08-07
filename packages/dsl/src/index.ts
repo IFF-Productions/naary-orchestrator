@@ -45,6 +45,7 @@ export {
   getIntegrationAction,
   buildIntegrationRequest,
   validateIntegrationConfig,
+  collectIntegrationConfigErrors,
   resolveCredentialSetup,
   deriveTokenFormat,
   type IntegrationProvider,
@@ -53,6 +54,7 @@ export {
   type BuiltIntegrationRequest,
   type CredentialSetup,
   type ResolvedCredentialSetup,
+  type IntegrationConfigError,
 } from "./integrations";
 export {
   planIntegrationCall,
