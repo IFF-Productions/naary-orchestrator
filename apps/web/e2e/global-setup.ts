@@ -82,118 +82,133 @@ async function globalSetup(_config: FullConfig): Promise<void> {
   // mintToken throws WITH the cause; no generic fallback message to flatten it into.
   const token = process.env.E2E_API_TOKEN || mintToken();
 
-  // Seed a workflow (ignore 'already exists' / offline — tests handle empty too).
-  await fetch(`${API_BASE}/graphs`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${token}`,
+  /**
+   * Seed one graph, and FAIL LOUDLY if the API refuses it.
+   *
+   * Every seed here used to be `fetch(...).catch(() => undefined)`, which is doubly silent: the
+   * catch only fires on a network error, so a 4xx *resolved* and was dropped on the floor too.
+   * When the integration save gate (#1138) started refusing one of these fixtures, the seed
+   * vanished and the symptom was two unrelated specs failing on "element not found" — a locator
+   * mystery instead of "the API answered 400 and said why". A seed the tests depend on is not
+   * optional, and a broken one must say so here, once, in the setup that created it.
+   */
+  async function seedGraph(body: Record<string, unknown>): Promise<void> {
+    const key = String(body.workflowKey);
+    let res: Response;
+    try {
+      res = await fetch(`${API_BASE}/graphs`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(body),
+      });
+    } catch (e) {
+      throw new Error(
+        `E2E setup: could not reach ${API_BASE}/graphs to seed "${key}" — ` +
+          `${e instanceof Error ? e.message : String(e)}. Is the stack up?`,
+      );
+    }
+    if (res.ok) return;
+    const detail = await res.text().catch(() => "");
+    throw new Error(
+      `E2E setup: seeding workflow "${key}" failed with ${res.status}. ${detail}`,
+    );
+  }
+
+  // Re-seeding is safe: POST /graphs is an upsert, so an existing key mints a new version and an
+  // identical graph is a no-op — there is no 'already exists' to tolerate.
+  await seedGraph({
+    // "default" is the key the Runs "Start test run" button triggers.
+    workflowKey: "default",
+    name: "E2E flow",
+    graph: {
+      startNodeId: "s",
+      nodes: [
+        { id: "s", type: "start" },
+        { id: "a", type: "humanApproval" },
+        { id: "e", type: "end" },
+      ],
+      edges: [
+        { from: "s", to: "a" },
+        { from: "a", to: "e" },
+      ],
     },
-    body: JSON.stringify({
-      // "default" is the key the Runs "Start test run" button triggers.
-      workflowKey: "default",
-      name: "E2E flow",
-      graph: {
-        startNodeId: "s",
-        nodes: [
-          { id: "s", type: "start" },
-          { id: "a", type: "humanApproval" },
-          { id: "e", type: "end" },
-        ],
-        edges: [
-          { from: "s", to: "a" },
-          { from: "a", to: "e" },
-        ],
-      },
-    }),
-  }).catch(() => undefined);
+  });
 
   // Seed a RUNNABLE new-node graph (no LLM key, no approval) that exercises the
   // set → merge (diamond) → wait nodes end-to-end, so the run-through e2e can start
   // it and watch it complete. workflowKey "e2e-nodes".
-  await fetch(`${API_BASE}/graphs`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${token}`,
+  await seedGraph({
+    workflowKey: "e2e-nodes",
+    name: "E2E new nodes",
+    graph: {
+      startNodeId: "s",
+      nodes: [
+        // sampleInput seeds ctx.__input, so the run-detail "Run input" panel has
+        // a deterministic payload to assert against (session-fixes e2e).
+        {
+          id: "s",
+          type: "start",
+          config: {
+            sampleInput: { source: "e2e-run-input", ticket: "NAARY-42" },
+          },
+        },
+        { id: "a", type: "set", config: { fields: { a: 1 } } },
+        { id: "b", type: "set", config: { fields: { b: 2 } } },
+        { id: "m", type: "merge", config: { mode: "array" } },
+        { id: "dt", type: "dateTime", config: { addSeconds: 30 } },
+        {
+          id: "rk",
+          type: "renameKeys",
+          config: { from: "a", rename: { a: "alpha" } },
+        },
+        {
+          id: "c",
+          type: "code",
+          config: {
+            // real QuickJS/WASM run in the worker container — reads $ctx, returns
+            code: "return { doubled: ($ctx.a.a || 0) * 2, has: typeof $ctx.rk === 'object' };",
+          },
+        },
+        { id: "w", type: "wait", config: { durationSeconds: 1 } },
+        { id: "e", type: "end" },
+      ],
+      edges: [
+        { from: "s", to: "a" },
+        { from: "s", to: "b" },
+        { from: "a", to: "m" },
+        { from: "b", to: "m" },
+        { from: "m", to: "dt" },
+        { from: "dt", to: "rk" },
+        { from: "rk", to: "c" },
+        { from: "c", to: "w" },
+        { from: "w", to: "e" },
+      ],
     },
-    body: JSON.stringify({
-      workflowKey: "e2e-nodes",
-      name: "E2E new nodes",
-      graph: {
-        startNodeId: "s",
-        nodes: [
-          // sampleInput seeds ctx.__input, so the run-detail "Run input" panel has
-          // a deterministic payload to assert against (session-fixes e2e).
-          {
-            id: "s",
-            type: "start",
-            config: {
-              sampleInput: { source: "e2e-run-input", ticket: "NAARY-42" },
-            },
-          },
-          { id: "a", type: "set", config: { fields: { a: 1 } } },
-          { id: "b", type: "set", config: { fields: { b: 2 } } },
-          { id: "m", type: "merge", config: { mode: "array" } },
-          { id: "dt", type: "dateTime", config: { addSeconds: 30 } },
-          {
-            id: "rk",
-            type: "renameKeys",
-            config: { from: "a", rename: { a: "alpha" } },
-          },
-          {
-            id: "c",
-            type: "code",
-            config: {
-              // real QuickJS/WASM run in the worker container — reads $ctx, returns
-              code: "return { doubled: ($ctx.a.a || 0) * 2, has: typeof $ctx.rk === 'object' };",
-            },
-          },
-          { id: "w", type: "wait", config: { durationSeconds: 1 } },
-          { id: "e", type: "end" },
-        ],
-        edges: [
-          { from: "s", to: "a" },
-          { from: "s", to: "b" },
-          { from: "a", to: "m" },
-          { from: "b", to: "m" },
-          { from: "m", to: "dt" },
-          { from: "dt", to: "rk" },
-          { from: "rk", to: "c" },
-          { from: "c", to: "w" },
-          { from: "w", to: "e" },
-        ],
-      },
-    }),
-  }).catch(() => undefined);
+  });
 
   // Seed a wait(webhook) graph: start → wait(mode:webhook) → end. It parks the run
   // in `awaiting_webhook` indefinitely until an external POST to the signed resume URL
   // releases it — the durable human-in-the-loop path the resume e2e drives end-to-end.
   // workflowKey "e2e-wait-webhook".
-  await fetch(`${API_BASE}/graphs`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${token}`,
+  await seedGraph({
+    workflowKey: "e2e-wait-webhook",
+    name: "E2E wait for webhook",
+    graph: {
+      startNodeId: "s",
+      nodes: [
+        { id: "s", type: "start" },
+        { id: "w", type: "wait", config: { mode: "webhook" } },
+        { id: "e", type: "end" },
+      ],
+      edges: [
+        { from: "s", to: "w" },
+        { from: "w", to: "e" },
+      ],
     },
-    body: JSON.stringify({
-      workflowKey: "e2e-wait-webhook",
-      name: "E2E wait for webhook",
-      graph: {
-        startNodeId: "s",
-        nodes: [
-          { id: "s", type: "start" },
-          { id: "w", type: "wait", config: { mode: "webhook" } },
-          { id: "e", type: "end" },
-        ],
-        edges: [
-          { from: "s", to: "w" },
-          { from: "w", to: "e" },
-        ],
-      },
-    }),
-  }).catch(() => undefined);
+  });
 
   // A monthly budget cap for the tenant — REQUIRED before a public form can be registered (the
   // anonymous endpoint's spend backstop). Seed it on the TOKEN's real tenant (via /me), not the
@@ -218,111 +233,104 @@ async function globalSetup(_config: FullConfig): Promise<void> {
   // Seed a form-trigger graph: formTrigger → end. Its config carries the field schema the hosted
   // public form renders. The form-page e2e registers a form against this key and submits it.
   // workflowKey "e2e-form".
-  await fetch(`${API_BASE}/graphs`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify({
-      workflowKey: "e2e-form",
-      name: "E2E hosted form",
-      graph: {
-        startNodeId: "form",
-        nodes: [
-          {
-            id: "form",
-            type: "formTrigger",
-            config: {
-              title: "E2E Contact",
-              description: "Say hello.",
-              submitLabel: "Send it",
-              fields: [
-                { key: "email", label: "Email", type: "email", required: true },
-                { key: "message", label: "Message", type: "textarea" },
-              ],
-            },
+  await seedGraph({
+    workflowKey: "e2e-form",
+    name: "E2E hosted form",
+    graph: {
+      startNodeId: "form",
+      nodes: [
+        {
+          id: "form",
+          type: "formTrigger",
+          config: {
+            title: "E2E Contact",
+            description: "Say hello.",
+            submitLabel: "Send it",
+            fields: [
+              { key: "email", label: "Email", type: "email", required: true },
+              { key: "message", label: "Message", type: "textarea" },
+            ],
           },
-          { id: "end", type: "end" },
-        ],
-        edges: [{ from: "form", to: "end" }],
-      },
-    }),
-  }).catch(() => undefined);
+        },
+        { id: "end", type: "end" },
+      ],
+      edges: [{ from: "form", to: "end" }],
+    },
+  });
 
   // Seed a chat-trigger graph: chatTrigger → respondToWebhook (echoes the message back as the reply)
   // → end. Hermetic (no LLM). The chat-page e2e registers a chat against this key and messages it.
   // workflowKey "e2e-chat".
-  await fetch(`${API_BASE}/graphs`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${token}`,
+  await seedGraph({
+    workflowKey: "e2e-chat",
+    name: "E2E hosted chat",
+    graph: {
+      startNodeId: "chat",
+      nodes: [
+        {
+          id: "chat",
+          type: "chatTrigger",
+          config: { title: "E2E Chat", greeting: "Hi there!" },
+        },
+        {
+          id: "reply",
+          type: "respondToWebhook",
+          // Echo the inbound message straight back as the reply (proves the round-trip).
+          config: { bodyBinding: { from: "chat", path: "message" } },
+        },
+        { id: "end", type: "end" },
+      ],
+      edges: [
+        { from: "chat", to: "reply" },
+        { from: "reply", to: "end" },
+      ],
     },
-    body: JSON.stringify({
-      workflowKey: "e2e-chat",
-      name: "E2E hosted chat",
-      graph: {
-        startNodeId: "chat",
-        nodes: [
-          {
-            id: "chat",
-            type: "chatTrigger",
-            config: { title: "E2E Chat", greeting: "Hi there!" },
-          },
-          {
-            id: "reply",
-            type: "respondToWebhook",
-            // Echo the inbound message straight back as the reply (proves the round-trip).
-            config: { bodyBinding: { from: "chat", path: "message" } },
-          },
-          { id: "end", type: "end" },
-        ],
-        edges: [
-          { from: "chat", to: "reply" },
-          { from: "reply", to: "end" },
-        ],
-      },
-    }),
-  }).catch(() => undefined);
+  });
 
   // Seed a saved graph containing a GitHub INTEGRATION node. Every integration tile shares the
   // DSL type "integration", so a type-keyed label collapses to the last-registered tile ("Notion")
   // and mislabels this GitHub node. The session-fixes e2e opens this workflow's detail page and
   // asserts it reads "GitHub", guarding the provider-aware nodeDisplayLabel fix. workflowKey
   // "e2e-integration".
-  await fetch(`${API_BASE}/graphs`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify({
-      workflowKey: "e2e-integration",
-      name: "E2E GitHub integration",
-      graph: {
-        startNodeId: "s",
-        nodes: [
-          { id: "s", type: "start" },
-          {
-            id: "gh",
-            type: "integration",
-            config: {
-              provider: "github",
-              action: "create_issue",
-              connectionId: "",
-              fields: {},
+  //
+  // The config is COMPLETE — a connection is chosen and every required field of `create_issue`
+  // is filled. It was `connectionId: ""` with no fields until the integration save gate (#1138)
+  // began refusing a node that cannot run, which is a graph no user can save any more; a fixture
+  // that only exists because the API used to accept it tests nothing real.
+  //
+  // `connectionId` names a connection that does NOT exist in this stack, which is deliberate and
+  // still reachable: the gate requires that a connection be CHOSEN, not that it resolves. The
+  // canvas lint is what flags a dangling id, and the neighbouring spec covers that on its own
+  // freshly-placed node. This one is about the LABEL, and it never runs the graph.
+  await seedGraph({
+    workflowKey: "e2e-integration",
+    name: "E2E GitHub integration",
+    graph: {
+      startNodeId: "s",
+      nodes: [
+        { id: "s", type: "start" },
+        {
+          id: "gh",
+          type: "integration",
+          config: {
+            provider: "github",
+            action: "create_issue",
+            connectionId: "e2e-github-connection",
+            fields: {
+              owner: "naary-e2e",
+              repo: "fixtures",
+              title: "E2E issue",
             },
           },
-          { id: "e", type: "end" },
-        ],
-        edges: [
-          { from: "s", to: "gh" },
-          { from: "gh", to: "e" },
-        ],
-      },
-    }),
-  }).catch(() => undefined);
+        },
+        { id: "e", type: "end" },
+      ],
+      edges: [
+        { from: "s", to: "gh" },
+        { from: "gh", to: "e" },
+      ],
+    },
+  });
 
   const authDir = path.resolve(cwd, "e2e/.auth");
   mkdirSync(authDir, { recursive: true });

@@ -113,3 +113,35 @@ export function validateIntegrationConfig(
   }
   return null;
 }
+
+/** One integration node's config problem, keyed to the node so a caller can point at it. */
+export interface IntegrationConfigError {
+  nodeId: string;
+  message: string;
+}
+
+/**
+ * Every integration node in a graph whose config cannot run, with the node id.
+ *
+ * The walk itself was duplicated in three places (dry-run, the generator's self-repair, the canvas
+ * lint) and the SAVE PATH had no copy at all — which is #1138 cause 2: a node with no
+ * `connectionId`, a missing required field, or an unfillable `<slot>` saved cleanly and failed at
+ * run time. Shared here so a fourth caller cannot quietly disagree with the other three about what
+ * "incomplete" means.
+ *
+ * Pure and total — no I/O, no clock — so it is safe to call from a save path, a lint, or a
+ * workflow-adjacent context alike.
+ */
+export function collectIntegrationConfigErrors(graph: {
+  nodes?: Array<{ id: string; type: string; config?: Record<string, unknown> }>;
+}): IntegrationConfigError[] {
+  const out: IntegrationConfigError[] = [];
+  for (const node of graph.nodes ?? []) {
+    if (node.type !== "integration") continue;
+    const message = validateIntegrationConfig(
+      (node.config ?? {}) as unknown as IntegrationNodeConfig,
+    );
+    if (message) out.push({ nodeId: node.id, message });
+  }
+  return out;
+}
