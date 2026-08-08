@@ -278,11 +278,17 @@ export class GraphsService {
       ? collectIntegrationConfigErrors(graph)
       : [];
     if (integrationErrors.length > 0) {
+      // NOT wrapped in `.catch(() => null)`. `getLatest` already answers `null` for "nothing
+      // stored", so a catch here could only swallow a REAL storage failure — and it would land in
+      // the worst possible place: with no previous version every node reads as new, nothing is
+      // forgiven, and a database outage is reported to the author as "this integration step can't
+      // run yet". A save that should have succeeded is refused, and the message sends them to
+      // inspect config that was never the problem. Let it propagate as the 500 it is.
       const previous = await this.getLatest(
         tenantId,
         environmentId,
         workflowKey,
-      ).catch(() => null);
+      );
       // `canonicalize`, NOT `JSON.stringify`. The stored graph comes back out of a `jsonb`
       // column, and Postgres does not preserve key order — so a node the author never touched
       // round-trips with its keys in a different order and compares unequal to the identical

@@ -155,8 +155,15 @@ describe("upsert — you cannot be blocked by a node you did not touch", () => {
     // "pre-existing": a half-finished fix must not save, or the gate would be trivially escaped by
     // touching a broken node twice.
     storedAs(graphWith({ ...COMPLETE, connectionId: undefined }));
+    // The edit goes INSIDE `fields`, where a real one does. Setting a top-level `title` would
+    // also change the canonical form and pass, but by writing a key the action does not declare —
+    // so the test would keep passing if the edit-detection stopped looking at fields at all.
     const err = await save(
-      graphWith({ ...COMPLETE, connectionId: undefined, title: "new title" }),
+      graphWith({
+        ...COMPLETE,
+        connectionId: undefined,
+        fields: { ...COMPLETE.fields, title: "new title" },
+      }),
     ).catch((e) => e);
     expect(err).toBeInstanceOf(BadRequestException);
     expect(create).not.toHaveBeenCalled();
