@@ -29,16 +29,20 @@ cd /opt/naary-data
 docker compose pull -q
 docker compose up -d --wait --wait-timeout 300
 
-# Nightly backups (idempotent cron install).
+# Nightly backups (idempotent cron install). NB every stage tolerates "nothing there
+# yet": an EMPTY crontab makes both `crontab -l` and the dedupe grep exit nonzero,
+# which under set -e/pipefail killed this script on first run until the `|| true`s.
+CRON_TMP="$(mktemp)"
+{ crontab -l 2>/dev/null || true; } | grep -v 'naary-data/backup.sh' > "$CRON_TMP" || true
+echo '15 3 * * * cd /opt/naary-data && ./backup.sh >> /var/log/naary-backup.log 2>&1' >> "$CRON_TMP"
+crontab "$CRON_TMP" && rm -f "$CRON_TMP"
 chmod +x backup.sh
-( crontab -l 2>/dev/null | grep -v 'naary-data/backup.sh' ; \
-  echo '15 3 * * * cd /opt/naary-data && ./backup.sh >> /var/log/naary-backup.log 2>&1' ) | crontab -
 
 echo "── status ─────────────────────────────────────────────"
 docker compose ps
 echo "── verify ─────────────────────────────────────────────"
 docker compose exec -T postgres pg_isready -U "$(grep ^POSTGRES_USER .env | cut -d= -f2)"
-docker compose exec -T postgres psql -U "$(grep ^POSTGRES_USER .env | cut -d= -f2)" -Atc "SELECT datname FROM pg_database WHERE datname IN ('naary_orchestrator','temporal','temporal_visibility') ORDER BY 1"
+docker compose exec -T postgres psql -U "$(grep ^POSTGRES_USER .env | cut -d= -f2)" -d postgres -Atc "SELECT datname FROM pg_database WHERE datname IN ('naary_orchestrator','temporal','temporal_visibility') ORDER BY 1"
 echo "temporal frontend: $(timeout 3 bash -c '</dev/tcp/127.0.0.1/7233' && echo OK || echo UNREACHABLE)"
 REMOTE
 

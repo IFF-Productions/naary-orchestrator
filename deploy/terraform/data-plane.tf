@@ -33,8 +33,10 @@ locals {
 }
 
 # Attach the EXISTING app box. Attaching is additive (a hot-plugged NIC) — it does not
-# replace the server. NOTE for a LIVE box: Ubuntu's hc-utils configures the new
-# interface via DHCP; verify with `ip a` after apply and `dhclient` / reboot if needed.
+# replace the server. NOTE for a LIVE box the stock image does NOT auto-configure the
+# hot-plugged NIC: drop a plain-DHCP netplan for enp7s0 (see the templates' 60-private-net
+# file) and `netplan apply`. DHCP supplies the address + the 10.0.0.0/16 route via the
+# NETWORK gateway 10.0.0.1.
 resource "hcloud_server_network" "app" {
   server_id = hcloud_server.naary.id
   subnet_id = hcloud_network_subnet.naary.id

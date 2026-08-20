@@ -205,8 +205,8 @@ variable "data_server_name" {
 
 variable "data_server_type" {
   type        = string
-  default     = "cax21"
-  description = "Hetzner server type for the data box. cax21 = 4 vCPU ARM / 8 GB / 80 GB (~€12.5/mo) — everything it runs (pgvector, temporal auto-setup, temporal-ui) is multi-arch, so ARM is the cheap 8 GB option when cx types are sold out in the target location. x86 alternative: cpx32."
+  default     = "cx33"
+  description = "Hetzner server type for the data box. cx33 = 4 vCPU x86 / 8 GB / 80 GB (~€10/mo), same as the app box. Everything it runs (pgvector, temporal auto-setup, temporal-ui) is multi-arch, so cax21 (ARM) also works when cx is sold out — but VERIFY with a real create: the /v1/datacenters availability listing has been observed wrong in both directions (cax21 listed-but-refused, cx33 unlisted-but-created, Aug 2026)."
 }
 
 variable "data_server_location" {

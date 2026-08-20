@@ -22,6 +22,18 @@ write_files:
     permissions: "0644"
     content: |
       net.ipv4.ip_nonlocal_bind=1
+  # The Hetzner PRIVATE network NIC (attached by data-plane.tf). The stock image only
+  # configures the public NIC; plain DHCP here gets the private address AND the
+  # 10.0.0.0/16 route via the network gateway 10.0.0.1 (do NOT hand-write routes —
+  # the gateway is the NETWORK's .0.1, not the subnet's .1.1; we learned this live).
+  - path: /etc/netplan/60-private-net.yaml
+    permissions: "0600"
+    content: |
+      network:
+        version: 2
+        ethernets:
+          enp7s0:
+            dhcp4: true
 
 # 2 GiB swap — headroom for Postgres + the single-container Temporal cluster on an
 # 8 GB box; same mechanics as the app box's swapfile.
@@ -32,6 +44,7 @@ swap:
 
 runcmd:
   - sysctl --system
+  - netplan apply
   - curl -fsSL https://get.docker.com | sh
   - systemctl enable --now docker
   - echo "naary-data — Docker ready, .env staged at /opt/naary-data/.env. Ship + start the stack with deploy/data/deploy.sh from your machine." > /etc/motd
