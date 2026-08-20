@@ -1,3 +1,9 @@
+# DEPRECATED (self-hosted data plane): the app DB now lives on the naary-data Hetzner
+# box (data-plane.tf) and nothing references these locals any more. The project is kept
+# STANDING so an apply can't silently destroy the old production data — decommission
+# deliberately by deleting this file (+ the neon vars/provider) and applying, once the
+# self-hosted cutover is verified.
+#
 # Neon — managed serverless Postgres for the prod stack (replaces the in-stack
 # pgvector container; Neon ships the `vector` extension, so the RAG migrations work
 # unchanged). Backups/PITR are Neon's problem, not backup.sh's.

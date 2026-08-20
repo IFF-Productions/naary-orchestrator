@@ -15,6 +15,16 @@ write_files:
     permissions: "0600"
     content: |
       ${indent(6, env_file)}
+  # Private-network NIC (attached by data-plane.tf) — DHCP supplies the address and
+  # the 10.0.0.0/16 route via the network gateway (10.0.0.1). See cloud-init-data.
+  - path: /etc/netplan/60-private-net.yaml
+    permissions: "0600"
+    content: |
+      network:
+        version: 2
+        ethernets:
+          enp7s0:
+            dhcp4: true
 
 # 4 GiB swap — absorbs the worker's boot-time RSS spike (in-process webpack bundle of the
 # workflow code + quickjs-emscripten WASM) so the kernel doesn't OOM-kill a NEW worker during
@@ -28,6 +38,7 @@ swap:
   maxsize: 4294967296
 
 runcmd:
+  - netplan apply
   - curl -fsSL https://get.docker.com | sh
   - systemctl enable --now docker
   - echo "naary — Docker ready, .env staged at /opt/naary/.env. Deploy from GitHub Actions (Actions -> Release, or Deploy with a tag); it ships the compose files and pulls the GHCR images." > /etc/motd

@@ -14,20 +14,21 @@ Browser ──HTTPS──▶ Cloudflare edge (TLS · DDoS · DNS)
   Firewall: inbound = SSH only. 80/443 CLOSED.
 ```
 
-> **Prefer not to run your own hardware?** See **[Variant B — Hetzner + Neon +
-> GitHub Actions](#variant-b--hetzner--neon--github-actions)** below: the same
-> Terraform also provisions a Hetzner VPS and a Neon (managed Postgres) project,
+> **Prefer not to run your own hardware?** See **[Variant B — Hetzner + GitHub
+> Actions](#variant-b--hetzner--github-actions)** below: the same
+> Terraform also provisions two Hetzner VPSes (app + data),
 > and a GitHub Actions workflow redeploys on every green `main`.
 
 ## What's here
 | File | Purpose |
 |---|---|
-| `terraform/` | Cloudflare tunnel + ingress + DNS record, **plus** (Variant B) the Hetzner server (`hetzner.tf` + `cloud-init.yaml.tftpl`) and Neon Postgres (`neon.tf`). |
+| `terraform/` | Cloudflare tunnel + ingress + DNS record, **plus** (Variant B) the app server (`hetzner.tf` + `cloud-init.yaml.tftpl`) and the DATA server + private network (`data-plane.tf` + `cloud-init-data.yaml.tftpl`). `neon.tf` is the DEPRECATED former DB (kept standing until decommissioned). |
 | `docker-compose.prod.yml` | Overlay on the repo's base compose: closes all ports, adds `cloudflared`. |
-| `docker-compose.neon.yml` | Second overlay (Variant B): DB = Neon; gates the local postgres off, splits pooled vs direct URLs. |
+| `docker-compose.external-db.yml` | Second overlay (Variant B): DB = the data box's Postgres (was Neon); gates the local postgres off, `DATABASE_URL`/`MIGRATE_DATABASE_URL` from `.env`. |
 | `docker-compose.ghcr.yml` | Third overlay (Variant B): run prebuilt `ghcr.io/…:${APP_VERSION}` images; `!reset`s all on-box builds. |
 | `.env.prod.example` | Template for the server `.env` (copy to repo-root `.env`). Variant B generates this via Terraform instead. |
-| `backup.sh` | Nightly `pg_dump` + Temporal DB → local (+ optional rclone off-box). **Not needed on Variant B** — Neon has PITR and Temporal is Cloud. |
+| `backup.sh` | Nightly `pg_dump` + Temporal DB → local (+ optional rclone off-box), for the single-box Variant A. **Variant B uses `data/backup.sh` on the data box instead.** |
+| `data/` | The DATA box stack (Variant B): Postgres (pgvector) + self-hosted Temporal + Temporal UI (`docker-compose.yml`), shipped/started by `deploy.sh`, backed up nightly by `backup.sh`. |
 | `../.github/workflows/deploy.yml` | CD: after CI passes on `main`, SSH-deploys to the Hetzner box. |
 
 ## Prerequisites
@@ -39,9 +40,10 @@ Browser ──HTTPS──▶ Cloudflare edge (TLS · DDoS · DNS)
 ---
 
 > **Note:** the Terraform config now provisions the **full Variant B footprint**
-> (tunnel + Hetzner server + Neon) on every `apply`, and `hcloud_token` /
-> `neon_api_key` are required inputs. To run Variant A (tunnel only, your own
-> hardware), delete `terraform/hetzner.tf`, `terraform/neon.tf` and their variables —
+> (tunnel + app server + data server + private network) on every `apply`, and
+> `hcloud_token` / `neon_api_key` are required inputs (the latter only until the
+> deprecated Neon project is decommissioned). To run Variant A (tunnel only, your own
+> hardware), delete `terraform/hetzner.tf`, `terraform/data-plane.tf`, `terraform/neon.tf` and their variables —
 > both files are self-contained by design (see their headers).
 
 ## Step 1 — Cloudflare side (Terraform, on your laptop)
@@ -132,35 +134,40 @@ Set `BACKUP_RCLONE_REMOTE` in `.env` (e.g. `r2:naary-backups`) to also ship them
 
 ---
 
-## Variant B — Hetzner + Neon + GitHub Actions
+## Variant B — Hetzner + GitHub Actions
 
 Same architecture (tunnel in front, no inbound web ports), but Terraform provisions
-**everything**: the Cloudflare tunnel, a **Hetzner VPS** (default `cx33`, 4 vCPU / 8 GB,
-~€7/mo, Nuremberg) and a **Neon** project (managed serverless Postgres, pgvector
-included — so the RAG migrations run unchanged). The app DB and durable execution both
-live off-box (Neon + Temporal Cloud), and the app itself arrives as **prebuilt images
-from GHCR** — the box never sees source code, git, or a build. It holds exactly two
-things: `/opt/naary/.env` and the compose files (re-shipped on every deploy).
+**everything**: the Cloudflare tunnel, the **app VPS** (`naary-prod`), a **data VPS**
+(`naary-data`, default `cax21` 4 vCPU ARM / 8 GB) running Postgres (pgvector) + a
+self-hosted, Postgres-backed **Temporal** cluster + the Temporal UI, and the **private
+network** joining the two (DB/Temporal are bound to the private IP + loopback only —
+never public). The app arrives as **prebuilt images from GHCR** — the app box never
+sees source code, git, or a build. It holds exactly two things: `/opt/naary/.env` and
+the compose files (re-shipped on every deploy).
 
 ```
-Browser ──HTTPS──▶ Cloudflare edge ──tunnel──▶ Hetzner VPS (compose: cloudflared·web·api·worker·migrate)
-                                                   │  ▲                     │
-GitHub Actions ── build+push ─▶ GHCR ── pull ──────┘  │           Neon (Postgres+pgvector)
-       └───────── SSH (deploy key): compose files ────┘           Temporal Cloud (durable exec)
+Browser ──HTTPS──▶ Cloudflare edge ──tunnel──▶ app VPS (compose: cloudflared·web·api·worker·migrate)
+                                                   │  ▲              │ private net (10.0.1.0/24)
+GitHub Actions ── build+push ─▶ GHCR ── pull ──────┘  │              ▼
+       └───────── SSH (deploy key): compose files ────┘   data VPS (postgres·temporal·temporal-ui)
 ```
+
+(The previous incarnation used Neon + Temporal Cloud for the off-box pieces; both were
+replaced by the data box. `terraform/neon.tf` keeps the old project standing until it
+is decommissioned deliberately.)
 
 ### Provision (once, on your laptop)
 
 1. Collect credentials into `terraform/terraform.tfvars` (see the example file):
    - **Hetzner** API token — console → your project → *Security → API tokens* (Read & Write).
-   - **Neon** API key — console → *Account settings → API keys*.
+   - **Neon** API key — only while the deprecated `neon.tf` still exists (state refresh).
    - **Cloudflare** token/IDs — as in Variant A above.
    - `ssh_public_key` — your personal key (admin access).
    - `deploy_ssh_public_key` — a **dedicated** CI keypair: `ssh-keygen -t ed25519 -f deploy_key -N ""`.
      Set it **before the first apply** (hcloud injects keys at create time only).
-   - Recommended: the three `temporal_*` values (create the Temporal Cloud namespace +
-     API key first), so the generated `.env` is complete. No repo access/PAT is needed —
-     the box pulls prebuilt images.
+   - (The `temporal_*` vars are deprecated/ignored — Temporal is self-hosted on the
+     data box and the generated `.env` points at its private IP.) No repo access/PAT is
+     needed — the box pulls prebuilt images.
 
 2. Apply and grab outputs:
    ```bash
@@ -170,19 +177,27 @@ GitHub Actions ── build+push ─▶ GHCR ── pull ──────┘  
    terraform output -raw server_env    # the generated server .env — SAVE ENCRYPTION_KEY in a password manager
    ```
 
-3. First boot: cloud-init installs Docker and writes `/opt/naary/.env` — that's all.
-   The first *deploy* comes from GitHub Actions (next section). Watch the boot with
-   `cloud-init status --wait` if you're curious.
+3. Data box: cloud-init installs Docker and writes `/opt/naary-data/.env`; then ship +
+   start the data stack (Postgres + Temporal + UI) from your machine:
+   ```bash
+   ./deploy/data/deploy.sh root@$(terraform -chdir=deploy/terraform output -raw data_server_ipv4)
+   ```
+   Re-run it any time the data compose file changes (idempotent). Temporal UI:
+   `ssh -L 8233:localhost:8233 root@<data box>` → http://localhost:8233.
+
+4. App box first boot: cloud-init installs Docker and writes `/opt/naary/.env` — that's
+   all. The first *deploy* comes from GitHub Actions (next section). Watch the boot
+   with `cloud-init status --wait` if you're curious.
 
 The compose invocation layers **three** overlays (order matters; the Deploy workflow
 runs this for you — shown here for manual ops/debugging on the box):
 ```bash
 APP_VERSION=v0.0.1 docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml \
-  -f deploy/docker-compose.neon.yml -f deploy/docker-compose.ghcr.yml up -d --no-build
+  -f deploy/docker-compose.external-db.yml -f deploy/docker-compose.ghcr.yml up -d --no-build
 ```
-`DATABASE_URL` (api/worker) uses Neon's **pooled** endpoint with `pgbouncer=true`;
-`MIGRATE_DATABASE_URL` (the `migrate` one-shot) uses the **direct** endpoint — Prisma
-migrations need a real session (advisory locks + DDL), not PgBouncer. The `ghcr` overlay
+`DATABASE_URL` (api/worker) and `MIGRATE_DATABASE_URL` (the `migrate` one-shot) both
+point at the data box's Postgres over the private network (kept as two vars so a pooler
+can be inserted later without breaking migrations, which need a direct session). The `ghcr` overlay
 swaps every `build:` for `image: ghcr.io/…:${APP_VERSION}` (and `!reset`s the build
 config so nothing can rebuild on the box).
 
@@ -324,11 +339,13 @@ each deploy, add a *required reviewers* rule to the auto-created `production` en
   `hostname` (e.g. `hetzner.naar-y.com`) + `tunnel_name` in a separate state/workspace.
 - **Migrating existing data:** `pg_dump` from the old box → `psql "<MIGRATE_DATABASE_URL>"`
   (direct endpoint) before cut-over.
-- **Secrets in state:** the tfstate now also holds the Neon password, `ENCRYPTION_KEY`,
+- **Secrets in state:** the tfstate holds the Postgres password, `ENCRYPTION_KEY`,
   and DB URLs — the GCS state bucket must stay private + versioned. Back up
   `ENCRYPTION_KEY` separately; losing it invalidates stored tenant credentials.
-- **Neon autosuspend:** the default scale-to-zero adds a ~½s cold start after idle
-  periods. Fine to start; raise the suspend timeout in Neon if it bothers you.
+- **Data-box backups are on YOU now** (no Neon PITR, no Temporal Cloud): `data/deploy.sh`
+  installs a nightly `pg_dump` cron of all three DBs on the data box — configure
+  `BACKUP_RCLONE_REMOTE` in `/opt/naary-data/.env` for off-box copies, or the backups
+  die with the disk.
 - **Box provisioned before the GHCR switch?** It may still carry a git checkout in
   `/opt/naary` (with a PAT in `.git/config`). The GHCR deploy works right over it, but
   clean up: revoke that PAT, then keep only the env file —
@@ -346,14 +363,13 @@ each deploy, add a *required reviewers* rule to the auto-created `production` en
   `docker image prune -af --filter until=…`: nothing references them between `--rm` runs, so
   the prune would otherwise delete them every deploy and re-download 1.7GiB. Superseded ones
   are removed by a targeted sweep after a successful rollout.
-- **Costs:** Hetzner `cx33` ~€7/mo · Neon free tier (or Launch $19/mo) · Temporal Cloud
-  (usage-based) · Cloudflare free · GHCR free for private packages within GitHub's
-  storage quota.
+- **Costs:** app `cx33` ~€10/mo · data `cax21` ~€12.5/mo · Cloudflare free · GHCR free
+  for private packages within GitHub's storage quota. (Neon + Temporal Cloud dropped.)
 
 ---
 
 ## Switching to Temporal Cloud later
-Self-hosting Temporal is the one piece where *managed* pays off (HA, backups, upgrades). To switch:
+Prod now self-hosts Temporal on the data box. If scale ever justifies managed (HA, backups, upgrades), switching back is env-only:
 1. Create a Temporal Cloud namespace + API key.
 2. In `.env` set `TEMPORAL_ADDRESS`, `TEMPORAL_NAMESPACE`, `TEMPORAL_API_KEY` (see `.env.prod.example`).
 3. Remove the `temporal` service from the run (or just stop relying on it) and `up -d` again.

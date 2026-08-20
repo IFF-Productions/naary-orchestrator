@@ -49,7 +49,7 @@ const REPO = resolve(__dirname, "../../..");
 const PROD_COMPOSE_FILES = [
   "docker-compose.yml",
   "deploy/docker-compose.prod.yml",
-  "deploy/docker-compose.neon.yml",
+  "deploy/docker-compose.external-db.yml",
   "deploy/docker-compose.ghcr.yml",
 ];
 

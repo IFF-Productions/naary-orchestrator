@@ -75,23 +75,27 @@ variable "ssh_allowed_cidrs" {
   description = "CIDRs allowed to reach SSH (the ONLY open inbound port). Tighten to your IP if it's static."
 }
 
+# DEPRECATED (self-hosted data plane): Temporal now runs on the naary-data box and the
+# generated .env points at its private IP. These three are no longer referenced — kept
+# declared so an existing terraform.tfvars that still sets them doesn't error. Safe to
+# delete here + in tfvars once the Temporal Cloud account is retired.
 variable "temporal_address" {
   type        = string
   default     = ""
-  description = "Temporal Cloud gRPC endpoint (e.g. eu-central-1.aws.api.temporal.io:7233) — lands in the generated /opt/naary/.env. Empty ⇒ fill it in on the server before the first deploy (api/worker can't run without it)."
+  description = "DEPRECATED — unused. Temporal is self-hosted on the data box (data-plane.tf)."
 }
 
 variable "temporal_namespace" {
   type        = string
   default     = ""
-  description = "Fully-qualified Temporal Cloud namespace (<namespace>.<account>)."
+  description = "DEPRECATED — unused (see temporal_address)."
 }
 
 variable "temporal_api_key" {
   type        = string
   default     = ""
   sensitive   = true
-  description = "Temporal Cloud API key (Settings → API Keys)."
+  description = "DEPRECATED — unused (see temporal_address)."
 }
 
 # ── Neon (neon.tf) ─────────────────────────────────────────────────────────────────────
@@ -189,4 +193,24 @@ variable "s3_scope_to_prefixes" {
   type        = bool
   default     = false
   description = "Narrow the IAM policy to the specific key prefixes the app uses instead of all objects in the bucket. Only worth it if you SHARE this bucket with another workload — otherwise the bucket is the trust boundary, and a per-prefix policy breaks with a confusing AccessDenied the first time a new claim-check prefix is added in the worker."
+}
+
+# ── Data server (data-plane.tf) ────────────────────────────────────────────────────────
+
+variable "data_server_name" {
+  type        = string
+  default     = "naary-data"
+  description = "Name of the Hetzner data server (Postgres + Temporal)."
+}
+
+variable "data_server_type" {
+  type        = string
+  default     = "cx33"
+  description = "Hetzner server type for the data box. cx33 = 4 vCPU x86 / 8 GB / 80 GB (~€10/mo), same as the app box. Everything it runs (pgvector, temporal auto-setup, temporal-ui) is multi-arch, so cax21 (ARM) also works when cx is sold out — but VERIFY with a real create: the /v1/datacenters availability listing has been observed wrong in both directions (cax21 listed-but-refused, cx33 unlisted-but-created, Aug 2026)."
+}
+
+variable "data_server_location" {
+  type        = string
+  default     = "nbg1"
+  description = "Hetzner location for the data box. Keep it in the SAME location as the app server (nbg1) — every Prisma query and Temporal poll pays the RTT between them. Fallback if the type is sold out in nbg1: hel1/fsn1 (same eu-central network zone, ~20ms RTT)."
 }

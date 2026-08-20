@@ -281,7 +281,7 @@ jobs:
           # allowlist, and enabling the sandbox profile needs its Dockerfile + egress test
           # ON the box (see deploy/docker-compose.prod.yml's sandbox services).
           tar czf - docker-compose.yml \
-            deploy/docker-compose.prod.yml deploy/docker-compose.neon.yml deploy/docker-compose.ghcr.yml \
+            deploy/docker-compose.prod.yml deploy/docker-compose.external-db.yml deploy/docker-compose.ghcr.yml \
             deploy/sandbox \
             | $SSH "mkdir -p /opt/naary && tar xzf - -C /opt/naary"
 
@@ -330,7 +330,7 @@ jobs:
           # exit (set -e would otherwise skip a trailing logout on pull/up failure).
           printf '%s' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
           trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
-          FILES="-f docker-compose.yml -f deploy/docker-compose.prod.yml -f deploy/docker-compose.neon.yml -f deploy/docker-compose.ghcr.yml"
+          FILES="-f docker-compose.yml -f deploy/docker-compose.prod.yml -f deploy/docker-compose.external-db.yml -f deploy/docker-compose.ghcr.yml"
           COMPOSE="docker compose $FILES"
           export APP_VERSION="$DEPLOY_REF" IMAGE_BASE
           # Backend Sentry env: a repo secret, when SET, overrides the box .env; an UNSET

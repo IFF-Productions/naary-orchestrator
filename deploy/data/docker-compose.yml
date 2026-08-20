@@ -1,0 +1,109 @@
+# The naary DATA box stack: Postgres (pgvector) + self-hosted Temporal + Temporal UI.
+# Runs on the dedicated Hetzner data server (deploy/terraform/data-plane.tf); shipped +
+# started by deploy/data/deploy.sh. The APP stack (api/worker/web) stays on the app box
+# and reaches this over the Hetzner private network.
+#
+# Exposure model — nothing here is ever public:
+#   • 5432/7233 bind to ${BIND_IP} (the PRIVATE network IP) + 127.0.0.1 (local ops).
+#   • The Temporal UI binds to 127.0.0.1 only — reach it with an SSH tunnel:
+#       ssh -L 8233:localhost:8233 root@<data box>   →  http://localhost:8233
+#   • The Hetzner firewall admits SSH only on the public interface regardless.
+#
+# .env (staged by cloud-init from Terraform — see data-plane.tf):
+#   POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB / BIND_IP
+
+services:
+  # Same pgvector/pg16 image as dev — ONE Postgres instance holds the app DB
+  # (naary_orchestrator, pgvector for RAG) plus Temporal's two DBs (temporal /
+  # temporal_visibility, created by auto-setup below with the superuser creds).
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: naary-data-postgres
+    restart: unless-stopped
+    # Modest tuning for the shared 8 GB box (Temporal server needs its share).
+    command:
+      - postgres
+      - -c
+      - shared_buffers=1GB
+      - -c
+      - effective_cache_size=3GB
+      - -c
+      - max_connections=200
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-naary}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env (terraform output -raw data_server_env)}
+      POSTGRES_DB: ${POSTGRES_DB:-naary_orchestrator}
+    ports:
+      - "${BIND_IP:?set BIND_IP in .env (the private-network IP)}:5432:5432"
+      - "127.0.0.1:5432:5432"
+    # Host bind mount (not a named volume): survives `compose down -v`, and lives in a
+    # real folder backup.sh & an operator can see. Path is relative to /opt/naary-data.
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Self-hosted Temporal — the real cluster (all four services in one container),
+  # Postgres persistence. Replaces BOTH the dev `server start-dev` (SQLite) and
+  # Temporal Cloud. auto-setup creates the temporal/temporal_visibility databases and
+  # their schemas on first boot, then keeps them migrated on version bumps.
+  #
+  # Pin EXACT versions — the server is upgraded deliberately (one minor at a time, per
+  # Temporal's upgrade rules), never by a floating tag. Server 1.29.x ≥ our TS SDK
+  # 1.21.x, same newer-server posture as Temporal Cloud was.
+  temporal:
+    image: temporalio/auto-setup:1.29.7
+    container_name: naary-data-temporal
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB: postgres12
+      DB_PORT: "5432"
+      POSTGRES_SEEDS: postgres
+      POSTGRES_USER: ${POSTGRES_USER:-naary}
+      POSTGRES_PWD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      DBNAME: temporal
+      VISIBILITY_DBNAME: temporal_visibility
+      # Chosen ONCE at first boot — cannot be changed after the cluster has data.
+      # 512 is the standard production default; 4 (the dev default) throttles
+      # concurrency forever on a cluster that may outgrow this box.
+      NUM_HISTORY_SHARDS: "512"
+      # Workflows land in `default` (the app sends no namespace override when
+      # TEMPORAL_NAMESPACE=default). Retention = how long CLOSED runs stay queryable
+      # in Temporal/UI; the app's own run records (Postgres) outlive it.
+      DEFAULT_NAMESPACE: default
+      DEFAULT_NAMESPACE_RETENTION: 168h
+      BIND_ON_IP: 0.0.0.0
+      TEMPORAL_BROADCAST_ADDRESS: 127.0.0.1
+      LOG_LEVEL: warn
+    ports:
+      - "${BIND_IP:?}:7233:7233"
+      - "127.0.0.1:7233:7233"
+    # The image has bash; a TCP connect to the frontend gRPC port is the readiness
+    # signal (the CLI isn't in the auto-setup image).
+    healthcheck:
+      test: ['CMD-SHELL', 'bash -c "</dev/tcp/127.0.0.1/7233"']
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 30s
+
+  # Temporal Web UI — loopback only (SSH tunnel; see header). Read-mostly ops surface:
+  # inspect histories, terminate stuck runs.
+  temporal-ui:
+    image: temporalio/ui:2.53.3
+    container_name: naary-data-temporal-ui
+    restart: unless-stopped
+    depends_on:
+      temporal:
+        condition: service_healthy
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_UI_PORT: "8233"
+    ports:
+      - "127.0.0.1:8233:8233"

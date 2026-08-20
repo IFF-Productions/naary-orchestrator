@@ -80,3 +80,27 @@ output "s3_secret_access_key" {
   sensitive   = true
   description = "Run: terraform output -raw s3_secret_access_key  → AWS_SECRET_ACCESS_KEY in the server .env"
 }
+
+# ── Data server (data-plane.tf) ────────────────────────────────────────────────────────
+
+output "data_server_ipv4" {
+  value       = hcloud_server.naary_data.ipv4_address
+  description = "Public IPv4 of the data server (SSH only — Postgres/Temporal are private-net only)."
+}
+
+output "data_server_private_ip" {
+  value       = local.data_private_ip
+  description = "Private-network IP the app box dials for Postgres (5432) and Temporal (7233)."
+}
+
+output "data_ssh_command" {
+  value       = "ssh root@${hcloud_server.naary_data.ipv4_address}"
+  description = "How to reach the data box. Temporal UI: ssh -L 8233:localhost:8233 root@<ip> → http://localhost:8233"
+}
+
+# SENSITIVE — the .env cloud-init writes to /opt/naary-data/.env on the data box.
+output "data_server_env" {
+  value       = local.data_server_env
+  sensitive   = true
+  description = "The generated data-box .env — for backup or a manual (non-cloud-init) provision."
+}

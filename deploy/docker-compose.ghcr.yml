@@ -4,7 +4,7 @@
 #
 #   APP_VERSION=v0.0.1 docker compose \
 #     -f docker-compose.yml -f deploy/docker-compose.prod.yml \
-#     -f deploy/docker-compose.neon.yml -f deploy/docker-compose.ghcr.yml \
+#     -f deploy/docker-compose.external-db.yml -f deploy/docker-compose.ghcr.yml \
 #     pull && ... up -d --no-build
 #
 # APP_VERSION is the image tag (the release tag). `build: !reset null` REMOVES the base
