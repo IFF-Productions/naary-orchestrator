@@ -1,0 +1,37 @@
+#cloud-config
+# First-boot provisioning for the naary DATA server (rendered by data-plane.tf).
+# Installs Docker and stages the generated .env. The data stack itself (Postgres +
+# Temporal + Temporal UI, deploy/data/docker-compose.yml) is shipped and started by
+# deploy/data/deploy.sh over SSH — no repo, no source, no git on the box.
+
+package_update: true
+packages:
+  - ca-certificates
+  - curl
+
+write_files:
+  - path: /opt/naary-data/.env
+    permissions: "0600"
+    content: |
+      ${indent(6, env_file)}
+  # The compose file publishes Postgres/Temporal on the PRIVATE IP. If Docker ever
+  # (re)starts before the private NIC has its address (boot ordering), a literal bind
+  # would fail and the containers would flap — allow binding to a not-yet-present
+  # address so the stack always comes up.
+  - path: /etc/sysctl.d/90-naary-nonlocal-bind.conf
+    permissions: "0644"
+    content: |
+      net.ipv4.ip_nonlocal_bind=1
+
+# 2 GiB swap — headroom for Postgres + the single-container Temporal cluster on an
+# 8 GB box; same mechanics as the app box's swapfile.
+swap:
+  filename: /swapfile
+  size: 2147483648
+  maxsize: 2147483648
+
+runcmd:
+  - sysctl --system
+  - curl -fsSL https://get.docker.com | sh
+  - systemctl enable --now docker
+  - echo "naary-data — Docker ready, .env staged at /opt/naary-data/.env. Ship + start the stack with deploy/data/deploy.sh from your machine." > /etc/motd

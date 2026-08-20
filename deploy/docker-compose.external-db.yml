@@ -1,0 +1,44 @@
+# External-DB overlay: the app database lives OUTSIDE this compose stack — in prod, the
+# Postgres on the naary-data Hetzner box, reached over the private network
+# (deploy/terraform/data-plane.tf; formerly this overlay pointed at Neon). Layer it
+# LAST, on top of the prod overlay:
+#
+#   docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml \
+#                  -f deploy/docker-compose.external-db.yml up -d --build
+#
+# Needs in .env (deploy/terraform emits both — see hetzner.tf):
+#   DATABASE_URL          → api/worker connection string (Prisma pools its own
+#                           connections; no external pooler in between).
+#   MIGRATE_DATABASE_URL  → migrations connection. Same URL for the self-hosted box;
+#                           kept SEPARATE because migrations need a direct session
+#                           (advisory locks + DDL) if a pooler is ever reintroduced.
+#
+# NOTE: the base file still interpolates ${POSTGRES_PASSWORD:?} even though the postgres
+# service never starts (profiles gate starting, not parsing) — keep POSTGRES_* in .env.
+
+services:
+  # Profile-gate the local postgres off, same pattern as temporal in the prod overlay.
+  postgres:
+    profiles: ["local-postgres-disabled"]
+
+  migrate:
+    environment:
+      DATABASE_URL: ${MIGRATE_DATABASE_URL:?set MIGRATE_DATABASE_URL in .env (external Postgres, direct connection)}
+    depends_on: !override [] # no local postgres to wait for; the external DB is already up
+
+  api:
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in .env (external Postgres)}
+    # Re-override (prod overlay waits on postgres healthy): only migrations gate startup.
+    depends_on: !override
+      migrate:
+        condition: service_completed_successfully
+
+  worker:
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in .env (external Postgres)}
+
+  # Heavy queue worker (#453) also talks to the app DB → same external URL as worker.
+  worker-heavy:
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in .env (external Postgres)}

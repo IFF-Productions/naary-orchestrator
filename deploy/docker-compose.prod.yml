@@ -1,5 +1,6 @@
-# Production overlay: self-hosted app (api/worker/web/postgres), exposed ONLY through a
-# Cloudflare Tunnel, with Temporal on TEMPORAL CLOUD (not a local container).
+# Production overlay: self-hosted app (api/worker/web), exposed ONLY through a
+# Cloudflare Tunnel, with Temporal + Postgres on the dedicated DATA box (private
+# network) — see deploy/terraform/data-plane.tf + deploy/data/.
 #
 # Run it together with the base compose from the repo root (or `pnpm prod`):
 #   docker compose --env-file ./deploy/.env -f docker-compose.yml -f deploy/docker-compose.prod.yml up -d --build
@@ -9,9 +10,10 @@
 #      app is reachable ONLY via the tunnel. (postgres stays bound to 127.0.0.1 for
 #      local ops / SSH port-forward, never the network.)
 #   2. Adds the `cloudflared` tunnel container.
-#   3. Uses Temporal Cloud: the base `temporal` start-dev container is profile-gated OFF
-#      and api/worker connect to Cloud via env (deploy/.env.prod.example). Durable +
-#      managed — no local SQLite to corrupt.
+#   3. Uses the self-hosted Temporal on the data box: the base `temporal` start-dev
+#      container is profile-gated OFF and api/worker connect over the private network via
+#      env (TEMPORAL_ADDRESS=<data box>:7233, TEMPORAL_NAMESPACE=default). A real
+#      Postgres-backed cluster — no local SQLite to corrupt.
 #
 # `!override` clears the base port list (Docker Compose >= 2.24). If your compose is
 # older, delete the `!override` tag and manually remove the `ports:` from the base file.
@@ -27,9 +29,10 @@ services:
     volumes: !override
       - "${PG_DATA_DIR:-./data/postgres}:/var/lib/postgresql/data"
 
-  # Temporal is TEMPORAL CLOUD in prod, not a local container — durable, managed, and
-  # immune to the single-file SQLite corruption that took down the dev server. The app
-  # connects to Cloud purely via env (TEMPORAL_ADDRESS/NAMESPACE/API_KEY — see
+  # Temporal runs on the DATA box in prod (Postgres-backed auto-setup cluster,
+  # deploy/data/docker-compose.yml), not a local container here — durable, and immune to
+  # the single-file SQLite corruption that took down the dev server. The app connects
+  # over the private network purely via env (TEMPORAL_ADDRESS/NAMESPACE — see
   # deploy/.env.prod.example; handled by @naary/temporal-config, no code change).
   # Profile-gate the base start-dev service so `up` never starts it. (A profiled service
   # is skipped unless its profile is enabled — hence api/worker also drop it from
@@ -67,7 +70,7 @@ services:
       # settings; every API-key provider (Anthropic/OpenAI/Google) is unaffected.
       SANDBOX_RUNNER_URL: "${SANDBOX_RUNNER_URL:-http://sandbox-runner:8099}"
       SANDBOX_RUNNER_TOKEN: "${SANDBOX_RUNNER_TOKEN:-}"
-    # Drop the local-temporal dependency (Temporal is Cloud); keep DB + migrations.
+    # Drop the local-temporal dependency (Temporal is on the data box); keep migrations.
     depends_on: !override
       postgres:
         condition: service_healthy
@@ -115,15 +118,15 @@ services:
     # in prod (Sentry gets the metrics), and "every published port is closed" (header
     # point 1) should actually include this one — it was the lone hole.
     ports: !override []
-    # Drop the local-temporal dependency (Temporal is Cloud); wait only for migrations.
+    # Drop the local-temporal dependency (Temporal is on the data box); wait only for migrations.
     depends_on: !override
       migrate:
         condition: service_completed_successfully
 
   # Heavy task-queue worker (codeAgent's `orchestrator-heavy` queue, #453) — same prod
-  # treatment as `worker`: the local-Temporal dependency is dropped (Temporal is Cloud,
-  # so the base `depends_on: temporal` would reference the profile-gated-off service and
-  # break `compose config`), the published metrics port is closed, Sentry env labeled.
+  # treatment as `worker`: the local-Temporal dependency is dropped (Temporal is on the
+  # data box, so the base `depends_on: temporal` would reference the profile-gated-off
+  # service and break `compose config`), the published metrics port is closed, Sentry env labeled.
   worker-heavy:
     container_name: !reset null
     environment:

@@ -60,9 +60,10 @@ import { WebhooksModule } from "./webhooks/webhooks.module";
     // Two rate-limit dimensions (see the two throttle/ guards + helpers):
     //  - `default`: 120 req/min per CLIENT IP across the API (keyed by ClientIpThrottlerGuard behind
     //    nginx/cloudflared, #618) — protects credential-save / execution-start / oauth / hooks.
-    //  - `public-endpoint`: caps a single public form/chat's total submit rate PER ENDPOINT, across
+    //  - `public-endpoint`: caps a single public form/chat/webhook's total rate PER ENDPOINT, across
     //    all IPs (#616) — bounds a distributed flood the per-IP limit can't. Its own getTracker/skipIf
-    //    apply it ONLY to `POST /forms/:formId` + `POST /chat/:chatId`.
+    //    apply it ONLY to `POST /forms/:formId`, `POST /chat/:chatId`, and the public webhook
+    //    ingress `POST /hooks/:endpointId` + `POST /hooks/resume/:workflowId`.
     ThrottlerModule.forRoot([
       { name: "default", ttl: 60_000, limit: 120 },
       {
