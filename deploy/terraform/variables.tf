@@ -98,26 +98,6 @@ variable "temporal_api_key" {
   description = "DEPRECATED — unused (see temporal_address)."
 }
 
-# ── Neon (neon.tf) ─────────────────────────────────────────────────────────────────────
-
-variable "neon_api_key" {
-  type        = string
-  sensitive   = true
-  description = "Neon API key (console → Account settings → API keys)."
-}
-
-variable "neon_project_name" {
-  type        = string
-  default     = "naary"
-  description = "Name of the Neon project."
-}
-
-variable "neon_region" {
-  type        = string
-  default     = "aws-eu-central-1"
-  description = "Neon region id (aws-eu-central-1 = Frankfurt — pairs with Hetzner nbg1/fsn1)."
-}
-
 # ── Object storage (s3.tf) ─────────────────────────────────────────────────────────────
 
 variable "create_s3" {
