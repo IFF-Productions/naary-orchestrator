@@ -11,8 +11,22 @@ decision; nothing was migrated.
 - `deploy.sh` — ship + start/roll the stack over SSH (idempotent; also installs the
   backup cron). `./deploy/data/deploy.sh root@<data box ip>`
 - `backup.sh` — nightly `pg_dump` of `naary_orchestrator`, `temporal`,
-  `temporal_visibility` (runs ON the box via cron; set `BACKUP_RCLONE_REMOTE` in the
-  box `.env` for off-box copies).
+  `temporal_visibility` (runs ON the box via cron; `BACKUP_RCLONE_REMOTE=r2:naary-backups`
+  in the box `.env` ships them to Cloudflare R2 — configured live 2026-08-24).
+
+## Off-box backups (Cloudflare R2)
+
+Remote `r2` in `/root/.config/rclone/rclone.conf` on the data box. Two hard-won gotchas
+if it ever needs recreating:
+
+- The bucket is **EU jurisdiction**, so the endpoint is
+  `https://<account-id>.eu.r2.cloudflarestorage.com` — the standard (no `.eu`) endpoint
+  answers `NoSuchBucket` for it.
+- The token is **bucket-scoped**, which means it may not call `HeadBucket`/`CreateBucket`
+  — without `no_check_bucket = true` in the rclone remote, every upload fails with
+  `CreateBucket … AccessDenied` even though object read/write works fine.
+
+Restore drill: `rclone copy r2:naary-backups/<dump>.sql.gz . && gunzip … && psql`.
 
 ## Ops quickies
 
