@@ -93,6 +93,50 @@ services:
       retries: 18
       start_period: 30s
 
+  # HOST + per-container resource monitor — same sidecar the app box runs (see
+  # deploy/docker-compose.prod.yml for the full rationale): memory/swap/CPU/disk + OOM
+  # events, the layer app-level telemetry doesn't cover. On THIS box it's watching the
+  # database and the Temporal cluster — the two things whose slow-then-dead disk/RAM
+  # failure modes you want to see coming.
+  #
+  # Access, same two options as the app box:
+  #   • SSH tunnel (zero exposure): ssh -L 19999:localhost:19999 root@<data box>
+  #   • Netdata Cloud (outbound-only): set NETDATA_CLAIM_TOKEN (+ NETDATA_CLAIM_ROOMS)
+  #     in /opt/naary-data/.env — use the SAME room as the app box and both nodes share
+  #     one dashboard. Empty token ⇒ SSH-tunnel-only.
+  #
+  # mem_limit caps the monitor (~256MB) so it can never be what OOMs the DB box.
+  netdata:
+    image: netdata/netdata:stable
+    container_name: naary-data-netdata
+    hostname: naary-data # the node's display name in Netdata
+    restart: unless-stopped
+    pid: host
+    cap_add:
+      - SYS_PTRACE
+      - SYS_ADMIN
+    security_opt:
+      - apparmor:unconfined
+    mem_limit: 256m
+    ports:
+      - "127.0.0.1:19999:19999" # loopback only — SSH-tunnel to view; never public
+    environment:
+      NETDATA_CLAIM_TOKEN: ${NETDATA_CLAIM_TOKEN:-}
+      NETDATA_CLAIM_URL: ${NETDATA_CLAIM_URL:-https://app.netdata.cloud}
+      NETDATA_CLAIM_ROOMS: ${NETDATA_CLAIM_ROOMS:-}
+    volumes:
+      - netdata-config:/etc/netdata
+      - netdata-lib:/var/lib/netdata
+      - netdata-cache:/var/cache/netdata
+      - /:/host/root:ro,rslave
+      - /etc/passwd:/host/etc/passwd:ro
+      - /etc/group:/host/etc/group:ro
+      - /etc/os-release:/host/etc/os-release:ro
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /var/log:/host/var/log:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro # container names (read-only)
+
   # Temporal Web UI — loopback only (SSH tunnel; see header). Read-mostly ops surface:
   # inspect histories, terminate stuck runs.
   temporal-ui:
@@ -107,3 +151,9 @@ services:
       TEMPORAL_UI_PORT: "8233"
     ports:
       - "127.0.0.1:8233:8233"
+
+# Named volumes for the Netdata sidecar (postgres data stays a host bind mount above).
+volumes:
+  netdata-config:
+  netdata-lib:
+  netdata-cache:
