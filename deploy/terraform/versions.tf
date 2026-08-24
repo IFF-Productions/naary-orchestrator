@@ -17,10 +17,6 @@ terraform {
       source  = "hetznercloud/hcloud"
       version = "~> 1.50"
     }
-    neon = {
-      source  = "kislerdm/neon"
-      version = "~> 0.9"
-    }
     aws = {
       source  = "hashicorp/aws"
       version = "~> 5.60"

@@ -22,7 +22,7 @@ Browser ──HTTPS──▶ Cloudflare edge (TLS · DDoS · DNS)
 ## What's here
 | File | Purpose |
 |---|---|
-| `terraform/` | Cloudflare tunnel + ingress + DNS record, **plus** (Variant B) the app server (`hetzner.tf` + `cloud-init.yaml.tftpl`) and the DATA server + private network (`data-plane.tf` + `cloud-init-data.yaml.tftpl`). `neon.tf` is the DEPRECATED former DB (kept standing until decommissioned). |
+| `terraform/` | Cloudflare tunnel + ingress + DNS record, **plus** (Variant B) the app server (`hetzner.tf` + `cloud-init.yaml.tftpl`) and the DATA server + private network (`data-plane.tf` + `cloud-init-data.yaml.tftpl`). |
 | `docker-compose.prod.yml` | Overlay on the repo's base compose: closes all ports, adds `cloudflared`. |
 | `docker-compose.external-db.yml` | Second overlay (Variant B): DB = the data box's Postgres (was Neon); gates the local postgres off, `DATABASE_URL`/`MIGRATE_DATABASE_URL` from `.env`. |
 | `docker-compose.ghcr.yml` | Third overlay (Variant B): run prebuilt `ghcr.io/…:${APP_VERSION}` images; `!reset`s all on-box builds. |
@@ -41,9 +41,8 @@ Browser ──HTTPS──▶ Cloudflare edge (TLS · DDoS · DNS)
 
 > **Note:** the Terraform config now provisions the **full Variant B footprint**
 > (tunnel + app server + data server + private network) on every `apply`, and
-> `hcloud_token` / `neon_api_key` are required inputs (the latter only until the
-> deprecated Neon project is decommissioned). To run Variant A (tunnel only, your own
-> hardware), delete `terraform/hetzner.tf`, `terraform/data-plane.tf`, `terraform/neon.tf` and their variables —
+> `hcloud_token` is a required input. To run Variant A (tunnel only, your own
+> hardware), delete `terraform/hetzner.tf` and `terraform/data-plane.tf` and their variables —
 > both files are self-contained by design (see their headers).
 
 ## Step 1 — Cloudflare side (Terraform, on your laptop)
@@ -153,14 +152,12 @@ GitHub Actions ── build+push ─▶ GHCR ── pull ──────┘  
 ```
 
 (The previous incarnation used Neon + Temporal Cloud for the off-box pieces; both were
-replaced by the data box. `terraform/neon.tf` keeps the old project standing until it
-is decommissioned deliberately.)
+replaced by the data box and decommissioned 2026-08-24.)
 
 ### Provision (once, on your laptop)
 
 1. Collect credentials into `terraform/terraform.tfvars` (see the example file):
    - **Hetzner** API token — console → your project → *Security → API tokens* (Read & Write).
-   - **Neon** API key — only while the deprecated `neon.tf` still exists (state refresh).
    - **Cloudflare** token/IDs — as in Variant A above.
    - `ssh_public_key` — your personal key (admin access).
    - `deploy_ssh_public_key` — a **dedicated** CI keypair: `ssh-keygen -t ed25519 -f deploy_key -N ""`.

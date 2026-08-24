@@ -27,11 +27,6 @@ output "ssh_command" {
   description = "How to reach the box. First boot: `cloud-init status --wait` then check /etc/motd."
 }
 
-output "neon_host" {
-  value       = neon_project.naary.database_host
-  description = "Neon direct endpoint host (the pooled host is the same with a -pooler suffix)."
-}
-
 # SENSITIVE — the full .env cloud-init writes to the server (includes DB URLs,
 # ENCRYPTION_KEY, tunnel token). Retrieve with: terraform output -raw server_env
 # Save ENCRYPTION_KEY in a password manager — losing it invalidates stored tenant creds.
