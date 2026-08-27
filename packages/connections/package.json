@@ -13,12 +13,12 @@
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@naary/db": "workspace:*",
     "@naary/secrets": "workspace:*",
-    "jose": "^6.2.8",
+    "jose": "^6.2.10",
     "undici": "^8.10.0"
   },
   "devDependencies": {
     "@types/node": "^26.1.2",
     "@types/nodemailer": "^8.0.1",
-    "nodemailer": "^9.0.3"
+    "nodemailer": "^9.0.5"
   }
 }

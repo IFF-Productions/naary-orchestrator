@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.test.json"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.1101.0"
+    "@aws-sdk/client-s3": "^3.1116.0"
   },
   "devDependencies": {
     "@types/node": "^26.1.2"
