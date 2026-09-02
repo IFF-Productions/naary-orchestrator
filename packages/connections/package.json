@@ -14,7 +14,7 @@
     "@naary/db": "workspace:*",
     "@naary/secrets": "workspace:*",
     "jose": "^6.2.8",
-    "undici": "^8.10.0"
+    "undici": "^8.10.1"
   },
   "devDependencies": {
     "@types/node": "^26.1.2",
