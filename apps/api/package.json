@@ -54,8 +54,8 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@temporalio/testing": "1.21.1",
-    "@nestjs/testing": "^11.1.28",
+    "@temporalio/testing": "1.24.0",
+    "@nestjs/testing": "^12.1.2",
     "@types/express": "^5.0.6",
     "@types/nodemailer": "^8.0.1",
     "ajv": "^8.20.0",
