@@ -150,8 +150,8 @@ importers:
         specifier: ^6.2.8
         version: 6.2.8
       nodemailer:
-        specifier: ^9.0.3
-        version: 9.0.3
+        specifier: ^10.1.4
+        version: 10.1.4
       reflect-metadata:
         specifier: ^0.2.2
         version: 0.2.2
@@ -380,8 +380,8 @@ importers:
         specifier: ^9.0.1
         version: 9.0.1
       nodemailer:
-        specifier: ^9.0.3
-        version: 9.0.3
+        specifier: ^10.1.4
+        version: 10.1.4
       papaparse:
         specifier: ^5.5.4
         version: 5.5.4
@@ -448,8 +448,8 @@ importers:
         specifier: ^8.0.1
         version: 8.0.1
       nodemailer:
-        specifier: ^9.0.3
-        version: 9.0.3
+        specifier: ^10.1.4
+        version: 10.1.4
 
   packages/contracts:
     dependencies:
@@ -1947,6 +1947,7 @@ packages:
   '@opentelemetry/sdk-trace-base@2.10.0':
     resolution: {integrity: sha512-GuYQQT7QD2EeO8lcZLRQzcbOyhqAzL+6WWTKTU9mSUBYBazkEDl+VrQcXQhbB08OWM9anD1aHleVadzulpOaUQ==}
     engines: {node: ^18.19.0 || >=20.6.0}
+    deprecated: Use @opentelemetry/sdk-trace package
     peerDependencies:
       '@opentelemetry/api': '>=1.3.0 <1.10.0'
 
@@ -3561,6 +3562,7 @@ packages:
   '@xmldom/xmldom@0.8.13':
     resolution: {integrity: sha512-KRYzxepc14G/CEpEGc3Yn+JKaAeT63smlDr+vjB8jRfgTBBI9wRj/nkQEO+ucV8p8I9bfKLWp37uHgFrbntPvw==}
     engines: {node: '>=10.0.0'}
+    deprecated: this version has critical issues, please update to the latest version
 
   '@xtuc/ieee754@1.2.0':
     resolution: {integrity: sha512-DX8nKgqcGwsc0eJSqYt5lwP4DH5FlHnmuWWBRy7X0NcaGR0ZtuyeESgMwTYVEtxmsNGY+qit4QYT/MIYTOTPeA==}
@@ -4554,6 +4556,7 @@ packages:
   flagsmith-nodejs@6.2.0:
     resolution: {integrity: sha512-AQGCN/J1z7aGJOyyu4YRTbCEpYVHiqbzoySODEYdSVc+iNPqiPX9vOyeG2pZyGh4FLW7JLhkLdFEAjzG7tGaPg==}
     engines: {node: '>=18'}
+    deprecated: 'This package has moved to @flagsmith/nodejs. Please update your dependencies: https://www.npmjs.com/package/@flagsmith/nodejs'
 
   foreground-child@3.3.1:
     resolution: {integrity: sha512-gIXjKqtFuWEgzFRJA9WCQeSJLZDjgJUOMCMzxtvFq/37KojM1BFGufqsCy0r4qSQmYLsZYMeyRqzIWOMup03sw==}
@@ -5400,9 +5403,9 @@ packages:
     resolution: {integrity: sha512-wRNIrw4DmVLKQlbgOMdkMx27Wrpzes2hh5Jtbi2bjPd+4wJstWIqP5A+lscnqbm0xxmT5Bpg8Lec5ItEBwx6BQ==}
     engines: {node: '>=18'}
 
-  nodemailer@9.0.3:
-    resolution: {integrity: sha512-n+YP+NKwR5zRWa60k3GiQ6Q3B4KXCoAw40dAKeCtYn020iNN74aWK2liXIC3ZEATeGql7we3tE3t8QwhY0eskw==}
-    engines: {node: '>=6.0.0'}
+  nodemailer@10.1.4:
+    resolution: {integrity: sha512-EsMnOR2oRv4LGnWvHgcVYkkQ4O2j8KO4WTw6l+PHR4sOXo8SAgIraxtEnGDmotjbhv0hDsu3IuDIFZm8iXwO4A==}
+    engines: {node: '>=20.0.0'}
 
   normalize-path@3.0.0:
     resolution: {integrity: sha512-6eZs5Ls3WtCisHWp9S2GUy8dqkpGi4BVSz3GaqiE6ezub0512ESztXUwUB6C6IKbQkY2Pnb/mD4WYojCRwcwLA==}
@@ -5674,6 +5677,7 @@ packages:
   prom-client@15.1.3:
     resolution: {integrity: sha512-6ZiOBfCywsD4k1BN9IX0uZhF+tJkV8q8llP64G5Hajs4JOeVLPCwpPVcpXy3BwYiUGgyJzsJJQeOIv7+hDSq8g==}
     engines: {node: ^16 || ^18 || >=20}
+    deprecated: prom-client has been replaced by @prometheus-io/client
 
   proper-lockfile@4.1.2:
     resolution: {integrity: sha512-TjNPblN4BwAWMXU8s9AEz4JmQxnD1NNL7bNOY/AKUzyamc379FWASUhc/K1pL2noVb+XmZKLL68cjzLsiOAMaA==}
@@ -11818,7 +11822,7 @@ snapshots:
 
   node-releases@2.0.51: {}
 
-  nodemailer@9.0.3: {}
+  nodemailer@10.1.4: {}
 
   normalize-path@3.0.0: {}
 
