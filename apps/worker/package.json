@@ -44,7 +44,7 @@
     "papaparse": "^5.5.4",
     "quickjs-emscripten": "^0.32.0",
     "sanitize-html": "^2.17.6",
-    "zod": "^4.4.3"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@temporalio/testing": "^1.21.1",

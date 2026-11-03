@@ -51,7 +51,7 @@
     "rxjs": "^7.8.2",
     "xml-crypto": "6.1.2",
     "yaml": "2.9.0",
-    "zod": "^4.4.3"
+    "zod": "^4.6.6"
   },
   "devDependencies": {
     "@temporalio/testing": "1.21.1",
