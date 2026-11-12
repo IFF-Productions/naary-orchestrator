@@ -35,7 +35,7 @@
     "@temporalio/workflow": "^1.21.1",
     "ai": "7.0.48",
     "dotenv": "^17.4.2",
-    "fast-xml-parser": "^5.10.1",
+    "fast-xml-parser": "^5.12.0",
     "jose": "^6.2.8",
     "kafkajs": "^2.2.4",
     "mqtt": "^5.15.2",
